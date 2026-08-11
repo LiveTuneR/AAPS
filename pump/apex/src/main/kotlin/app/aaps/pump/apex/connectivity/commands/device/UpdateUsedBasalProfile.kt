@@ -9,13 +9,14 @@ import app.aaps.pump.apex.interfaces.ApexDeviceInfo
 class UpdateUsedBasalProfile(
     info: ApexDeviceInfo,
     val index: Int,
+    private val useProto411Format: Boolean,
 ) : BaseValueCommand(info) {
-    override val valueId = 0x04
+    override val valueId = if (useProto411Format) 0x34 else 0x04
     override val isWrite = true
     override val canBeMerged = true
 
     override val additionalData: ByteArray
         get() = byteArrayOf(index.toByte())
 
-    override fun toString(): String = "UpdateUsedBasalProfile($index)"
+    override fun toString(): String = "UpdateUsedBasalProfile($index, valueId=0x${valueId.toString(16)})"
 }

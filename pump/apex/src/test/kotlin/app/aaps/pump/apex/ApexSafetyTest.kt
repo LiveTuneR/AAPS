@@ -15,9 +15,12 @@ class ApexSafetyTest {
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 25, 4, 10)).isTrue()
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 27, 4, 11)).isTrue()
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 28, 4, 11)).isTrue()
+        assertThat(ApexCompatibility.isKnownLegacyVersion(1, 1, 4, 12)).isTrue()
 
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 29, 4, 11)).isFalse()
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 28, 4, 12)).isFalse()
+        assertThat(ApexCompatibility.isKnownLegacyVersion(1, 1, 4, 11)).isFalse()
+        assertThat(ApexCompatibility.isKnownLegacyVersion(1, 2, 4, 12)).isFalse()
         assertThat(ApexCompatibility.isKnownLegacyVersion(7, 0, 5, 0)).isFalse()
     }
 
@@ -36,6 +39,13 @@ class ApexSafetyTest {
         assertThat(ApexCompatibility.isControlEligible(observed, FirmwareVersion.FW_6_28, true)).isFalse()
         assertThat(ApexCompatibility.isControlEligible(observed, FirmwareVersion.AUTO, false)).isFalse()
         assertThat(ApexCompatibility.isControlEligible(null, FirmwareVersion.AUTO, true)).isFalse()
+    }
+
+    @Test
+    fun `firmware 1110 compatibility workaround is exact`() {
+        assertThat(ApexCompatibility.isFirmware11Protocol412(Version(1, 1, ProtocolVersion.PROTO_4_12))).isTrue()
+        assertThat(ApexCompatibility.isFirmware11Protocol412(Version(1, 1, ProtocolVersion.PROTO_4_11))).isFalse()
+        assertThat(ApexCompatibility.isFirmware11Protocol412(Version(6, 28, ProtocolVersion.PROTO_4_12))).isFalse()
     }
 
     @Test

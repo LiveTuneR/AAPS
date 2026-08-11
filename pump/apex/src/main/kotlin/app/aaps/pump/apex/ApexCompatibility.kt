@@ -9,6 +9,7 @@ object ApexCompatibility {
         FirmwareProtocol(6, 25, 4, 10),
         FirmwareProtocol(6, 27, 4, 11),
         FirmwareProtocol(6, 28, 4, 11),
+        FirmwareProtocol(1, 1, 4, 12),
     )
 
     fun isKnownLegacyVersion(version: Version): Boolean = isKnownLegacyVersion(
@@ -27,6 +28,10 @@ object ApexCompatibility {
         protocolMajor: Int,
         protocolMinor: Int,
     ): Boolean = FirmwareProtocol(firmwareMajor, firmwareMinor, protocolMajor, protocolMinor) in legacyMatrix
+
+    fun isFirmware11Protocol412(version: Version?): Boolean = version?.let {
+        it.firmwareMajor == 1 && it.firmwareMinor == 1 && it.protocolMajor == 4 && it.protocolMinor == 12
+    } == true
 
     private data class FirmwareProtocol(
         val firmwareMajor: Int,

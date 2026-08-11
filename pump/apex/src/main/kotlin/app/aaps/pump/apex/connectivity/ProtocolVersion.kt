@@ -19,4 +19,7 @@ enum class ProtocolVersion(
      * * New commands: `GetLatestTemporaryBasals`, V2 versions of UpdateSettings, Status
      **/
     PROTO_4_11(4, 11),
+
+    /** Production firmware 1.1.1.0. */
+    PROTO_4_12(4, 12),
 }

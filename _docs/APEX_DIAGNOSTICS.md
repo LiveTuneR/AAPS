@@ -8,6 +8,9 @@ Known observed pairs:
 - firmware 6.25 / protocol 4.10
 - firmware 6.27 / protocol 4.11
 - firmware 6.28 / protocol 4.11
+- firmware 1.1.1.0 (reported as 1.1) / protocol 4.12
+
+Protocol 4.12 uses a compatibility fallback for basal-profile selection only after an explicit `Invalid` response. A timeout is never retried using another wire format. Firmware 1.1/protocol 4.12 may also reject the non-critical settings synchronization command; that exact rejection is traced and does not block initialization.
 
 ## Phone-only collection
 

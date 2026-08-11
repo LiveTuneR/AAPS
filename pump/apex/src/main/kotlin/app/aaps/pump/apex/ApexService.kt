@@ -119,7 +119,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         const val DIAGNOSTICS_READY_IDLE_MS = 5 * 60_000L
         const val DIAGNOSTICS_ARCHIVE_COOLDOWN_MS = 5 * 60_000L
         val FIRST_SUPPORTED_PROTO = ProtocolVersion.PROTO_4_9
-        val LAST_SUPPORTED_PROTO = ProtocolVersion.PROTO_4_11
+        val LAST_SUPPORTED_PROTO = ProtocolVersion.PROTO_4_12
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -637,6 +637,16 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             return false
         }
 
+        if (response.code == CommandResponse.Code.Invalid && ApexCompatibility.isFirmware11Protocol412(pump.firmwareVersion)) {
+            aapsLogger.warn(LTag.PUMPCOMM, "[caller=$caller] UpdateSettings returned Invalid for firmware 1.1/protocol 4.12; command is non-critical")
+            trace.record(
+                "firmware_compatibility_fallback",
+                generation = linkState.generation,
+                fields = mapOf("command" to "UpdateSettings", "response" to "Invalid", "firmware" to "1.1", "protocol" to "4.12"),
+            )
+            return true
+        }
+
         if (response.code != CommandResponse.Code.Accepted) {
             aapsLogger.error(LTag.PUMPCOMM, "[caller=$caller] Failed to update settings: ${response.code.name}")
             return false
@@ -692,7 +702,26 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         if (!isExperimentalControlAllowed("UpdateBasalPatternIndex", caller)) return false
 
         status.addAction(ApexDriverStatus.Action.SettingBasalProfileIndex, R.string.action_setting_basal_no)
-        val response = executeWithResponse(UpdateUsedBasalProfile(apexDeviceInfo, id))
+        val preferProto411Format = pump.firmwareVersion?.atleastProto(ProtocolVersion.PROTO_4_11) == true
+        var response = executeWithResponse(UpdateUsedBasalProfile(apexDeviceInfo, id, preferProto411Format))
+        if (response?.code == CommandResponse.Code.Invalid) {
+            val fallbackFormat = !preferProto411Format
+            aapsLogger.warn(
+                LTag.PUMPCOMM,
+                "[updateBasalPatternIndex caller=$caller] valueId ${if (preferProto411Format) "0x34" else "0x04"} returned Invalid; retrying ${if (fallbackFormat) "0x34" else "0x04"}",
+            )
+            trace.record(
+                "firmware_compatibility_fallback",
+                generation = linkState.generation,
+                fields = mapOf(
+                    "command" to "UpdateUsedBasalProfile",
+                    "response" to "Invalid",
+                    "firstFormat" to if (preferProto411Format) "0x34" else "0x04",
+                    "retryFormat" to if (fallbackFormat) "0x34" else "0x04",
+                ),
+            )
+            response = executeWithResponse(UpdateUsedBasalProfile(apexDeviceInfo, id, fallbackFormat))
+        }
         status.removeAction(ApexDriverStatus.Action.SettingBasalProfileIndex)
 
         if (response == null) {
