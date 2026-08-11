@@ -34,6 +34,5 @@ enum class ApexBooleanKey(
         false,
         R.string.setting_enable_experimental_control,
         R.string.setting_enable_experimental_control_summary,
-        engineeringModeOnly = true,
     ),
 }

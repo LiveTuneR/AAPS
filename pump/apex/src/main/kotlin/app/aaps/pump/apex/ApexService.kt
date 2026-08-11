@@ -261,6 +261,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     private fun isExperimentalControlAllowed(command: String, caller: String): Boolean {
         val version = pump.firmwareVersion
         val automaticVersion = selectedFirmwareVersion() == FirmwareVersion.AUTO
+        val controlToggleEnabled = preferences.get(ApexBooleanKey.EnableExperimentalControl)
         val allowed = isExperimentalControlEnabled()
         if (!allowed) {
             aapsLogger.error(LTag.PUMP, "Blocked Apex therapy command=$command caller=$caller")
@@ -270,6 +271,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                 fields = mapOf(
                     "command" to command,
                     "caller" to caller,
+                    "controlToggleEnabled" to controlToggleEnabled,
                     "automaticVersion" to automaticVersion,
                     "knownLegacyVersion" to (version?.let(ApexCompatibility::isKnownLegacyVersion) ?: false),
                 ),

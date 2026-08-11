@@ -4,10 +4,17 @@ import app.aaps.pump.apex.connectivity.FirmwareVersion
 import app.aaps.pump.apex.connectivity.ProtocolVersion
 import app.aaps.pump.apex.connectivity.commands.pump.Version
 import app.aaps.pump.apex.diagnostics.ApexTraceSanitizer
+import app.aaps.pump.apex.utils.keys.ApexBooleanKey
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 
 class ApexSafetyTest {
+
+    @Test
+    fun `experimental control opt in is visible but disabled by default`() {
+        assertThat(ApexBooleanKey.EnableExperimentalControl.defaultValue).isFalse()
+        assertThat(ApexBooleanKey.EnableExperimentalControl.engineeringModeOnly).isFalse()
+    }
 
     @Test
     fun `only observed legacy firmware protocol pairs are accepted`() {

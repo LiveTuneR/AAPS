@@ -148,5 +148,5 @@
     <string name="diagnostic_control_disabled">Blocked</string>
     <string name="setting_enable_experimental_control">Enable experimental pump control</string>
     <string name="setting_enable_experimental_control_summary">Allows therapy commands only for a known legacy firmware/protocol pair</string>
-    <string name="diagnostic_control_blocked">Apex therapy command blocked by compatibility protection</string>
+    <string name="diagnostic_control_blocked">Apex control is blocked: enable experimental control, select Auto firmware, and wait for firmware detection</string>
 </resources>

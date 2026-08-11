@@ -5,8 +5,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 object Versions {
 
     // On change edit aaps-ci.yml
-    const val appVersion = "4.0.0-beta-apex"
-    const val versionCode = 2001
+    const val appVersion = "4.0.0-beta-apex2"
+    const val versionCode = 2002
 
     const val compileSdk = 37
     const val minSdk = 31
