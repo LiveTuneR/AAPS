@@ -6,6 +6,8 @@ import app.aaps.core.interfaces.logging.LTag
 import app.aaps.pump.apex.connectivity.bluetooth.ApexTransport
 import app.aaps.pump.apex.connectivity.bluetooth.Configuration
 import app.aaps.pump.apex.connectivity.commands.device.DeviceCommand
+import app.aaps.pump.apex.connectivity.commands.device.Bolus
+import app.aaps.pump.apex.connectivity.commands.device.CancelBolus
 import app.aaps.pump.apex.connectivity.commands.device.GetValue
 import app.aaps.pump.apex.connectivity.commands.pump.AlarmObject
 import app.aaps.pump.apex.connectivity.commands.pump.BasalProfile
@@ -24,6 +26,7 @@ import app.aaps.pump.apex.interfaces.ApexBluetoothCallback
 import app.aaps.pump.apex.interfaces.ApexDeviceInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +39,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -50,6 +54,8 @@ class ApexCommDirector @Inject constructor(
 ) : ApexBluetoothCallback {
 
     private enum class CommandSafety { READ_ONLY, IDEMPOTENT, RECONCILE_REQUIRED }
+    private enum class RequestPriority { CANCEL_BOLUS, START_BOLUS, NORMAL }
+    private enum class RequestSlotPool { CANCEL_BOLUS, START_BOLUS, NORMAL }
 
     data class DiagnosticSnapshot(
         val state: String,
@@ -92,6 +98,9 @@ class ApexCommDirector @Inject constructor(
         val result: CompletableDeferred<List<PumpObjectModel>?>,
         val operationId: Long,
         val safety: CommandSafety,
+        val priority: RequestPriority,
+        val slotPool: RequestSlotPool,
+        val issued: CompletableDeferred<Boolean> = CompletableDeferred(),
     )
 
     private data class Pending(
@@ -99,13 +108,22 @@ class ApexCommDirector @Inject constructor(
         val single: Boolean,
         val result: CompletableDeferred<List<PumpObjectModel>?>,
         val operationId: Long,
+        val safety: CommandSafety,
+        val commandName: String?,
         val values: MutableList<PumpObjectModel> = mutableListOf(),
         var completionJob: Job? = null,
     )
 
     private var scope: CoroutineScope? = null
     private val events = Channel<LinkEvent>(Channel.UNLIMITED)
-    private val requests = Channel<Request>(Configuration.COMM_BUFFERS_CAPACITY)
+    private val requestSignal = Channel<Unit>(Channel.CONFLATED)
+    private val requestQueueLock = Any()
+    private val normalRequestSlots = Semaphore(Configuration.COMM_BUFFERS_CAPACITY)
+    private val cancelBolusRequestSlots = Semaphore(1)
+    private val startBolusRequestSlots = Semaphore(1)
+    private val cancelBolusRequests = ArrayDeque<Request>()
+    private val startBolusRequests = ArrayDeque<Request>()
+    private val normalRequests = ArrayDeque<Request>()
     private val pumpData = Channel<PumpObjectModel>(Channel.UNLIMITED)
     private val _linkState = MutableStateFlow<LinkState>(LinkState.Stopped)
     val linkState: StateFlow<LinkState> = _linkState.asStateFlow()
@@ -117,6 +135,7 @@ class ApexCommDirector @Inject constructor(
     private val pendingLock = Any()
     private var pending: Pending? = null
     private var lastSendUptime = 0L
+    @Volatile private var lastHeartbeatUptime = 0L
     private var handshakeJob: Job? = null
     private var reconnectJob: Job? = null
     private val queuedCommands = AtomicInteger(0)
@@ -129,9 +148,9 @@ class ApexCommDirector @Inject constructor(
         listener = callback
     }
 
-    fun start() {
+    fun start(dispatcher: CoroutineDispatcher = Dispatchers.IO) {
         if (scope != null) return
-        val newScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val newScope = CoroutineScope(SupervisorJob() + dispatcher)
         scope = newScope
         apexBluetooth.setCallback(this)
         newScope.launch { linkLoop() }
@@ -145,6 +164,8 @@ class ApexCommDirector @Inject constructor(
 
     fun shutdown() {
         stop()
+        cancelPending()
+        failQueuedRequests()
         scope?.cancel()
         scope = null
         apexBluetooth.shutdown()
@@ -185,20 +206,102 @@ class ApexCommDirector @Inject constructor(
         val deferred = CompletableDeferred<List<PumpObjectModel>?>()
         val operationId = trace.nextOperationId()
         val safety = classify(command)
+        val priority = priority(command)
+        val slotPool = when (priority) {
+            RequestPriority.CANCEL_BOLUS -> RequestSlotPool.CANCEL_BOLUS
+            RequestPriority.START_BOLUS  -> RequestSlotPool.START_BOLUS
+            RequestPriority.NORMAL       -> RequestSlotPool.NORMAL
+        }
+        val request = Request(command, deferred, operationId, safety, priority, slotPool)
+        val slotAcquired = withTimeoutOrNull(Configuration.REQUEST_ISSUE_TIMEOUT) {
+            slots(request).acquire()
+            true
+        } == true
+        if (!slotAcquired) {
+            trace.record(
+                "command_queue_capacity_timeout",
+                activeGeneration,
+                operationId,
+                mapOf("command" to command::class.simpleName, "priority" to priority),
+            )
+            return null
+        }
         trace.record(
             event = "command_queued",
             generation = activeGeneration,
             operationId = operationId,
-            fields = mapOf("command" to command::class.simpleName, "safety" to safety),
+            fields = mapOf("command" to command::class.simpleName, "safety" to safety, "priority" to priority),
         )
-        queuedCommands.incrementAndGet()
+        enqueue(request)
+        if (priority == RequestPriority.CANCEL_BOLUS) preemptReadOnlyForCancel(request)
         try {
-            requests.send(Request(command, deferred, operationId, safety))
+            val issued = withTimeoutOrNull(Configuration.REQUEST_ISSUE_TIMEOUT) { request.issued.await() }
+            if (issued != true && request.issued.complete(false)) {
+                request.result.complete(null)
+                trace.record(
+                    "command_issue_timeout",
+                    activeGeneration,
+                    operationId,
+                    mapOf("command" to command::class.simpleName, "priority" to priority),
+                )
+                requestSignal.trySend(Unit)
+                return null
+            }
+            return deferred.await()
         } catch (error: CancellationException) {
-            queuedCommands.updateAndGet { value -> (value - 1).coerceAtLeast(0) }
+            if (request.issued.complete(false)) {
+                request.result.complete(null)
+                requestSignal.trySend(Unit)
+            }
             throw error
         }
-        return deferred.await()
+    }
+
+    private fun enqueue(request: Request) {
+        synchronized(requestQueueLock) {
+            when (request.priority) {
+                RequestPriority.CANCEL_BOLUS -> cancelBolusRequests.addLast(request)
+                RequestPriority.START_BOLUS  -> startBolusRequests.addLast(request)
+                RequestPriority.NORMAL       -> normalRequests.addLast(request)
+            }
+            queuedCommands.incrementAndGet()
+        }
+        requestSignal.trySend(Unit)
+    }
+
+    private fun pollRequest(): Request? = synchronized(requestQueueLock) {
+        while (true) {
+            val request = when {
+                cancelBolusRequests.isNotEmpty() -> cancelBolusRequests.removeFirst()
+                startBolusRequests.isNotEmpty()  -> startBolusRequests.removeFirst()
+                normalRequests.isNotEmpty()      -> normalRequests.removeFirst()
+                else                             -> return@synchronized null
+            }
+            queuedCommands.updateAndGet { value -> (value - 1).coerceAtLeast(0) }
+            slots(request).release()
+            if (request.issued.complete(true)) return@synchronized request
+        }
+        @Suppress("UNREACHABLE_CODE") null
+    }
+
+    private fun hasQueuedRequests(): Boolean = synchronized(requestQueueLock) {
+        cancelBolusRequests.isNotEmpty() || startBolusRequests.isNotEmpty() || normalRequests.isNotEmpty()
+    }
+
+    private fun discardExpiredRequests() {
+        synchronized(requestQueueLock) {
+            listOf(cancelBolusRequests, startBolusRequests, normalRequests).forEach { queue ->
+                val iterator = queue.iterator()
+                while (iterator.hasNext()) {
+                    val request = iterator.next()
+                    if (request.issued.isCompleted) {
+                        iterator.remove()
+                        queuedCommands.updateAndGet { value -> (value - 1).coerceAtLeast(0) }
+                        slots(request).release()
+                    }
+                }
+            }
+        }
     }
 
     override fun onConnect(generation: Long) {
@@ -238,11 +341,7 @@ class ApexCommDirector @Inject constructor(
                     reconnectJob?.cancel()
                     reconnectJob = null
                     cancelPending()
-                    while (true) {
-                        val queued = requests.tryReceive().getOrNull() ?: break
-                        queuedCommands.updateAndGet { value -> (value - 1).coerceAtLeast(0) }
-                        queued.result.complete(null)
-                    }
+                    failQueuedRequests()
                     apexBluetooth.disconnect()
                     transition(LinkState.Stopped)
                 }
@@ -353,12 +452,16 @@ class ApexCommDirector @Inject constructor(
     }
 
     private suspend fun commandLoop() {
-        for (request in requests) {
-            queuedCommands.updateAndGet { value -> (value - 1).coerceAtLeast(0) }
+        while (true) {
+            requestSignal.receive()
             if (!awaitTransport()) {
-                request.result.complete(null)
+                discardExpiredRequests()
+                if (linkState.value is LinkState.Stopped || linkState.value is LinkState.Incompatible) failQueuedRequests()
+                if (hasQueuedRequests()) requestSignal.trySend(Unit)
                 continue
             }
+            val request = pollRequest() ?: continue
+            if (hasQueuedRequests()) requestSignal.trySend(Unit)
 
             val expected = PumpObject.fromDeviceCommand(request.command)
             if (expected == null) {
@@ -368,11 +471,28 @@ class ApexCommDirector @Inject constructor(
             }
 
             val now = SystemClock.uptimeMillis()
-            val remainingGap = Configuration.COMMAND_GAP_MS - (now - lastSendUptime)
+            val lastRelevantActivity = if (request.priority == RequestPriority.CANCEL_BOLUS) {
+                lastSendUptime
+            } else {
+                maxOf(lastSendUptime, lastHeartbeatUptime)
+            }
+            val requiredGap = if (lastHeartbeatUptime > lastSendUptime && request.priority != RequestPriority.CANCEL_BOLUS) {
+                Configuration.HEARTBEAT_COMMAND_GAP_MS
+            } else {
+                Configuration.COMMAND_GAP_MS
+            }
+            val remainingGap = requiredGap - (now - lastRelevantActivity)
             if (remainingGap > 0) delay(remainingGap)
 
             val single = request.command !is GetValue || request.command.value.singleValueReturn
-            val current = Pending(expected, single, request.result, request.operationId)
+            val current = Pending(
+                expected = expected,
+                single = single,
+                result = request.result,
+                operationId = request.operationId,
+                safety = request.safety,
+                commandName = request.command::class.simpleName,
+            )
             synchronized(pendingLock) {
                 pending = current
                 diagnosticPendingCommand = request.command::class.simpleName
@@ -383,7 +503,7 @@ class ApexCommDirector @Inject constructor(
                 "command_started",
                 activeGeneration,
                 request.operationId,
-                mapOf("command" to request.command::class.simpleName, "safety" to request.safety),
+                mapOf("command" to request.command::class.simpleName, "safety" to request.safety, "priority" to request.priority),
             )
             if (!apexBluetooth.send(request.command)) {
                 trace.record("command_write_failed", activeGeneration, request.operationId)
@@ -420,6 +540,25 @@ class ApexCommDirector @Inject constructor(
         }
     }
 
+    private fun failQueuedRequests() {
+        val failed = synchronized(requestQueueLock) {
+            buildList {
+                listOf(cancelBolusRequests, startBolusRequests, normalRequests).forEach { queue ->
+                    while (queue.isNotEmpty()) {
+                        val request = queue.removeFirst()
+                        add(request)
+                        queuedCommands.updateAndGet { value -> (value - 1).coerceAtLeast(0) }
+                        slots(request).release()
+                    }
+                }
+            }
+        }
+        failed.forEach { request ->
+            request.issued.complete(false)
+            request.result.complete(null)
+        }
+    }
+
     private suspend fun awaitTransport(): Boolean = withTimeoutOrNull(Configuration.REQUEST_ISSUE_TIMEOUT) {
         when (linkState.first {
             it is LinkState.Handshaking || it is LinkState.Ready || it is LinkState.Stopped || it is LinkState.Incompatible
@@ -441,6 +580,7 @@ class ApexCommDirector @Inject constructor(
             aapsLogger.error(LTag.PUMPCOMM, "Invalid Apex $type: $validationError")
             return
         }
+        if (type == PumpObject.Heartbeat) lastHeartbeatUptime = SystemClock.uptimeMillis()
 
         var matched = false
         synchronized(pendingLock) {
@@ -510,6 +650,34 @@ class ApexCommDirector @Inject constructor(
         current?.result?.complete(null)
     }
 
+    private fun preemptReadOnlyForCancel(cancelRequest: Request) {
+        val current = synchronized(pendingLock) {
+            val value = pending
+            if (value?.safety != CommandSafety.READ_ONLY) return@synchronized null
+            pending = null
+            diagnosticPendingCommand = null
+            value
+        } ?: return
+        current.completionJob?.cancel()
+        current.result.complete(null)
+        trace.record(
+            "command_preempted_for_cancel",
+            activeGeneration,
+            current.operationId,
+            mapOf(
+                "command" to current.commandName,
+                "cancelOperationId" to cancelRequest.operationId,
+            ),
+        )
+        markProgress()
+    }
+
+    private fun slots(request: Request): Semaphore = when (request.slotPool) {
+        RequestSlotPool.CANCEL_BOLUS -> cancelBolusRequestSlots
+        RequestSlotPool.START_BOLUS  -> startBolusRequestSlots
+        RequestSlotPool.NORMAL       -> normalRequestSlots
+    }
+
     private fun decode(type: PumpObject, command: PumpCommand): PumpObjectModel? = when (type) {
         PumpObject.Heartbeat -> Heartbeat()
         PumpObject.CommandResponse -> CommandResponse(command)
@@ -556,6 +724,12 @@ class ApexCommDirector @Inject constructor(
             "Bolus", "TemporaryBasal", "ExtendedBolus", "CancelBolus", "CancelTemporaryBasal" -> CommandSafety.RECONCILE_REQUIRED
             else -> CommandSafety.IDEMPOTENT
         }
+    }
+
+    private fun priority(command: DeviceCommand): RequestPriority = when (command) {
+        is CancelBolus -> RequestPriority.CANCEL_BOLUS
+        is Bolus       -> RequestPriority.START_BOLUS
+        else           -> RequestPriority.NORMAL
     }
 
     interface Callback {

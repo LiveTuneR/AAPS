@@ -111,6 +111,10 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
 
         const val USED_BASAL_PATTERN_INDEX = 7
         const val HEARTBEAT_PERIOD_MINUTES = 2
+        const val APEX_DOSE_STEP_U = 0.025
+        const val DOSE_EPSILON_U = 0.000_001
+        internal fun encodeDoseSteps(units: Double): Int = (units / APEX_DOSE_STEP_U).roundToInt()
+        internal fun decodeDoseSteps(steps: Int): Double = steps * APEX_DOSE_STEP_U
         const val DIAGNOSTICS_WATCHDOG_PERIOD_MS = 30_000L
         const val DIAGNOSTICS_SNAPSHOT_PERIOD_MS = 5 * 60_000L
         const val DIAGNOSTICS_PENDING_STALL_MS = 45_000L
@@ -346,7 +350,23 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             return null
         }
 
-        val doseRaw = (dbi.insulin / 0.025).roundToInt()
+        val requestedDose = dbi.insulin
+        val doseRaw = encodeDoseSteps(requestedDose)
+        val encodedDose = decodeDoseSteps(doseRaw)
+        dbi.insulin = encodedDose
+        trace.record(
+            "bolus_dose_encoded",
+            generation = linkState.generation,
+            fields = mapOf(
+                "requestedU" to requestedDose,
+                "encodedSteps" to doseRaw,
+                "encodedU" to encodedDose,
+                "roundingDeltaU" to (encodedDose - requestedDose),
+            ),
+        )
+        if (abs(encodedDose - requestedDose) > DOSE_EPSILON_U) {
+            aapsLogger.warn(LTag.PUMP, "[bolus caller=$caller] Dose normalized from ${requestedDose}U to ${encodedDose}U ($doseRaw steps)")
+        }
         val temporaryId = DateTime.now().withSecondOfMinute(59).withMillisOfSecond(0).millis
 
         val action = if (dbi.bolusType == BS.Type.SMB)
@@ -358,6 +378,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
 
         val inProgress = ApexPump.InProgressBolus(
             requestedDose = dbi.insulin,
+            requestedSteps = doseRaw,
             temporaryId = temporaryId,
             detailedBolusInfo = dbi,
             lockHistory = true,
@@ -1190,7 +1211,21 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         // Extended bolus entries do not have duration stored, do not use them.
         if (entry.extendedDose > 0) return
 
-        aapsLogger.debug(LTag.PUMP, "Processing bolus [${entry.standardDose * 0.025}U -> ${entry.standardPerformed * 0.025}U] on ${entry.dateTime}")
+        val historyRequestedU = decodeDoseSteps(entry.standardDose)
+        val historyPerformedU = decodeDoseSteps(entry.standardPerformed)
+        aapsLogger.debug(LTag.PUMP, "Processing bolus [$historyRequestedU U -> $historyPerformedU U] on ${entry.dateTime}")
+        trace.record(
+            "bolus_history_observed",
+            generation = linkState.generation,
+            fields = mapOf(
+                "historyIndex" to entry.index,
+                "pumpRequestedSteps" to entry.standardDose,
+                "pumpPerformedSteps" to entry.standardPerformed,
+                "pumpRequestedU" to historyRequestedU,
+                "pumpPerformedU" to historyPerformedU,
+                "activeRequestedSteps" to pump.inProgressBolus?.requestedSteps,
+            ),
+        )
 
         if (entry.dateTime > lastBolusDateTime) {
             lastBolusDateTime = entry.dateTime
@@ -1205,8 +1240,8 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             // Pump saves all boluses like they were issued on the 59th second of minute.
             // Considering that in the condition.
             if (delta <= 1000 || (delta in 57001..62999)) {
-                aapsLogger.debug(LTag.PUMP, "Syncing current bolus [${entry.standardDose * 0.025}U -> ${entry.standardPerformed * 0.025}U]")
-                val deltaU = abs(entry.standardDose * 0.025 - if (it.useFallbackDose) it.requestedDose else it.currentDose)
+                aapsLogger.debug(LTag.PUMP, "Syncing current bolus [$historyRequestedU U -> $historyPerformedU U]")
+                val deltaU = abs(historyRequestedU - if (it.useFallbackDose) it.requestedDose else it.currentDose)
                 if (!(it.cancelled || it.failed) && deltaU > 0.11) {
                     aapsLogger.debug(LTag.PUMP, "Not this bolus: $delta > 0.11")
                     return
@@ -1215,18 +1250,28 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                 val syncResult = pumpSync.syncBolusWithTempId(
                     timestamp = entry.dateTime.millis,
                     temporaryId = it.temporaryId,
-                    amount = PumpInsulin(entry.standardPerformed * 0.025),
+                    amount = PumpInsulin(historyPerformedU),
                     pumpId = entry.dateTime.millis,
                     pumpType = PumpType.APEX_TRUCARE_III,
                     pumpSerial = apexDeviceInfo.serialNumber,
                     type = it.detailedBolusInfo.bolusType,
                 )
-                aapsLogger.debug(LTag.PUMP, "Final bolus [${entry.standardDose * 0.025}U -> ${entry.standardPerformed * 0.025}U] sync succeeded? $syncResult")
+                trace.record(
+                    "bolus_history_reconciled",
+                    generation = linkState.generation,
+                    fields = mapOf(
+                        "sentSteps" to it.requestedSteps,
+                        "pumpRequestedSteps" to entry.standardDose,
+                        "pumpPerformedSteps" to entry.standardPerformed,
+                        "performedDeltaSteps" to (entry.standardPerformed - it.requestedSteps),
+                    ),
+                )
+                aapsLogger.debug(LTag.PUMP, "Final bolus [$historyRequestedU U -> $historyPerformedU U] sync succeeded? $syncResult")
                 if (!syncResult) {
                     pumpSync.syncBolusWithPumpId(
                         timestamp = entry.dateTime.millis,
                         pumpId = entry.dateTime.millis,
-                        amount = PumpInsulin(entry.standardPerformed * 0.025),
+                        amount = PumpInsulin(historyPerformedU),
                         pumpType = PumpType.APEX_TRUCARE_III,
                         pumpSerial = apexDeviceInfo.serialNumber,
                         type = it.detailedBolusInfo.bolusType,
@@ -1245,12 +1290,12 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         pumpSync.syncBolusWithPumpId(
             timestamp = entry.dateTime.millis,
             pumpId = entry.dateTime.millis,
-            amount = PumpInsulin(entry.standardPerformed * 0.025),
+            amount = PumpInsulin(historyPerformedU),
             pumpType = PumpType.APEX_TRUCARE_III,
             pumpSerial = apexDeviceInfo.serialNumber,
             type = null,
         )
-        aapsLogger.debug(LTag.PUMP, "Synced bolus ${entry.standardPerformed * 0.025}U on ${entry.dateTime}")
+        aapsLogger.debug(LTag.PUMP, "Synced bolus $historyPerformedU U on ${entry.dateTime}")
     }
 
     // !! Unreliable on 6.25 firmware, TODO: think about solution

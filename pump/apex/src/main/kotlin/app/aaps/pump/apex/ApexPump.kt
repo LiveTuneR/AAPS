@@ -255,6 +255,7 @@ class ApexPump @Inject constructor(
 
     data class InProgressBolus(
         var requestedDose: Double = 0.0,
+        var requestedSteps: Int = 0,
         var currentDose: Double = 0.0,
         var temporaryId: Long = 0,
         var cancelled: Boolean = false,

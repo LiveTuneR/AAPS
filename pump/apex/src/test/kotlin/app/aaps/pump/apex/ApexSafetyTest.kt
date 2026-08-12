@@ -17,6 +17,23 @@ class ApexSafetyTest {
     }
 
     @Test
+    fun `bolus doses are encoded to nearest pump step`() {
+        val cases = mapOf(
+            0.025 to 1,
+            0.575 to 23,
+            5.1 to 204,
+            5.75 to 230,
+            5.8 to 232,
+        )
+
+        cases.forEach { (units, expectedSteps) ->
+            val steps = ApexService.encodeDoseSteps(units)
+            assertThat(steps).isEqualTo(expectedSteps)
+            assertThat(ApexService.decodeDoseSteps(steps)).isWithin(0.000_001).of(units)
+        }
+    }
+
+    @Test
     fun `only observed legacy firmware protocol pairs are accepted`() {
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 24, 4, 9)).isTrue()
         assertThat(ApexCompatibility.isKnownLegacyVersion(6, 25, 4, 10)).isTrue()

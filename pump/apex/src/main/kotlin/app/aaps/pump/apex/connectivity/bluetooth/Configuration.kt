@@ -6,6 +6,9 @@ class Configuration {
         // NOTE: For boluses, successful execution means only successful bolus start.
         const val COMMAND_GAP_MS = 1500L
 
+        // Pump heartbeats are unsolicited frames. The pump can ignore a command sent immediately after one.
+        const val HEARTBEAT_COMMAND_GAP_MS = 1500L
+
         // When getting a complex value (values list), consider this time period of silence from pump
         // as a completed command.
         const val VALUE_COMPLETION_TIMEOUT = 500L

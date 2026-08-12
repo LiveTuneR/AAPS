@@ -36,6 +36,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
@@ -70,6 +72,7 @@ class ApexBLE @Inject constructor(
         Thread(runnable, "ApexBluetooth").apply { isDaemon = true }
     }.asCoroutineDispatcher()
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    private val transportMutex = Mutex()
 
     @Volatile private var callback: ApexBluetoothCallback? = null
     @Volatile private var _status = Status.DISCONNECTED
@@ -92,23 +95,23 @@ class ApexBLE @Inject constructor(
     }
 
     override fun connect(generation: Long) {
-        scope.launch { connectInternal(generation) }
+        scope.launch { transportMutex.withLock { connectInternal(generation) } }
     }
 
     override fun disconnect() {
-        scope.launch { closeCurrent(notify = false) }
+        scope.launch { transportMutex.withLock { closeCurrent(notify = false) } }
     }
 
     override fun shutdown() {
         scope.launch {
-            closeCurrent(notify = false)
+            transportMutex.withLock { closeCurrent(notify = false) }
             scope.cancel()
             dispatcher.close()
         }
     }
 
     override suspend fun send(command: DeviceCommand): Boolean = withContext(dispatcher) {
-        sendInternal(command)
+        transportMutex.withLock { sendInternal(command) }
     }
 
     @SuppressLint("MissingPermission")

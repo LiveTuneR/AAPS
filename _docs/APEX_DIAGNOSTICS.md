@@ -18,6 +18,10 @@ No root or connected computer is required. Open the Apex plugin screen and use t
 
 The trace records link-state transitions, connection generation, command lifecycle, response type, timeouts, reconnects, compatibility decisions, watchdog stalls, process-exit information on Android 11+, and thread dumps captured after a stall. It does not export raw BLE payloads, pump serial numbers, or Bluetooth addresses. Identifier-like fields are hashed.
 
+Bolus traces include requested units, the outgoing 0.025 U step count, encoded units, pump history
+requested/performed step counts, and reconciliation deltas. Command traces also identify priority,
+queue-capacity timeout, issue timeout, and a read preempted by `CancelBolus`.
+
 Storage is bounded to six 1 MiB trace files and two exported ZIP files. A watchdog checks every 30 seconds. It captures a thread dump and ZIP when a command is pending for 45 seconds, connection takes 40 seconds, handshake takes 75 seconds, or a ready connection makes no progress for five minutes.
 
 ## Field validation order
