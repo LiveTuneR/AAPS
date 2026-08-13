@@ -5,9 +5,10 @@ class Configuration {
         // Gap between sending the next command after the previous one was executed by pump.
         // NOTE: For boluses, successful execution means only successful bolus start.
         const val COMMAND_GAP_MS = 1500L
+        const val READ_ONLY_COMMAND_GAP_MS = 2000L
 
         // Pump heartbeats are unsolicited frames. The pump can ignore a command sent immediately after one.
-        const val HEARTBEAT_COMMAND_GAP_MS = 1500L
+        const val HEARTBEAT_COMMAND_GAP_MS = 2000L
 
         // When getting a complex value (values list), consider this time period of silence from pump
         // as a completed command.
@@ -23,6 +24,6 @@ class Configuration {
 
         // Timeout for command to be sent to pump from the commands queue.
         // Command will be deleted from queue and marked as failed if this fires.
-        const val REQUEST_ISSUE_TIMEOUT = COMM_BUFFERS_CAPACITY * COMMAND_GAP_MS + 10000L
+        const val REQUEST_ISSUE_TIMEOUT = COMM_BUFFERS_CAPACITY * READ_ONLY_COMMAND_GAP_MS + 10000L
     }
 }

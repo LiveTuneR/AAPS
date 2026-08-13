@@ -107,7 +107,7 @@ class ApexCommDirectorTest : TestBase() {
 
             val read = async { director.request(GetValue.Value.StatusV2) }
             runCurrent()
-            advanceTimeBy(Configuration.COMMAND_GAP_MS + 1)
+            advanceTimeBy(Configuration.READ_ONLY_COMMAND_GAP_MS + 1)
             runCurrent()
             assertThat(transport.sent.map { it::class.simpleName }).containsExactly("GetValue")
 
@@ -144,14 +144,46 @@ class ApexCommDirectorTest : TestBase() {
             runCurrent()
             assertThat(transport.sent).isEmpty()
 
-            advanceTimeBy(Configuration.HEARTBEAT_COMMAND_GAP_MS - 1)
+            advanceTimeBy(Configuration.HEARTBEAT_COMMAND_GAP_MS / 2)
             runCurrent()
             assertThat(transport.sent).isEmpty()
 
-            advanceTimeBy(2)
+            advanceTimeBy(Configuration.HEARTBEAT_COMMAND_GAP_MS / 2 + 1)
             runCurrent()
             assertThat(transport.sent.map { it::class.simpleName }).containsExactly("UpdateSystemState")
             assertThat(result.await()).isNotNull()
+        } finally {
+            director.shutdown()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `read command uses the wider read only gap`() = runTest {
+        val fixture = fixture(autoRespondToWrites = true)
+        val director = fixture.director
+        val transport = fixture.transport
+        try {
+            director.connect()
+            runCurrent()
+            transport.connected(1L)
+            runCurrent()
+
+            val command = async { director.execute(UpdateSystemState(fixture.info, false)) }
+            runCurrent()
+            assertThat(command.await()).isNotNull()
+
+            backgroundScope.launch { director.request(GetValue.Value.StatusV2) }
+            runCurrent()
+            advanceTimeBy(Configuration.COMMAND_GAP_MS + 1)
+            runCurrent()
+            assertThat(transport.sent.map { it::class.simpleName }).containsExactly("UpdateSystemState")
+
+            advanceTimeBy(Configuration.READ_ONLY_COMMAND_GAP_MS - Configuration.COMMAND_GAP_MS)
+            runCurrent()
+            assertThat(transport.sent.map { it::class.simpleName })
+                .containsExactly("UpdateSystemState", "GetValue")
+                .inOrder()
         } finally {
             director.shutdown()
             runCurrent()

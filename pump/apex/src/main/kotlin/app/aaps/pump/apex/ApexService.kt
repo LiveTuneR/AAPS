@@ -1256,6 +1256,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                     pumpSerial = apexDeviceInfo.serialNumber,
                     type = it.detailedBolusInfo.bolusType,
                 )
+                val performedDeltaSteps = entry.standardPerformed - it.requestedSteps
                 trace.record(
                     "bolus_history_reconciled",
                     generation = linkState.generation,
@@ -1263,9 +1264,26 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                         "sentSteps" to it.requestedSteps,
                         "pumpRequestedSteps" to entry.standardDose,
                         "pumpPerformedSteps" to entry.standardPerformed,
-                        "performedDeltaSteps" to (entry.standardPerformed - it.requestedSteps),
+                        "performedDeltaSteps" to performedDeltaSteps,
                     ),
                 )
+                if (!(it.cancelled || it.failed) && performedDeltaSteps != 0) {
+                    aapsLogger.warn(
+                        LTag.PUMP,
+                        "Apex bolus delivery differs from requested dose: sent=${it.requestedSteps} steps, " +
+                            "pumpRequested=${entry.standardDose} steps, pumpPerformed=${entry.standardPerformed} steps",
+                    )
+                    trace.record(
+                        "bolus_delivery_mismatch",
+                        generation = linkState.generation,
+                        fields = mapOf(
+                            "sentSteps" to it.requestedSteps,
+                            "pumpRequestedSteps" to entry.standardDose,
+                            "pumpPerformedSteps" to entry.standardPerformed,
+                            "performedDeltaSteps" to performedDeltaSteps,
+                        ),
+                    )
+                }
                 aapsLogger.debug(LTag.PUMP, "Final bolus [$historyRequestedU U -> $historyPerformedU U] sync succeeded? $syncResult")
                 if (!syncResult) {
                     pumpSync.syncBolusWithPumpId(

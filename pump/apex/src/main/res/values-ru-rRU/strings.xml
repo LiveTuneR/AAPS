@@ -11,6 +11,7 @@
     <string name="setting_max_bolus">Максимальный болюс [Ед]</string>
     <string name="setting_max_basal">Максимальный базал [Ед/ч]</string>
     <string name="setting_serial_number">Серийный номер помпы</string>
+    <string name="setting_hide_serial">Скрывать серийный номер на экране помпы</string>
     <string name="setting_calc_battery_high_vtg">Высокое напряжение батареи [В]</string>
     <string name="overview_connection_status_disconnected">Отключено</string>
     <string name="overview_connection_status_connecting">Подключение</string>
@@ -50,7 +51,7 @@
     <string name="alarm_reservoir_empty">Резервуар пуст</string>
     <string name="alarm_hardware_fault">Аппаратная ошибка (%1$s)</string>
     <string name="alarm_check_bg">Проверьте ГК</string>
-    <string name="alarm_unknown_error_name">Неизвестная ошибка $1$s, сообщите разработчикам</string>
+    <string name="alarm_unknown_error_name">Неизвестная ошибка %1$s, сообщите разработчикам</string>
     <string name="alarm_unknown_error">Неизвестная ошибка</string>
     <string name="status_delivering">Подача %1$.3f Ед</string>
     <string name="status_delivered">Подано %1$.3f Ед успешно</string>
@@ -84,7 +85,7 @@
     <string name="action_driver_error">Ошибка драйвера: %1$s</string>
     <string name="action_canceling_bolus">Отмена болюса</string>
     <string name="action_setting_ext_bolus">Запрос дл. болюса %1$.3f Ед на %2$d мин</string>
-    <string name="action_setting_smb">Запрос SMB %1$.f Ед</string>
+    <string name="action_setting_smb">Запрос SMB %1$.3f Ед</string>
     <string name="action_setting_tbr">Запрос TBR %1$.3f Ед/ч на %2$d мин</string>
     <string name="action_bolusing">Ввод болюса %1$.3f Ед / %2$.3f Ед</string>
     <string name="action_bolusing_smb">Ввод SMB %1$.3f Ед / %2$.3f Ед</string>
@@ -110,6 +111,8 @@
     <string name="action_heartbeat">Обработка heartbeat</string>
     <string name="action_fallback_getting_obj">Получение %1$s</string>
     <string name="pump_special_mode">Особый режим</string>
+    <string name="pump_is_using_ref_basal">Помпа использует эталонный базал! Отключите его в настройках помпы.</string>
+    <string name="pumplimit_reservoir">уровень инсулина в резервуаре</string>
     <string name="bolus_error_pump_special_mode">Помпа находится в особом режиме (приостановлена, либо в состоянии заправки). Пожалуйста, отключайте помпу в AAPS ПЕРЕД входом в такие режимы. Болюс не может быть подан.</string>
     <string name="diagnostic_stall_detected">Обмен с Apex перестал продвигаться. Диагностический архив сохранён.</string>
     <string name="diagnostic_reconnect">Переподключить</string>

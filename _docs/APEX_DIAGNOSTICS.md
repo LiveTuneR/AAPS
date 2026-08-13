@@ -20,7 +20,12 @@ The trace records link-state transitions, connection generation, command lifecyc
 
 Bolus traces include requested units, the outgoing 0.025 U step count, encoded units, pump history
 requested/performed step counts, and reconciliation deltas. Command traces also identify priority,
-queue-capacity timeout, issue timeout, and a read preempted by `CancelBolus`.
+queue-capacity timeout, issue timeout, and a read preempted by `CancelBolus`. Starting with apex4,
+`GetValue` traces include the requested value and expected response type, and a non-cancelled
+performed-dose difference emits `bolus_delivery_mismatch`.
+
+Read-only commands and commands following an unsolicited heartbeat use a 2,000 ms quiet interval.
+Other commands use 1,500 ms, while `CancelBolus` keeps its priority and heartbeat bypass.
 
 Storage is bounded to six 1 MiB trace files and two exported ZIP files. A watchdog checks every 30 seconds. It captures a thread dump and ZIP when a command is pending for 45 seconds, connection takes 40 seconds, handshake takes 75 seconds, or a ready connection makes no progress for five minutes.
 

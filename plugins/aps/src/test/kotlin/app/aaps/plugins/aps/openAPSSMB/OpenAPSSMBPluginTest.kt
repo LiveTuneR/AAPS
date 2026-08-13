@@ -1,5 +1,6 @@
 package app.aaps.plugins.aps.openAPSSMB
 
+import app.aaps.core.interfaces.aps.GlucoseStatusSMB
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -40,6 +41,21 @@ class OpenAPSSMBPluginTest : TestBaseWithProfile() {
     @Test
     fun specialShowInListConditionTest() {
         assertThat(openAPSSMBPlugin.specialShowInListCondition()).isTrue()
+    }
+
+    @Test
+    fun `always use short deltas replaces only the effective delta`() {
+        val source = GlucoseStatusSMB(
+            glucose = 180.0,
+            noise = 1.0,
+            delta = 12.0,
+            shortAvgDelta = 4.5,
+            longAvgDelta = 2.0,
+            date = 1234L,
+        )
+
+        assertThat(effectiveGlucoseStatus(source, false)).isSameInstanceAs(source)
+        assertThat(effectiveGlucoseStatus(source, true)).isEqualTo(source.copy(delta = 4.5))
     }
 
 }

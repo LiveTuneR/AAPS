@@ -11,6 +11,7 @@ import app.aaps.core.interfaces.aps.APSResult
 import app.aaps.core.interfaces.aps.AutosensResult
 import app.aaps.core.interfaces.aps.CurrentTemp
 import app.aaps.core.interfaces.aps.GlucoseStatus
+import app.aaps.core.interfaces.aps.GlucoseStatusSMB
 import app.aaps.core.interfaces.aps.OapsProfile
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
 import app.aaps.core.interfaces.configuration.Config
@@ -306,6 +307,10 @@ open class OpenAPSSMBPlugin @Inject constructor(
             aapsLogger.debug(LTag.APS, rh.gs(R.string.openapsma_no_glucose_data))
             return@withContext
         }
+        val effectiveGlucoseStatus = effectiveGlucoseStatus(
+            glucoseStatus,
+            preferences.get(BooleanKey.ApsAlwaysUseShortDeltas),
+        )
 
         val inputConstraints = ConstraintObject(0.0, aapsLogger) // fake. only for collecting all results
 
@@ -477,7 +482,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
         }
 
         aapsLogger.debug(LTag.APS, ">>> Invoking determine_basal SMB <<<")
-        aapsLogger.debug(LTag.APS, "Glucose status:     $glucoseStatus")
+        aapsLogger.debug(LTag.APS, "Glucose status:     $effectiveGlucoseStatus")
         aapsLogger.debug(LTag.APS, "Current temp:       $currentTemp")
         aapsLogger.debug(LTag.APS, "IOB data:           ${iobArray.joinToString()}")
         aapsLogger.debug(LTag.APS, "Profile:            $oapsProfile")
@@ -488,7 +493,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
         aapsLogger.debug(LTag.APS, "DynIsfMode:         $dynIsfMode")
 
         determineBasalSMB.determine_basal(
-            glucose_status = glucoseStatus,
+            glucose_status = effectiveGlucoseStatus,
             currenttemp = currentTemp,
             iob_data_array = iobArray,
             profile = oapsProfile,
@@ -504,7 +509,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
             determineBasalResult.inputConstraints = inputConstraints
             determineBasalResult.autosensResult = autosensResult
             determineBasalResult.iobData = iobArray
-            determineBasalResult.glucoseStatus = glucoseStatus
+            determineBasalResult.glucoseStatus = effectiveGlucoseStatus
             determineBasalResult.currentTemp = currentTemp
             determineBasalResult.oapsProfile = oapsProfile
             determineBasalResult.mealData = mealData
@@ -620,4 +625,16 @@ open class OpenAPSSMBPlugin @Inject constructor(
         icon = pluginDescription.icon
     )
 
+}
+
+internal fun effectiveGlucoseStatus(glucoseStatus: GlucoseStatus, alwaysUseShortDeltas: Boolean): GlucoseStatus {
+    if (!alwaysUseShortDeltas) return glucoseStatus
+    return GlucoseStatusSMB(
+        glucose = glucoseStatus.glucose,
+        noise = glucoseStatus.noise,
+        delta = glucoseStatus.shortAvgDelta,
+        shortAvgDelta = glucoseStatus.shortAvgDelta,
+        longAvgDelta = glucoseStatus.longAvgDelta,
+        date = glucoseStatus.date,
+    )
 }

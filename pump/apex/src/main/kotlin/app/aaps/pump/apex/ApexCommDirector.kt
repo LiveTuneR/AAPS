@@ -114,6 +114,8 @@ class ApexCommDirector @Inject constructor(
         var completionJob: Job? = null,
     )
 
+    private data class CommandGap(val reason: String, val requiredMs: Long)
+
     private var scope: CoroutineScope? = null
     private val events = Channel<LinkEvent>(Channel.UNLIMITED)
     private val requestSignal = Channel<Unit>(Channel.CONFLATED)
@@ -222,7 +224,7 @@ class ApexCommDirector @Inject constructor(
                 "command_queue_capacity_timeout",
                 activeGeneration,
                 operationId,
-                mapOf("command" to command::class.simpleName, "priority" to priority),
+                commandFields(command, "priority" to priority),
             )
             return null
         }
@@ -230,7 +232,7 @@ class ApexCommDirector @Inject constructor(
             event = "command_queued",
             generation = activeGeneration,
             operationId = operationId,
-            fields = mapOf("command" to command::class.simpleName, "safety" to safety, "priority" to priority),
+            fields = commandFields(command, "safety" to safety, "priority" to priority),
         )
         enqueue(request)
         if (priority == RequestPriority.CANCEL_BOLUS) preemptReadOnlyForCancel(request)
@@ -242,7 +244,7 @@ class ApexCommDirector @Inject constructor(
                     "command_issue_timeout",
                     activeGeneration,
                     operationId,
-                    mapOf("command" to command::class.simpleName, "priority" to priority),
+                    commandFields(command, "priority" to priority),
                 )
                 requestSignal.trySend(Unit)
                 return null
@@ -470,19 +472,7 @@ class ApexCommDirector @Inject constructor(
                 continue
             }
 
-            val now = SystemClock.uptimeMillis()
-            val lastRelevantActivity = if (request.priority == RequestPriority.CANCEL_BOLUS) {
-                lastSendUptime
-            } else {
-                maxOf(lastSendUptime, lastHeartbeatUptime)
-            }
-            val requiredGap = if (lastHeartbeatUptime > lastSendUptime && request.priority != RequestPriority.CANCEL_BOLUS) {
-                Configuration.HEARTBEAT_COMMAND_GAP_MS
-            } else {
-                Configuration.COMMAND_GAP_MS
-            }
-            val remainingGap = requiredGap - (now - lastRelevantActivity)
-            if (remainingGap > 0) delay(remainingGap)
+            val commandGap = awaitCommandGap(request)
 
             val single = request.command !is GetValue || request.command.value.singleValueReturn
             val current = Pending(
@@ -491,11 +481,11 @@ class ApexCommDirector @Inject constructor(
                 result = request.result,
                 operationId = request.operationId,
                 safety = request.safety,
-                commandName = request.command::class.simpleName,
+                commandName = commandName(request.command),
             )
             synchronized(pendingLock) {
                 pending = current
-                diagnosticPendingCommand = request.command::class.simpleName
+                diagnosticPendingCommand = commandName(request.command)
             }
             pendingStartedElapsedMs = SystemClock.elapsedRealtime()
             markProgress()
@@ -503,7 +493,13 @@ class ApexCommDirector @Inject constructor(
                 "command_started",
                 activeGeneration,
                 request.operationId,
-                mapOf("command" to request.command::class.simpleName, "safety" to request.safety, "priority" to request.priority),
+                commandFields(
+                    request.command,
+                    "safety" to request.safety,
+                    "priority" to request.priority,
+                    "gapReason" to commandGap.reason,
+                    "requiredGapMs" to commandGap.requiredMs,
+                ),
             )
             if (!apexBluetooth.send(request.command)) {
                 trace.record("command_write_failed", activeGeneration, request.operationId)
@@ -523,7 +519,7 @@ class ApexCommDirector @Inject constructor(
                     "command_timeout",
                     activeGeneration,
                     request.operationId,
-                    mapOf("command" to request.command::class.simpleName, "safety" to request.safety),
+                    commandFields(request.command, "safety" to request.safety, "expected" to expected.name),
                 )
                 events.trySend(LinkEvent.TransportFault(activeGeneration, "command_timeout"))
             } else if (response != null) {
@@ -531,7 +527,7 @@ class ApexCommDirector @Inject constructor(
                     "command_completed",
                     activeGeneration,
                     request.operationId,
-                    mapOf("command" to request.command::class.simpleName, "values" to response.size),
+                    commandFields(request.command, "values" to response.size),
                 )
             }
             clearPending(current)
@@ -717,6 +713,37 @@ class ApexCommDirector @Inject constructor(
     private fun markProgress() {
         lastProgressElapsedMs = SystemClock.elapsedRealtime()
     }
+
+    private suspend fun awaitCommandGap(request: Request): CommandGap {
+        while (true) {
+            val observedLastSend = lastSendUptime
+            val observedHeartbeat = lastHeartbeatUptime
+            val heartbeatIsLatest = observedHeartbeat > observedLastSend && request.priority != RequestPriority.CANCEL_BOLUS
+            val gap = when {
+                heartbeatIsLatest                    -> CommandGap("heartbeat", Configuration.HEARTBEAT_COMMAND_GAP_MS)
+                request.safety == CommandSafety.READ_ONLY -> CommandGap("read_only", Configuration.READ_ONLY_COMMAND_GAP_MS)
+                else                                 -> CommandGap("standard", Configuration.COMMAND_GAP_MS)
+            }
+            val lastRelevantActivity = if (request.priority == RequestPriority.CANCEL_BOLUS) {
+                observedLastSend
+            } else {
+                maxOf(observedLastSend, observedHeartbeat)
+            }
+            val remainingMs = gap.requiredMs - (SystemClock.uptimeMillis() - lastRelevantActivity)
+            if (remainingMs <= 0) return gap
+            delay(remainingMs)
+            if (lastSendUptime == observedLastSend && lastHeartbeatUptime == observedHeartbeat) return gap
+        }
+    }
+
+    private fun commandFields(command: DeviceCommand, vararg fields: Pair<String, Any?>): Map<String, Any?> = buildMap {
+        put("command", command::class.simpleName)
+        if (command is GetValue) put("value", command.value.name)
+        fields.forEach { (key, value) -> put(key, value) }
+    }
+
+    private fun commandName(command: DeviceCommand): String =
+        if (command is GetValue) command.toString() else command::class.simpleName ?: command.toString()
 
     private fun classify(command: DeviceCommand): CommandSafety = when (command) {
         is GetValue -> CommandSafety.READ_ONLY
