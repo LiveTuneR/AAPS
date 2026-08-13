@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="omnipod_common_alert_finish_pairing_reminder">Напоминание о завершении сопряжения</string>
+    <string name="omnipod_common_alert_finish_setup_reminder_reminder">Напоминание о завершении настройки</string>
+    <string name="omnipod_common_cmd_cancel_fake_suspended_tbr">Отменить фейковый временный базал, который был создан из-за приостановки действия Pod</string>
+    <string name="omnipod_common_cmd_cancel_tbr">Отменить временный базал</string>
+    <string name="omnipod_common_cmd_cancel_tbr_by_driver">Отменить временный базал (внутренний драйвер)</string>
+    <string name="omnipod_common_cmd_set_fake_suspended_tbr">Установить фейковый временный базал, так как Pod остановлен</string>
+    <string name="omnipod_common_cmd_set_tbr">Установить временный базал</string>
+    <string name="omnipod_common_cmd_split_tbr">Разбить временный базаль из-за неясной ошибки при отмене</string>
+    <string name="omnipod_common_disable_suspend_alerts">ОТКЛЮЧИТЬ ОПОВЕЩЕНИЯ ОБ ОСТАНОВЕ</string>
+    <string name="omnipod_common_overview_pod_hard_end_date">Под Хард Энд</string>
+    <string name="omnipod_common_preferences_notification_delivery_suspended_sound_enabled">Звук на приостановку подачи включен</string>
+    </resources>

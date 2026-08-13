@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="bolus_speed_1">1 Ед/мин</string>
+    <string name="bolus_speed_2">2 Ед/мин</string>
+    <string name="bolus_speed_3">3 Ед/мин</string>
+    <string name="bolus_speed_4">4 Ед/мин</string>
+    <string name="bolus_speed_5">5 Ед/мин</string>
+    <string name="bolus_speed_6">6 Ед/мин</string>
+    <string name="bolus_speed_7">7 ед/мин</string>
+    <string name="bolus_speed_8">8 Ед/мин</string>
+    <string name="diaconn_pairing_successful">Сопряжение успешно!</string>
+    <string name="diaconn_pairing_successful_message">Теперь ваша помпа подключена и готова к использованию.</string>
+    <string name="gettingbolusstatus">Получение статуса болюса</string>
+    <string name="largetimedifftitle">Большая разница во времени</string>
+    <string name="processinghistory">Обработка события</string>
+    <string name="resetpairing">Сбросить информацию о сопряжении?</string>
+    <string name="waitingforbolusend">Ожидание предполагаемого окончания болюса</string>
+    </resources>

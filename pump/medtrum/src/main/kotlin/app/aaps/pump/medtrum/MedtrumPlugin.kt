@@ -44,6 +44,7 @@ import app.aaps.core.ui.compose.icons.IcPluginMedtrum
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
 import app.aaps.pump.medtrum.compose.MedtrumComposeContent
+import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
 import app.aaps.pump.medtrum.keys.MedtrumBooleanKey
 import app.aaps.pump.medtrum.keys.MedtrumBooleanNonKey
 import app.aaps.pump.medtrum.keys.MedtrumDoubleNonKey
@@ -82,7 +83,8 @@ class MedtrumPlugin @Inject constructor(
     private val temporaryBasalStorage: TemporaryBasalStorage,
     private val pumpEnactResultProvider: Provider<PumpEnactResult>,
     private val protectionCheck: ProtectionCheck,
-    private val blePreCheck: BlePreCheck
+    private val blePreCheck: BlePreCheck,
+    private val medtrumBleTrace: MedtrumBleTrace,
 ) : PumpPluginBase(
     pluginDescription = PluginDescription()
         .mainType(PluginType.PUMP)
@@ -94,7 +96,8 @@ class MedtrumPlugin @Inject constructor(
             MedtrumComposeContent(
                 pluginName = rh.gs(R.string.medtrum),
                 protectionCheck = protectionCheck,
-                blePreCheck = blePreCheck
+                blePreCheck = blePreCheck,
+                trace = medtrumBleTrace,
             )
         },
     ownPreferences = listOf(

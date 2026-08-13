@@ -524,6 +524,15 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
 
     private suspend fun doMigrations() {
         // set values for different builds
+        // apex5: the previous diagnostic build retained Apex traces for hours but left the
+        // standard AAPS export at its old two-file preference. Migrate that old value once,
+        // while preserving any explicit non-default choice made by the user.
+        if (!sp.getBoolean("apex5_aaps_log_retention_migrated", false)) {
+            if (preferences.get(IntKey.MaintenanceLogsAmount) == 2) {
+                preferences.put(IntKey.MaintenanceLogsAmount, 10)
+            }
+            sp.putBoolean("apex5_aaps_log_retention_migrated", true)
+        }
         // 3.3
         if (preferences.get(UnitDoubleKey.OverviewLowMark) == 0.0) preferences.remove(UnitDoubleKey.OverviewLowMark)
         if (preferences.get(UnitDoubleKey.OverviewHighMark) == 0.0) preferences.remove(UnitDoubleKey.OverviewHighMark)

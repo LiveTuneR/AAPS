@@ -35,6 +35,8 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.pump.medtrum.comm.ManufacturerData
 import app.aaps.pump.medtrum.comm.ReadDataPacket
 import app.aaps.pump.medtrum.comm.WriteCommandPackets
+import app.aaps.pump.medtrum.comm.enums.CommandType
+import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
 import app.aaps.pump.medtrum.extension.toInt
 import app.aaps.pump.medtrum.keys.MedtrumBooleanKey
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -51,7 +53,8 @@ class MedtrumBleTransportImpl @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val context: Context,
     private val preferences: Preferences,
-    private val rxBus: RxBus
+    private val rxBus: RxBus,
+    private val trace: MedtrumBleTrace,
 ) : MedtrumBleTransport {
 
     companion object {
@@ -129,6 +132,7 @@ class MedtrumBleTransportImpl @Inject constructor(
 
     @Synchronized
     override fun connect(from: String, deviceSN: Long): Boolean {
+        trace.record("connect_requested", mapOf("source" to from, "serial" to deviceSN.toString(16)))
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT) || !hasPermission(Manifest.permission.BLUETOOTH_SCAN)) {
             rxBus.send(EventShowSnackbar(context.getString(app.aaps.core.ui.R.string.need_connect_permission), EventShowSnackbar.Type.Error))
             aapsLogger.error(LTag.PUMPBTCOMM, "missing permission: $from")
@@ -170,6 +174,7 @@ class MedtrumBleTransportImpl @Inject constructor(
 
     @Synchronized
     override fun disconnect(from: String) {
+        trace.record("disconnect_requested", mapOf("source" to from, "connected" to isConnected, "connecting" to isConnecting))
         if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) {
             aapsLogger.error(LTag.PUMPBTCOMM, "missing permission: $from")
             return
@@ -194,6 +199,15 @@ class MedtrumBleTransportImpl @Inject constructor(
     @Synchronized
     override fun sendMessage(message: ByteArray) {
         aapsLogger.debug(LTag.PUMPBTCOMM, "sendMessage: ${message.contentToString()}")
+        trace.record(
+            "tx_message",
+            mapOf(
+                "command" to commandName(message.firstOrNull()),
+                "opCode" to message.firstOrNull()?.toInt()?.and(0xFF),
+                "length" to message.size,
+                "data" to message,
+            ),
+        )
         if (writePackets?.allPacketsConsumed() == false) {
             aapsLogger.error(LTag.PUMPBTCOMM, "sendMessage: previous packets not consumed, dropping")
             return
@@ -226,6 +240,10 @@ class MedtrumBleTransportImpl @Inject constructor(
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             aapsLogger.debug(LTag.PUMPBTCOMM, "onCharacteristicChanged UUID: ${characteristic.uuid}")
             val value = characteristic.value
+            trace.record(
+                if (characteristic.uuid == UUID.fromString(READ_UUID)) "rx_notification_chunk" else "rx_indication_chunk",
+                mapOf("uuid" to characteristic.uuid, "length" to value.size, "data" to value),
+            )
             when (characteristic.uuid) {
                 UUID.fromString(READ_UUID)  -> medtrumCallback?.onNotification(value)
                 UUID.fromString(WRITE_UUID) -> handleIndication(value)
@@ -234,6 +252,7 @@ class MedtrumBleTransportImpl @Inject constructor(
 
         override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             aapsLogger.debug(LTag.PUMPBTCOMM, "onCharacteristicWrite status: $status")
+            trace.record("tx_chunk_complete", mapOf("uuid" to characteristic.uuid, "status" to status))
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 writePackets?.let { packets ->
                     synchronized(packets) {
@@ -270,7 +289,18 @@ class MedtrumBleTransportImpl @Inject constructor(
                 if (readPacket?.failed() == true) {
                     medtrumCallback?.onSendMessageError("ReadDataPacket failed", false)
                 } else {
-                    readPacket?.getData()?.let { medtrumCallback?.onIndication(it) }
+                    readPacket?.getData()?.let {
+                        trace.record(
+                            "rx_message",
+                            mapOf(
+                                "command" to commandName(it.getOrNull(1)),
+                                "opCode" to it.getOrNull(1)?.toInt()?.and(0xFF),
+                                "length" to it.size,
+                                "data" to it,
+                            ),
+                        )
+                        medtrumCallback?.onIndication(it)
+                    }
                 }
                 readPacket = null
             }
@@ -295,6 +325,7 @@ class MedtrumBleTransportImpl @Inject constructor(
     @Synchronized
     private fun onConnectionStateChangeSynchronized(gatt: BluetoothGatt, status: Int, newState: Int) {
         aapsLogger.debug(LTag.PUMPBTCOMM, "onConnectionStateChange newState: $newState status: $status")
+        trace.record("connection_state", mapOf("status" to status, "newState" to newState))
         if (newState == BluetoothProfile.STATE_CONNECTED) {
             isConnected = true
             isConnecting = false
@@ -395,6 +426,10 @@ class MedtrumBleTransportImpl @Inject constructor(
                                     characteristic.value = data
                                     characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                                     aapsLogger.debug(LTag.PUMPBTCOMM, "writeCharacteristic: ${data.contentToString()}")
+                                    trace.record(
+                                        "tx_chunk",
+                                        mapOf("uuid" to characteristic.uuid, "length" to data.size, "data" to data),
+                                    )
                                     if (bluetoothGatt?.writeCharacteristic(characteristic) != true) {
                                         medtrumCallback?.onSendMessageError("Failed to write characteristic", true)
                                     }
@@ -452,6 +487,9 @@ class MedtrumBleTransportImpl @Inject constructor(
 
     private fun hasPermission(permission: String): Boolean =
         ActivityCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun commandName(opCode: Byte?): String =
+        CommandType.entries.firstOrNull { it.code == opCode }?.name ?: "UNKNOWN"
 
     // --- BleAdapter ---
 

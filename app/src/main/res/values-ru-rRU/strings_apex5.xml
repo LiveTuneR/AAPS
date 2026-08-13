@@ -1,0 +1,4 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string comment="Shown once after the database migration when no profile was active, so the insulin actually used could not be determined. %1$s is the substituted insulin name, e.g. Ultra-Rapid-Oref. The already migrated records are NOT corrected later." name="insulin_migration_default_used">В более старых записях не было конфигурации инсулина и не было активного профиля, поэтому для них использовался %1$s. Проверьте настройки инсулина — уже перенесенные записи впоследствии не обновляются.</string>
+    <string name="optimizing_database">Оптимизация базы данных…</string>
+    </resources>

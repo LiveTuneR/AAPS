@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="setupwizard_client_control_info">Выполните сопряжение клиентских устройств, чтобы они могли отправлять подписанные команды этому ведущему устройству через Nightscout. Это новый рекомендуемый способ удаленного управления AAPS.</string>
+    <string name="setupwizard_client_control_title">Клиентский контроль</string>
+    <string name="setupwizard_ns_receive_info">Прием лечения и данных непосредственно из Nightscout (менее безопасный способ) теперь отключен по умолчанию. Открывайте настройки ниже, только если они вам еще нужны. Необходимо, если вам нужно ввести данные через NS или сторонние приложения.</string>
+    <string name="setupwizard_open_ns_receive_settings">Прием данных Nightscout</string>
+    <string name="setupwizard_pair_with_master_info">Соедините этот клиент с вашим главным AAPS, чтобы он мог отправлять команды по защищенному каналу.</string>
+    <string name="setupwizard_pairing_status_client_not_paired">Еще не сопряжено</string>
+    <string name="setupwizard_pairing_status_client_paired">В паре с мастером</string>
+    <string name="setupwizard_pairing_status_master">Парные клиенты: %1$d</string>
+    <string name="setupwizard_pairing_status_master_none">Пока нет сопряженных клиентов</string>
+    <string name="setupwizard_pairing_ws_warning">Для сопряжения требуется соединение Nightscout WebSocket. Вернитесь к предыдущему шагу и сначала включите его.</string>
+    <string name="status_label">Статус помпы</string>
+    </resources>

@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="ble_scan_connect_pump_base_first">Подключите базу помпы к новому патчу, чтобы включить его, затем выберите его из списка ниже.</string>
+    <string name="connect_pump_base">Соедините основание помпы и новый патч, удалите воздух и заполните инсулином, затем нажмите <b>Далее</b>.</string>
+    <string name="patch_reset_after_primed_error">Обнаружен сброс патча после установки! Удалите патч и запустите новый патч.</string>
+    <string name="status_active">Активный</string>
+    <string name="status_ejected">Выброшен</string>
+    <string name="status_ejecting">Извлечение</string>
+    <string name="status_filled">Заполненный</string>
+    <string name="status_idle">Простой</string>
+    <string name="status_primed">грунтованный</string>
+    <string name="status_priming">Грунтовка</string>
+    <string name="status_stopped">Остановлено</string>
+    <string name="step_select_insulin">Выберите инсулин</string>
+    <string name="unpair_confirm_message">Это приведет к удалению сохраненного серийного номера помпы и отключению. Активируйте новый патч для поиска помпы.</string>
+    </resources>

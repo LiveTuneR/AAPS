@@ -15,6 +15,7 @@ import app.aaps.pump.medtrum.R
 import app.aaps.pump.medtrum.ble.MedtrumBleTransport
 import app.aaps.pump.medtrum.code.ConnectionState
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
+import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -53,6 +54,7 @@ internal class MedtrumPatchViewModelTest {
     private val medtrumPlugin: MedtrumPlugin = mock()
     private val medtrumPump: MedtrumPump = mock()
     private val bleTransport: MedtrumBleTransport = mock()
+    private val trace: MedtrumBleTrace = mock()
 
     private lateinit var sut: MedtrumPatchViewModel
 
@@ -67,7 +69,7 @@ internal class MedtrumPatchViewModelTest {
 
         sut = MedtrumPatchViewModel(
             aapsLogger, medtrumPlugin, commandQueue, medtrumPump, insulinManager,
-            profileFunction, profileRepository, preferences, persistenceLayer, bleTransport
+            profileFunction, profileRepository, preferences, persistenceLayer, bleTransport, trace
         )
     }
 

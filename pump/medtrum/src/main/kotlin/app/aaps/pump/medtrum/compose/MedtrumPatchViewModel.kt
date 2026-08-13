@@ -31,6 +31,7 @@ import app.aaps.pump.medtrum.ble.MedtrumBleTransport
 import app.aaps.pump.medtrum.code.ConnectionState
 import app.aaps.pump.medtrum.code.PatchStep
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
+import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
 import app.aaps.pump.medtrum.encryption.Crypt
 import app.aaps.pump.medtrum.keys.MedtrumStringNonKey
 import app.aaps.pump.medtrum.services.MedtrumService
@@ -73,7 +74,8 @@ class MedtrumPatchViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val preferences: Preferences,
     private val persistenceLayer: PersistenceLayer,
-    private val bleTransport: MedtrumBleTransport
+    private val bleTransport: MedtrumBleTransport,
+    private val trace: MedtrumBleTrace,
 ) : ViewModel(), SiteLocationStepHost, ProfileGateStepHost {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -248,6 +250,16 @@ class MedtrumPatchViewModel @Inject constructor(
 
     fun moveStep(newPatchStep: PatchStep) {
         oldPatchStep = _patchStep.value
+
+        trace.record(
+            "wizard_step",
+            mapOf(
+                "from" to oldPatchStep?.name,
+                "to" to newPatchStep.name,
+                "pumpState" to medtrumPump.pumpState.name,
+                "connectionState" to medtrumPump.connectionState.name,
+            ),
+        )
 
         if (oldPatchStep != newPatchStep) {
             when (newPatchStep) {

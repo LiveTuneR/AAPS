@@ -125,4 +125,6 @@
     <string name="bolus_error_reason_unable_to_send_command">Невозможно отправить команду на болюс</string>
     <string name="bolus_error_reason_communication_lost">Истекло время ожидания статуса болюса</string>
     <string name="bolus_error_reason_pump_error">Ошибка помпы</string>
+    <string name="ble_diagnostic_export">Экспорт диагностики Medtrum BLE</string>
+    <string name="ble_diagnostic_export_failed">Не удалось экспортировать диагностику Medtrum BLE</string>
 </resources>

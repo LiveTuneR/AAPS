@@ -395,7 +395,7 @@ enum class IntKey(
         unitType = UnitType.HOURS,
         sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
-    MaintenanceLogsAmount(key = "maintenance_logs_amount", defaultValue = 2, min = 1, max = 10, titleResId = R.string.pref_title_logs_amount, defaultedBySM = true),
+    MaintenanceLogsAmount(key = "maintenance_logs_amount", defaultValue = 10, min = 1, max = 10, titleResId = R.string.pref_title_logs_amount, defaultedBySM = true),
     AlertsStaleDataThreshold(
         key = "missed_bg_readings_threshold",
         defaultValue = 30,

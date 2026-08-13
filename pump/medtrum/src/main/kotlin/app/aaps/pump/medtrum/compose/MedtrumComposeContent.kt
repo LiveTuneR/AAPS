@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -11,26 +12,32 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.protection.ProtectionResult
 import app.aaps.core.interfaces.pump.BlePreCheck
 import app.aaps.core.ui.compose.ComposablePluginContent
+import app.aaps.core.ui.compose.LocalSnackbarHostState
 import app.aaps.core.ui.compose.ToolbarConfig
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
 import app.aaps.core.ui.compose.dialogs.OkDialog
 import app.aaps.core.ui.compose.pump.BlePreCheckHost
 import app.aaps.core.ui.compose.pump.KeepScreenOnEffect
 import app.aaps.pump.medtrum.code.PatchStep
+import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
+import kotlinx.coroutines.launch
 import app.aaps.core.ui.R as CoreUiR
 import app.aaps.pump.medtrum.R as MedtrumR
 
 class MedtrumComposeContent(
     private val pluginName: String,
     private val protectionCheck: ProtectionCheck,
-    private val blePreCheck: BlePreCheck
+    private val blePreCheck: BlePreCheck,
+    private val trace: MedtrumBleTrace,
 ) : ComposablePluginContent {
 
     @Composable
@@ -41,6 +48,9 @@ class MedtrumComposeContent(
     ) {
         val overviewViewModel: MedtrumOverviewViewModel = hiltViewModel()
         val patchViewModel: MedtrumPatchViewModel = hiltViewModel()
+        val context = LocalContext.current
+        val snackbar = LocalSnackbarHostState.current
+        val scope = rememberCoroutineScope()
 
         // Patch workflow state
         var showPatchWorkflow by remember { mutableStateOf(false) }
@@ -59,6 +69,16 @@ class MedtrumComposeContent(
             }
         }
         val settingsAction: @Composable RowScope.() -> Unit = {
+            IconButton(onClick = {
+                scope.launch {
+                    trace.record("manual_export_requested")
+                    if (runCatching { trace.share() }.isFailure) {
+                        snackbar.showSnackbar(context.getString(MedtrumR.string.ble_diagnostic_export_failed))
+                    }
+                }
+            }) {
+                Icon(Icons.Filled.Share, contentDescription = stringResource(MedtrumR.string.ble_diagnostic_export))
+            }
             onSettings?.let { action ->
                 IconButton(onClick = action) {
                     Icon(Icons.Filled.Settings, contentDescription = stringResource(CoreUiR.string.settings))

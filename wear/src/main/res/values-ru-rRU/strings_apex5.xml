@@ -1,0 +1,291 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="action_confirm_timeshift">Сдвиг времени: %1$s</string>
+    <string name="action_duration_hours_format">%1$d ч</string>
+    <string name="action_duration_hours_minutes_format">%1$d ч %2$d мин.</string>
+    <string name="action_high_unit" comment="In temp target menu, higher value from range">Верхняя граница [%s]</string>
+    <string name="action_low_unit" comment="In temp target menu, lower value from range">Нижняя граница [%s]</string>
+    <string name="action_minutes_format">%1$d мин.</string>
+    <string name="action_running_mode_selected">Запрошен режим работы</string>
+    <string name="action_scene_confirmation">Запрошена сцена</string>
+    <string name="action_target_unit" comment="In temp target menu, single target value">Цель [%s]</string>
+    <string comment="Shown under the carbs field when removing carbs (a negative value). %1$d = grams of carbs currently on board, the maximum removable. Example: Max removal: 30 g (carbs on board)" name="carbs_removal_cob_limit">Максимальное удаление: %1$d г (активные углеводы (COB))</string>
+    <string name="complication_bg_graph">График БГ</string>
+    <string name="complication_blood_glucose_large">Глюкоза крови (большая)</string>
+    <string name="complication_br_tt">БР и цель</string>
+    <string name="complication_target">Цель</string>
+    <string name="confirm">Подтверждаю</string>
+    <string name="constraint_applied">Применено ограничение!</string>
+    <string name="contacting_master">Обращение к мастеру…</string>
+    <string name="contacting_master_unknown">Состояние неизвестно — проверьте телефон</string>
+    <string name="duration_1_hour">1 час</string>
+    <string name="duration_3_hours">3 часа</string>
+    <string name="duration_6_hours">6 часов</string>
+    <string name="ecarbs_start_format">%1$d мин.</string>
+    <string name="error">Ошибка</string>
+    <string name="label_actions_tile">AAPS (Действия)</string>
+    <string name="label_bg_graph_tile">График БГ</string>
+    <string name="label_quick_wizard_tile">AAPS (калькулятор)</string>
+    <string name="label_running_mode_title">Режим работы</string>
+    <string name="label_scene_tile">Сцена</string>
+    <string name="label_temp_target_tile">AAPS (временная цель)</string>
+    <string name="label_user_action_tile">AAPS (действие пользователя)</string>
+    <string name="loop_status_adjusted_target">Скорректированная цель</string>
+    <string name="loop_status_dst_suspended">Приостановлено по летнему времени</string>
+    <string name="loop_status_duration_remaining" comment="%1$s=formatted duration e.g. 2 h 5 min. Example: 2 h 5 min remaining">Осталось %1$s</string>
+    <string name="loop_status_duration_until" comment="%1$s=formatted duration e.g. 2 h 5 min, %2$s=end time. Example: 2 h 5 min (14:35)">%1$s (%2$s)</string>
+    <string name="loop_status_pump_suspended">Помпа приостановлена</string>
+    <string name="loop_status_refresh">Обновить</string>
+    <string name="menu_bg_graph">График ГК</string>
+    <string name="menu_install_watchface">Установить циферблат</string>
+    <string name="menu_installing_watchface">Установка циферблата…</string>
+    <string name="menu_tempt_long">Временная цель</string>
+    <string name="minute_short">м</string>
+    <string name="pref_complication_bg_graph_hours">Временной диапазон графика ГК</string>
+    <string name="pref_tile_settings">Плитка</string>
+    <string name="quick_wizard_tile_carbs" comment="QuickWizard tile sub-label, carbs amount. %1$d=grams. Example: 30 g">%1$d г</string>
+    <string name="quick_wizard_tile_insulin" comment="QuickWizard tile sub-label, fixed insulin amount. %1$.2f=units. Example: 1.50 U">%1$.2f У</string>
+    <string name="request">Запрос</string>
+    <string name="scene_end">Конец</string>
+    <string name="tile_graph_time_range">Временной диапазон</string>
+    <string name="tile_scene_1">сцена 1</string>
+    <string name="tile_scene_2">сцена 2</string>
+    <string name="tile_scene_3">сцена 3</string>
+    <string name="tile_scene_4">сцена 4</string>
+    <string name="tile_scene_auto">Автоматический</string>
+    <string name="tile_scene_unavailable">Недоступно</string>
+    <string name="tile_tap_action">Нажмите действие</string>
+    <string name="tile_tap_bg_graph">График БГ</string>
+    <string name="tile_tap_loop_status">Статус цикла</string>
+    <string name="tile_tap_main_menu">Главное меню</string>
+    <string name="title_activity_disconnect_pump">Отключить помпу</string>
+    <string name="title_activity_suspend_loop">Приостановить цикл</string>
+    <string name="watchface_install_failed">Не удалось установить циферблат</string>
+    <string name="watchface_installed_active">Циферблат установлен и выбран</string>
+    <string name="watchface_installed_select">Циферблат установлен. Выберите его в настройках часов.</string>
+    <string name="wizard_calculation">Расчет</string>
+    <string name="wizard_carbs_short" comment="%1$d=grams. Example: 30 g">%1$d г</string>
+    <string name="wizard_carbs_with_time" comment="%1$d=grams, %2$s=signed minute offset e.g. +20 or -5. Example: 30 g (+20 min)">%1$d г (%2$s мин)</string>
+    <string name="wizard_insulin_format">%1$s ед</string>
+    <string name="wizard_result_bg">ГК</string>
+    <string name="wizard_result_bg_tt">ГК (ВЦ: %1$s)</string>
+    <string name="wizard_result_carbs">Углеводы (%1$d г)</string>
+    <string name="wizard_result_cob">Активные углеводы (COB): %1$.1f г</string>
+    <string name="wizard_result_correction">Коррекция</string>
+    <string name="wizard_result_correction_percentage">Корр. %1$d%%</string>
+    <string name="wizard_result_ecarbs" comment="%1$d=grams, %2$d=duration hours, %3$d=delay minutes. Example: 16 g / 2 h (+90 min)">%1$d г / %2$d ч (+%3$d мин)</string>
+<string name="wizard_result_iob">Активный инсулин (IOB)</string>
+    <string name="wizard_result_new_iob">Новый IOB: %1$s ед.</string>
+    <string name="wizard_result_subtotal">Подытог</string>
+    <string name="wizard_result_total">Итого</string>
+    <string name="wizard_result_trend">Тренд за 15 мин</string>
+    <string name="wizard_settings_format">IC: %1$s | ИСФ: %2$s</string>
+    <string name="wizard_total_insulin">Всего инсулина</string>
+    <string-array name="chart_timeframe">
+        <item>@string/pref_1_hour</item>
+        <item>@string/pref_2_hours</item>
+        <item>@string/pref_3_hours</item>
+        <item>@string/pref_4_hours</item>
+        <item>@string/pref_5_hours</item>
+    </string-array>
+
+    <string-array name="chart_timeframe_values">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>4</item>
+        <item>5</item>
+    </string-array>
+
+    <string-array name="complication_bg_graph_hours">
+        <item>@string/duration_1_hour</item>
+        <item>@string/duration_3_hours</item>
+        <item>@string/duration_6_hours</item>
+    </string-array>
+
+    <string-array name="complication_bg_graph_hours_values">
+        <item>1</item>
+        <item>3</item>
+        <item>6</item>
+    </string-array>
+
+    <string-array name="complication_tap_action">
+        <item>@string/menu_default</item>
+        <item>@string/menu_menu</item>
+        <item>@string/menu_wizard</item>
+        <item>@string/menu_treatment</item>
+        <item>@string/menu_ecarb</item>
+        <item>@string/menu_status</item>
+        <item>@string/menu_none</item>
+    </string-array>
+
+    <string-array name="complication_tap_action_values">
+        <item>default</item>
+        <item>menu</item>
+        <item>wizard</item>
+        <item>bolus</item>
+        <item>ecarb</item>
+        <item>status</item>
+        <item>none</item>
+    </string-array>
+
+    <string-array name="digitalstyle_color_name">
+        <item>@string/color_name_red</item>
+        <item>@string/color_name_pink</item>
+        <item>@string/color_name_purple</item>
+        <item>@string/color_name_deeppurple</item>
+        <item>@string/color_name_indigo</item>
+        <item>@string/color_name_blue</item>
+        <item>@string/color_name_lightblue</item>
+        <item>@string/color_name_cyan</item>
+        <item>@string/color_name_teal</item>
+        <item>@string/color_name_green</item>
+        <item>@string/color_name_lightgreen</item>
+        <item>@string/color_name_lime</item>
+        <item>@string/color_name_yellow</item>
+        <item>@string/color_name_amber</item>
+        <item>@string/color_name_orange</item>
+        <item>@string/color_name_deeporange</item>
+        <item>@string/color_name_brown</item>
+        <item>@string/color_name_gray</item>
+        <item>@string/color_name_bluegray</item>
+        <item>@string/color_name_white</item>
+        <item>@string/color_name_multicolor</item>
+    </string-array>
+    <string-array name="digitalstyle_color_opacity_name">
+        <item>10%</item>
+        <item>20%</item>
+        <item>30%</item>
+        <item>40%</item>
+        <item>50%</item>
+        <item>60%</item>
+        <item>70%</item>
+        <item>80%</item>
+        <item>90%</item>
+        <item>100%</item>
+    </string-array>
+    <string-array name="digitalstyle_color_opacity_value">
+        <item>0.1</item>
+        <item>0.2</item>
+        <item>0.3</item>
+        <item>0.4</item>
+        <item>0.5</item>
+        <item>0.6</item>
+        <item>0.7</item>
+        <item>0.8</item>
+        <item>0.9</item>
+        <item>1</item>
+    </string-array>
+
+<string-array name="digitalstyle_color_saturation">
+        <item>100</item>
+        <item>500</item>
+        <item>700</item>
+        <item>900</item>
+    </string-array>
+
+    <string-array name="digitalstyle_color_values">
+        <item>red</item>
+        <item>pink</item>
+        <item>purple</item>
+        <item>deeppurple</item>
+        <item>indigo</item>
+        <item>blue</item>
+        <item>lightblue</item>
+        <item>cyan</item>
+        <item>teal</item>
+        <item>green</item>
+        <item>lightgreen</item>
+        <item>lime</item>
+        <item>yellow</item>
+        <item>amber</item>
+        <item>orange</item>
+        <item>deeporange</item>
+        <item>brown</item>
+        <item>gray</item>
+        <item>bluegray</item>
+        <item>white</item>
+        <item>multicolor</item>
+    </string-array>
+
+    <string-array name="digitalstyle_styles_name">
+        <item>@string/digitalstyle_style_none</item>
+        <item>@string/digitalstyle_style_minimal</item>
+        <item>@string/digitalstyle_style_shape</item>
+        <item>@string/digitalstyle_style_full</item>
+    </string-array>
+    <string-array name="digitalstyle_styles_values">
+        <item>none</item>
+        <item>minimal</item>
+        <item>shape</item>
+        <item>full</item>
+    </string-array>
+
+    <string-array name="heartrate_smoothing">
+        <item>@string/pref_1_min</item>
+        <item>@string/pref_5_min</item>
+        <item>@string/pref_10_min</item>
+        <item>@string/pref_15_min</item>
+    </string-array>
+
+    <string-array name="heartrate_smoothing_values">
+        <item>1</item>
+        <item>5</item>
+        <item>10</item>
+        <item>15</item>
+    </string-array>
+
+<string-array name="tile_action_names">
+        <item>@string/menu_wizard</item>
+        <item>@string/menu_treatment</item>
+        <item>@string/menu_bolus</item>
+        <item>@string/menu_carb</item>
+        <item>@string/menu_ecarb</item>
+        <item>@string/menu_tempt</item>
+        <item>@string/status_profile_switch</item>
+        <item>@string/tile_none</item>
+    </string-array>
+
+    <string-array name="tile_action_values">
+        <item>wizard</item>
+        <item>treatment</item>
+        <item>bolus</item>
+        <item>carbs</item>
+        <item>ecarbs</item>
+        <item>temp_target</item>
+        <item>profile_switch</item>
+        <item>none</item>
+    </string-array>
+
+    <string-array name="tile_tempt_names">
+        <item>@string/temp_target_activity</item>
+        <item>@string/temp_target_eating_soon</item>
+        <item>@string/temp_target_hypo</item>
+        <item>@string/temp_target_manual</item>
+        <item>@string/temp_target_cancel</item>
+        <item>@string/tile_none</item>
+    </string-array>
+
+    <string-array name="tile_tempt_values">
+        <item>activity</item>
+        <item>eating_soon</item>
+        <item>hypo</item>
+        <item>manual</item>
+        <item>cancel</item>
+        <item>none</item>
+    </string-array>
+
+    <string-array name="watchface_simplify_ui_name">
+        <item>@string/simple_ui_off</item>
+        <item>@string/simple_ui_charging</item>
+        <item>@string/simple_ui_always_on</item>
+        <item>@string/simple_ui_always_on_charging</item>
+    </string-array>
+
+    <string-array name="watchface_simplify_ui_values">
+        <item>off</item>
+        <item>charging</item>
+        <item>ambient</item>
+        <item>ambient_charging</item>
+    </string-array>
+
+    </resources>

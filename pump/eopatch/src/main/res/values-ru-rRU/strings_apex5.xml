@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="eopatch_not_activated">Не активировано</string>
+    <string name="no_profile_selected_try_again">Профиль не выбран. Пожалуйста, выберите профиль и повторите попытку.</string>
+    <string name="patch_force_reset">Принудительный сброс</string>
+    <string name="patch_force_reset_confirm">Это очистит состояние патча локально, без отправки команд патчу. Используйте только в том случае, если обычная деактивация не удалась. Патч будет продолжать доставляться до тех пор, пока у него не разрядится батарея или пока он не будет отключен вручную.</string>
+    <string name="patch_remove_needle_cap_desc_2">Если игла торчит, коснитесь \'Сбросьте \'.</string>
+    <string name="patch_remove_needle_cap_desc_3">Если пластырь мокрый или грязный или его клейкая лента загнута, коснитесь \'Выбросьте \'.</string>
+    <string name="patch_safety_check_desc_2">[Caution] Не удаляйте рычаг действия Иглы до завершения проверки безопасности!</string>
+    <string name="patch_safety_check_failed_desc">Проверка безопасности не удалась. Пожалуйста, попробуйте еще раз.</string>
+    <string name="patch_wake_up_pairing_info">Во время сопряжения появятся два всплывающих окна системы Android. Вы должны подтвердить оба варианта, чтобы завершить сопряжение Bluetooth.</string>
+    <string name="permission_exact_alarm_description">Приложению требуется разрешение на планирование точных сигналов тревоги для управления исправлениями.</string>
+    <string name="permission_exact_alarm_title">Точные сигналы тревоги</string>
+    <string name="string_pause_failed">Сбой приостановки.</string>
+    <string name="string_resume_insulin_delivery_message">Окончание приостановки инсулина.\nНажмите \'Подтвердить\', чтобы возобновить введение инсулина.\n\nВведение инсулина не возобновится, пока вы не нажмете \'Confirm\'.\nЕсли вы не нажмете \'Confirm\', у вас может развиться гипергликемия.</string>
+    <string name="wizard_exit_activation_warning">Выйти из мастера активации? Патч может остаться в незавершенном состоянии и потребовать нового патча.</string>
+    <string name="wizard_exit_deactivation_warning">Выйти из мастера деактивации? Пластырь может оставаться активным и продолжать доставлять инсулин.</string>
+    </resources>

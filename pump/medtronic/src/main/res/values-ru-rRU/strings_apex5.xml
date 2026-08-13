@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="medtronic_custom_action_reset_rileylink">Сбросить конфигурацию RileyLink</string>
+    <string name="medtronic_pump_type_523_24a">523 (Fw 2,4A или ниже)</string>
+    <string name="medtronic_pump_type_554_ca">554 (CA Fw. &lt;= 2,7 А)</string>
+    <string name="medtronic_pump_type_554_eu">554 (ЕС Fw. &lt;= 2,6 А)</string>
+    <string name="medtronic_pump_type_723_24a">723 (Fw 2,4A или ниже)</string>
+    <string name="medtronic_pump_type_754_ca">754 (CA Fw. &lt;= 2,7 А)</string>
+    <string name="medtronic_pump_type_754_eu">754 (ЕС Fw. &lt;= 2,6 А)</string>
+    <string name="medtronic_pump_type_unsupported">Другое (не поддерживается)</string>
+    </resources>

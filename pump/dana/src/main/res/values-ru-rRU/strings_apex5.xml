@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="bolus_speed_12">12 с/ед.</string>
+    <string name="bolus_speed_30">30 с/ед.</string>
+    <string name="bolus_speed_60">60 с/ед.</string>
+    <string name="cancel_pairing_message">Процесс сопряжения будет прерван.</string>
+    <string name="cancel_pairing_title">Отменить сопряжение?</string>
+    <string name="connecting_to_pump">Подключение к помпе…</string>
+    <string name="connecting_verifying">Подключение и проверка пароля…</string>
+    <string name="danar_disablebolusblock">Блокировка болюса включена на помпе. AAPS не может доставлять инсулин, пока он активен. Отключите блокировку болюса в настройках помпы.</string>
+    <string name="done">Готово</string>
+    <string name="enter_pump_password">Введите пароль помпы</string>
+    <string name="largetimedifftitle">Большая разница во времени</string>
+    <string name="no_paired_devices">Сопряженных устройств Dana не найдено. Сначала выполните сопряжение помпы в настройках Android Bluetooth.</string>
+    <string name="open_bluetooth_settings">Откройте настройки Bluetooth</string>
+    <string name="pairing_successful">Сопряжение успешно!</string>
+    <string name="pairing_successful_message">Теперь ваша помпа подключена и готова к использованию.</string>
+    <string name="password_hint">Введите пароль здесь</string>
+    <string name="password_ok">Пароль успешно подтвержден!</string>
+    <string name="password_wrong">Неправильный пароль. Вернитесь и исправьте это.</string>
+    <string name="select_paired_device">Выберите сопряженное устройство</string>
+    </resources>

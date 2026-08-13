@@ -148,4 +148,6 @@
     <string name="bolus_error_reason_unable_to_send_command">Unable to send bolus command</string>
     <string name="bolus_error_reason_communication_lost">Timeout getting bolus status</string>
     <string name="bolus_error_reason_pump_error">Pump error</string>
+    <string name="ble_diagnostic_export">Export Medtrum BLE diagnostics</string>
+    <string name="ble_diagnostic_export_failed">Failed to export Medtrum BLE diagnostics</string>
 </resources>

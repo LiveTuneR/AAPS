@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="aidex">Приложение MicroTech CGM</string>
+    <string name="aidex_sensor_error">Ошибка датчика. Проверьте состояние датчика.</string>
+    <string name="aidex_sensor_expired">Срок годности датчика истек, замените его новым датчиком.</string>
+    <string name="aidex_sensor_replace">Требуется замена датчика, пожалуйста, замените его новым датчиком как можно скорее.</string>
+    <string name="aidex_sensor_stabilizing">Датчик стабилизируется, подождите…</string>
+    <string name="aidex_short">Приложение CGM</string>
+    <string name="aidex_signal_lost">Сигнал датчика потерян, проверьте соединение.</string>
+    <string name="description_source_aidex">Получайте значения CGM от LinX, LinX vista, Equil G. Smart 2, Diaexpert 2 и т. д.</string>
+    <string name="description_source_instara_app">Получите значения ГК из приложения Instara.</string>
+    <string name="description_source_notification_reader">Читайте значения глюкозы в уведомлениях, опубликованных официальными приложениями CGM (Dexcom, Medtronic, Eversense и т. д.).</string>
+    <string name="instara_app">Инстара</string>
+    <string name="notification_reader">Читатель уведомлений</string>
+    <string name="permission_dexcom_description">Приложению требуется разрешение на получение данных CGM из приложения Dexcom.</string>
+    <string name="permission_dexcom_title">Декском CGM</string>
+    <string name="permission_notification_listener_description">Требуется для чтения значений глюкозы из уведомлений приложения CGM.</string>
+    <string name="pref_summary_instara_history_request">Запросить возможные отсутствующие исторические данные в фоновом режиме</string>
+    <string name="pref_title_instara_history_request">Запрос исторических данных Instara</string>
+    </resources>
