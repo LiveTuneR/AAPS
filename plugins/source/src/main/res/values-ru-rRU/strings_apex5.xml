@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="aidex">Приложение MicroTech CGM</string>
+<resources><!-- Generated for apex5; placeholders validated against English resources. --><string name="aidex">Lumiflex / Aidex</string>
     <string name="aidex_sensor_error">Ошибка датчика. Проверьте состояние датчика.</string>
     <string name="aidex_sensor_expired">Срок годности датчика истек, замените его новым датчиком.</string>
     <string name="aidex_sensor_replace">Требуется замена датчика, пожалуйста, замените его новым датчиком как можно скорее.</string>

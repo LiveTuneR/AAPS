@@ -182,6 +182,28 @@ class AidexWorkerTest : TestBaseWithProfile() {
     }
 
     @Test
+    fun `implausible mmol value blocks insert`() = runTest {
+        aidexPlugin.setPluginEnabled(app.aaps.core.data.plugin.PluginType.BGSOURCE, true)
+        reMockInput(inputDataOf(bgType = "mmol/l", bgValue = 118.0))
+
+        worker.doWork()
+
+        verify(persistenceLayer, never()).insertCgmSourceData(any(), any(), any(), anyOrNull())
+        verify(rxBusMock, never()).send(any())
+    }
+
+    @Test
+    fun `unknown glucose unit blocks insert`() = runTest {
+        aidexPlugin.setPluginEnabled(app.aaps.core.data.plugin.PluginType.BGSOURCE, true)
+        reMockInput(inputDataOf(bgType = "unknown", bgValue = 118.0))
+
+        worker.doWork()
+
+        verify(persistenceLayer, never()).insertCgmSourceData(any(), any(), any(), anyOrNull())
+        verify(rxBusMock, never()).send(any())
+    }
+
+    @Test
     fun `hasSensorError clears after a clean reading following a faulted one`() = runTest {
         aidexPlugin.setPluginEnabled(app.aaps.core.data.plugin.PluginType.BGSOURCE, true)
         whenever(persistenceLayer.insertCgmSourceData(anyOrNull(), anyOrNull(), anyOrNull(), anyOrNull()))

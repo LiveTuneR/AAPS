@@ -112,7 +112,17 @@ class AidexPlugin @Inject constructor(
             if (transmitterSN != null) aapsLogger.debug(LTag.BGSOURCE, "transmitterSerialNumber: $transmitterSN")
             if (sensorId != null) aapsLogger.debug(LTag.BGSOURCE, "sensorId: $sensorId")
 
-            val bgValueTarget = if (bgType == "mg/dl") bgValue else bgValue * Constants.MMOLL_TO_MGDL
+            val normalizedBgType = bgType.lowercase()
+            val rawValueValid = when (normalizedBgType) {
+                "mg/dl"  -> bgValue in 20.0..1000.0
+                "mmol/l" -> bgValue in 1.0..55.0
+                else     -> false
+            }
+            val bgValueTarget = when (normalizedBgType) {
+                "mg/dl"  -> bgValue
+                "mmol/l" -> bgValue * Constants.MMOLL_TO_MGDL
+                else     -> 0.0
+            }
 
             val sensorExpired = inputData.getBoolean(Intents.AIDEX_SENSOR_EXPIRED, false)
             val sensorError = inputData.getBoolean(Intents.EXTRA_SENSOR_ERROR, false)
@@ -126,7 +136,7 @@ class AidexPlugin @Inject constructor(
 
             aapsLogger.debug(LTag.BGSOURCE, "Received Aidex broadcast [time=$timestamp, bgType=$bgType, value=$bgValue, targetValue=$bgValueTarget]")
 
-            val isValidValue = timestamp > 0 && bgValueTarget > 0 && !aidexPlugin._hasSensorError
+            val isValidValue = timestamp > 0 && rawValueValid && !aidexPlugin._hasSensorError
 
             if (isValidValue) {
                 val glucoseValues = mutableListOf<GV>()
