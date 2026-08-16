@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Curated Russian localization fixups for the Apex5 branch.
+        These app-level resources intentionally override generated translations from library modules.
+        Keep technical AAPS terms (DynISF, Autosens, BGI, eCarbs) recognizable to users.
+    -->
+
+    <!-- Overview graph labels -->
+    <string name="abs_insulin_shortname">АБС.ИНС</string>
+    <string name="activity_shortname">АКТ.ИНС</string>
+    <string name="bgi_shortname">-BGI</string>
+    <string name="deviation_shortname">ОТКЛ.</string>
+    <string name="devslope_shortname">НАКЛ.ОТКЛ</string>
+    <string name="sensitivity_shortname">Autosens%</string>
+    <string name="variable_sensitivity_shortname">DynISF</string>
+
+    <!-- eCarbs / extended carbs: never translate eCarbs as "electronic carbs" -->
+    <string name="wizard_ecarbs">eCarbs (растянутые): %1$d г / %2$d ч (+%3$d мин)</string>
+    <string name="additional_ecarbs">Добавить растянутые углеводы (eCarbs)</string>
+    <string name="ecarbs_additional">Растянутые углеводы (eCarbs)</string>
+    <string name="wizard_carbs_type_bread_desc">Все углеводы сразу, без растянутых углеводов (eCarbs)</string>
+    <string name="wizard_carbs_type_desc">Доля углеводов сразу уменьшена на %1$d%%; добавлено %2$d%% растянутых углеводов (eCarbs) с задержкой %3$d мин на %4$d ч</string>
+
+    <!-- Pump / CGM / CarePortal wording -->
+    <string name="ble_scan_select_pump">Выберите помпу из списка ниже</string>
+    <string name="careportal_cgmsensorstart">Запуск сенсора</string>
+    <string name="careportal_cgm_sensor_stop">Остановка сенсора</string>
+    <string name="careportal_feeling_high">Ощущение гипергликемии</string>
+    <string name="careportal_feeling_low">Ощущение гипогликемии</string>
+    <string name="careportal_pre_period">Перед менструацией</string>
+    <string name="site_location">Место установки</string>
+    <string name="treatment_carbs_desc">Записать углеводы без инсулина</string>
+
+    <!-- General UI wording -->
+    <string name="carousel_move_earlier">Переместить раньше</string>
+    <string name="carousel_move_later">Переместить позже</string>
+    <string name="chip_local">Локально</string>
+    <string name="aaps_activity_icon_label">Физическая активность</string>
+    <string name="aaps_tbr_icon_label">Временный базал</string>
+    <string name="aaps_tt_eating_icon_label">ТТ «Скоро еда»</string>
+    <string name="aaps_tt_manual_icon_label">ТТ вручную</string>
+    <string name="alarm_icon_label">Тревога</string>
+    <string name="car_icon_label">Вождение</string>
+    <string name="exercise_icon_label">Бег</string>
+    <string name="fill_prime_amount">Количество для заполнения</string>
+    <string name="fill_pump_units_note">Количество для заполнения указано в единицах помпы</string>
+    <string name="no_temp_basal_running">Временный базал не активен</string>
+    <string name="permission_grant">Разрешить</string>
+    <string name="quick_launch_no_dynamic_items">Нет доступных элементов</string>
+    <string name="widget_rm_resume">Возобновить</string>
+
+    <!-- Client / master control: remove broken English contraction fragments -->
+    <string name="clientcontrol_action_deactivate_scene">Отключить сцену</string>
+    <string name="clientcontrol_bolus_progress_stalled_body">Этот телефон перестал получать обновления от ведущего устройства. Болюс может всё ещё вводиться или уже завершиться. Закрытие этого окна только скрывает его здесь — оно не останавливает помпу. Проверьте на ведущем телефоне фактически введённую дозу.</string>
+    <string name="clientcontrol_fail_bolus_compute">Не удалось рассчитать болюс: отсутствуют данные глюкозы или профиль, либо помпа не готова.</string>
+    <string name="clientcontrol_fail_execution">Ведущее устройство не смогло применить команду.</string>
+    <string name="clientcontrol_fail_not_paired">Это устройство не сопряжено с ведущим устройством.</string>
+    <string name="clientcontrol_fail_partial">Некоторые действия применить не удалось.</string>
+    <string name="clientcontrol_fail_send_failed">Не удалось связаться с Nightscout.</string>
+    <string name="clientcontrol_pump_out_of_sync">Конфигурация помпы не синхронизирована с ведущим устройством. Повторите попытку.</string>
+    <string name="clientcontrol_pending_failed_format">Не удалось выполнить «%1$s».\n%2$s</string>
+    <string name="clientcontrol_pending_partial_format">«%1$s» применено, но некоторые действия выполнить не удалось.\nПроверьте текущее состояние.</string>
+    <string name="clientcontrol_pending_partial_title">Применено частично</string>
+    <string name="clientcontrol_pending_rejected_title">Не применено</string>
+    <string name="clientcontrol_pending_stop_waiting">Перестать ждать</string>
+    <string name="clientcontrol_pending_unconfirmed_title">Подтверждение не получено</string>
+
+    <!-- Pairing / remote-control wording -->
+    <string name="authorized_clients_pin_dialog_title">Сопряжение клиента</string>
+    <string name="authorized_clients_pin_instructions">Введите этот PIN-код на клиентском устройстве. Код действителен только для одного сопряжения.</string>
+    <string name="authorized_clients_pin_published">Предложение сопряжения готово в Nightscout.</string>
+    <string name="pair_with_master_confirm_pair">Сопрячь</string>
+    <string name="pair_with_master_confirm_title">Сопрячь с этим ведущим устройством?</string>
+    <string name="pair_with_master_fetching">Поиск данных сопряжения…</string>
+    <string name="pair_with_master_pin_entry_submit">Сопрячь</string>
+    <string name="pair_with_master_title">Сопряжение с ведущим устройством</string>
+    <string name="pair_with_master_unpair">Отменить сопряжение</string>
+
+    <!-- Preference text with leaked English fragments -->
+    <string name="deliverpartofboluswizard">Использовать это значение для коррекции глюкозы и углеводов в калькуляторе болюса.</string>
+    <string name="pref_summary_bt_watchdog">Отключает Bluetooth телефона на одну секунду, если соединение с помпой невозможно. Это может помочь на некоторых телефонах, где стек Bluetooth зависает.</string>
+    <string formatted="false" name="openapsama_iob_threshold_percent_summary">Процент максимального IOB, выше которого SMB отключаются.\nЗначение по умолчанию: 100%.\nПри 100% эта функция фактически отключена.</string>
+
+    <!-- Safety-sensitive wording: hypo means hypoglycemia, not hypotension -->
+    <string name="scene_wizard_info_driving">Для безопасного вождения требуется стабильный уровень глюкозы выше 5,0 ммоль/л (90 мг/дл). В некоторых странах проверка перед и во время длительных поездок является обязательной. Немного более высокая цель даёт алгоритму запас безопасности. Если во время вождения развивается гипогликемия, немедленно остановитесь, купируйте её и подождите не менее 45 минут после восстановления уровня глюкозы, прежде чем продолжать движение.</string>
+    <string formatted="false" name="scene_wizard_info_luteal_phase">Во время лютеиновой фазы (примерно за 1–2 недели до менструации) у многих женщин повышается резистентность к инсулину. Это связано с повышением уровня прогестерона, который снижает чувствительность к инсулину. Эффект индивидуален: у некоторых потребность в инсулине возрастает на 10–30%, у других изменения минимальны. Начните с консервативного увеличения (115%) и корректируйте его по собственным закономерностям в течение нескольких циклов. Отслеживание этого в CarePortal помогает определить индивидуальный ритм.</string>
+    <string name="scene_wizard_info_post_exercise_night">После физической активности мышцы продолжают пополнять запасы гликогена в течение многих часов — чувствительность к инсулину может оставаться повышенной 24–48 часов, а наибольший риск ночной гипогликемии часто приходится на 6–12 часов после тренировки. Сниженный профиль уменьшает ночную базальную подачу, более высокая временная цель создаёт запас безопасности, а отключение SMB снижает риск избыточной коррекции кратковременных подъёмов. Активируйте эту сцену перед сном после тренировок, особенно длительных или непривычных. Держите быстрые углеводы рядом с кроватью и при необходимости предусмотрите дополнительную ночную проверку.</string>
+    <string formatted="false" name="scene_wizard_info_sick_day">Болезнь, лихорадка и гормоны стресса могут резко повысить резистентность к инсулину — иногда на 50% и более. Усиленный профиль (например, 150%) увеличивает подачу инсулина в расчётах базала, болюсов и коррекций. При необходимости можно также использовать временную цель или изменить режим работы алгоритма. Внимательно следите за глюкозой и корректируйте настройки по мере восстановления.</string>
+    <string formatted="false" name="scene_wizard_profile_info">Переключение профиля одновременно изменяет базальные дозы, фактор чувствительности к инсулину (ISF) и углеводный коэффициент (IC). Все параметры можно масштабировать в процентах: например, 110% увеличивает базальную подачу и связанные с профилем расчёты на 10%. Также можно полностью переключиться на другой заранее настроенный профиль.</string>
+    <string formatted="false" name="scene_wizard_info_sick_day_vomiting">Если из-за рвоты не удаётся удерживать пищу или жидкость, обычное увеличение инсулина при болезни может быть опасным. Углеводы могут не усваиваться, поэтому глюкоза способна снижаться, а не повышаться. Пониженный профиль (60%) уменьшает подачу инсулина, а режим LGS даёт дополнительную защиту при падении глюкозы. Отключение SMB предотвращает дополнительные микроболюсы. Регулярно контролируйте глюкозу и кетоны и обращайтесь за медицинской помощью при продолжающейся рвоте или повышении кетонов.</string>
+
+    <!-- File / storage wording -->
+    <string name="permission_directory_title">Папка AAPS</string>
+</resources>
