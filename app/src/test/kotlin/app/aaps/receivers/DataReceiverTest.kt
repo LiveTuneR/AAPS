@@ -120,6 +120,20 @@ class DataReceiverTest : TestBase() {
     }
 
     @Test
+    @Suppress("RestrictedApi")
+    fun `Aidex diagnostics are copied to worker data`() {
+        whenever(bundle.getLong(Intents.AIDEX_SENT_AT)).thenReturn(1_700_000_000_100L)
+        whenever(bundle.getString(Intents.AIDEX_SOURCE_APP)).thenReturn("Lumiflex")
+
+        dataReceiver.processIntent(context, createIntent(Intents.AIDEX_NEW_BG_ESTIMATE))
+
+        val captor = argumentCaptor<OneTimeWorkRequest>()
+        verify(workManager).enqueueUniqueWork(eq("data"), eq(ExistingWorkPolicy.APPEND_OR_REPLACE), captor.capture())
+        assertThat(captor.firstValue.workSpec.input.getLong(Intents.AIDEX_SENT_AT, 0)).isEqualTo(1_700_000_000_100L)
+        assertThat(captor.firstValue.workSpec.input.getString(Intents.AIDEX_SOURCE_APP)).isEqualTo("Lumiflex")
+    }
+
+    @Test
     fun `inbox action does not enqueue inline work`() {
         dataReceiver.processIntent(context, createIntent(Intents.ACTION_NEW_BG_ESTIMATE))
         verify(workManager, never()).enqueueUniqueWork(any(), any(), any<OneTimeWorkRequest>())

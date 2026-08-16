@@ -43,6 +43,8 @@ class AidexWorkerTest : TestBaseWithProfile() {
         bgType: String = "mg/dl",
         bgValue: Double = 120.0,
         bgSlopeName: String? = "Flat",
+        sentAt: Long = 1_700_000_000_100L,
+        sourceApp: String = "Lumiflex",
         sensorExpired: Boolean = false,
         sensorError: Boolean = false,
         sensorStabilizing: Boolean = false,
@@ -53,6 +55,8 @@ class AidexWorkerTest : TestBaseWithProfile() {
         Intents.AIDEX_BG_TYPE to bgType,
         Intents.AIDEX_BG_VALUE to bgValue,
         Intents.AIDEX_BG_SLOPE_NAME to bgSlopeName,
+        Intents.AIDEX_SENT_AT to sentAt,
+        Intents.AIDEX_SOURCE_APP to sourceApp,
         Intents.AIDEX_SENSOR_EXPIRED to sensorExpired,
         Intents.EXTRA_SENSOR_ERROR to sensorError,
         Intents.EXTRA_SENSOR_STABILIZING to sensorStabilizing,
@@ -159,6 +163,17 @@ class AidexWorkerTest : TestBaseWithProfile() {
     fun `zero bg value blocks insert`() = runTest {
         aidexPlugin.setPluginEnabled(app.aaps.core.data.plugin.PluginType.BGSOURCE, true)
         reMockInput(inputDataOf(bgValue = 0.0))
+
+        worker.doWork()
+
+        verify(persistenceLayer, never()).insertCgmSourceData(any(), any(), any(), anyOrNull())
+        verify(rxBusMock, never()).send(any())
+    }
+
+    @Test
+    fun `zero timestamp blocks insert`() = runTest {
+        aidexPlugin.setPluginEnabled(app.aaps.core.data.plugin.PluginType.BGSOURCE, true)
+        reMockInput(inputDataOf(timestamp = 0))
 
         worker.doWork()
 

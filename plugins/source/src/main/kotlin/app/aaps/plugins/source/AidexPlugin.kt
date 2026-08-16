@@ -99,8 +99,16 @@ class AidexPlugin @Inject constructor(
             val bgSlopeName = inputData.getString(Intents.AIDEX_BG_SLOPE_NAME)
             val transmitterSN = inputData.getString(Intents.AIDEX_TRANSMITTER_SN)
             val sensorId = inputData.getString(Intents.AIDEX_SENSOR_ID)
+            val sentAt = inputData.getLong(Intents.AIDEX_SENT_AT, 0)
+            val sourceApp = inputData.getString(Intents.AIDEX_SOURCE_APP) ?: "Aidex"
+            val receivedAt = System.currentTimeMillis()
 
-            aapsLogger.debug(LTag.BGSOURCE, "Received Aidex data [timestamp=$timestamp, bgType=$bgType, bgValue=$bgValue]")
+            aapsLogger.debug(
+                LTag.BGSOURCE,
+                "Received Aidex data [source=$sourceApp, timestamp=$timestamp, bgType=$bgType, bgValue=$bgValue, " +
+                    "sourceAgeMs=${if (timestamp > 0) receivedAt - timestamp else -1}, " +
+                    "transportMs=${if (sentAt > 0) receivedAt - sentAt else -1}]"
+            )
             if (transmitterSN != null) aapsLogger.debug(LTag.BGSOURCE, "transmitterSerialNumber: $transmitterSN")
             if (sensorId != null) aapsLogger.debug(LTag.BGSOURCE, "sensorId: $sensorId")
 
@@ -118,7 +126,7 @@ class AidexPlugin @Inject constructor(
 
             aapsLogger.debug(LTag.BGSOURCE, "Received Aidex broadcast [time=$timestamp, bgType=$bgType, value=$bgValue, targetValue=$bgValueTarget]")
 
-            val isValidValue = bgValueTarget > 0 && !aidexPlugin._hasSensorError
+            val isValidValue = timestamp > 0 && bgValueTarget > 0 && !aidexPlugin._hasSensorError
 
             if (isValidValue) {
                 val glucoseValues = mutableListOf<GV>()

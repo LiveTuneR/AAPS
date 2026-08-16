@@ -145,6 +145,8 @@ open class DataReceiver : DaggerBroadcastReceiver() {
                         it.copyString(Intents.AIDEX_TRANSMITTER_SN, bundle)
                         it.copyString(Intents.AIDEX_SENSOR_ID, bundle)
                         it.copyBoolean(Intents.AIDEX_SENSOR_EXPIRED, bundle)
+                        it.copyLong(Intents.AIDEX_SENT_AT, bundle)
+                        it.copyString(Intents.AIDEX_SOURCE_APP, bundle)
                         it.copyBoolean(Intents.EXTRA_SENSOR_ERROR, bundle)
                         it.copyBoolean(Intents.EXTRA_SENSOR_STABILIZING, bundle)
                         it.copyBoolean(Intents.EXTRA_REPLACE_SENSOR, bundle)

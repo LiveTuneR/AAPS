@@ -9,13 +9,13 @@
     <string name="action_scene_confirmation">Запрошена сцена</string>
     <string name="action_target_unit" comment="In temp target menu, single target value">Цель [%s]</string>
     <string comment="Shown under the carbs field when removing carbs (a negative value). %1$d = grams of carbs currently on board, the maximum removable. Example: Max removal: 30 g (carbs on board)" name="carbs_removal_cob_limit">Максимальное удаление: %1$d г (активные углеводы (COB))</string>
-    <string name="complication_bg_graph">График БГ</string>
+    <string name="complication_bg_graph">График ГК</string>
     <string name="complication_blood_glucose_large">Глюкоза крови (большая)</string>
     <string name="complication_br_tt">БР и цель</string>
     <string name="complication_target">Цель</string>
     <string name="confirm">Подтверждаю</string>
     <string name="constraint_applied">Применено ограничение!</string>
-    <string name="contacting_master">Обращение к мастеру…</string>
+    <string name="contacting_master">Связь с ведущим устройством…</string>
     <string name="contacting_master_unknown">Состояние неизвестно — проверьте телефон</string>
     <string name="duration_1_hour">1 час</string>
     <string name="duration_3_hours">3 часа</string>
@@ -23,7 +23,7 @@
     <string name="ecarbs_start_format">%1$d мин.</string>
     <string name="error">Ошибка</string>
     <string name="label_actions_tile">AAPS (Действия)</string>
-    <string name="label_bg_graph_tile">График БГ</string>
+    <string name="label_bg_graph_tile">График ГК</string>
     <string name="label_quick_wizard_tile">AAPS (калькулятор)</string>
     <string name="label_running_mode_title">Режим работы</string>
     <string name="label_scene_tile">Сцена</string>
@@ -43,9 +43,9 @@
     <string name="pref_complication_bg_graph_hours">Временной диапазон графика ГК</string>
     <string name="pref_tile_settings">Плитка</string>
     <string name="quick_wizard_tile_carbs" comment="QuickWizard tile sub-label, carbs amount. %1$d=grams. Example: 30 g">%1$d г</string>
-    <string name="quick_wizard_tile_insulin" comment="QuickWizard tile sub-label, fixed insulin amount. %1$.2f=units. Example: 1.50 U">%1$.2f У</string>
+    <string name="quick_wizard_tile_insulin" comment="QuickWizard tile sub-label, fixed insulin amount. %1$.2f=units. Example: 1.50 U">%1$.2f Е</string>
     <string name="request">Запрос</string>
-    <string name="scene_end">Конец</string>
+    <string name="scene_end">Завершить</string>
     <string name="tile_graph_time_range">Временной диапазон</string>
     <string name="tile_scene_1">сцена 1</string>
     <string name="tile_scene_2">сцена 2</string>
@@ -54,7 +54,7 @@
     <string name="tile_scene_auto">Автоматический</string>
     <string name="tile_scene_unavailable">Недоступно</string>
     <string name="tile_tap_action">Нажмите действие</string>
-    <string name="tile_tap_bg_graph">График БГ</string>
+    <string name="tile_tap_bg_graph">График ГК</string>
     <string name="tile_tap_loop_status">Статус цикла</string>
     <string name="tile_tap_main_menu">Главное меню</string>
     <string name="title_activity_disconnect_pump">Отключить помпу</string>
@@ -65,20 +65,20 @@
     <string name="wizard_calculation">Расчет</string>
     <string name="wizard_carbs_short" comment="%1$d=grams. Example: 30 g">%1$d г</string>
     <string name="wizard_carbs_with_time" comment="%1$d=grams, %2$s=signed minute offset e.g. +20 or -5. Example: 30 g (+20 min)">%1$d г (%2$s мин)</string>
-    <string name="wizard_insulin_format">%1$s ед</string>
+    <string name="wizard_insulin_format">%1$s Е</string>
     <string name="wizard_result_bg">ГК</string>
-    <string name="wizard_result_bg_tt">ГК (ВЦ: %1$s)</string>
+    <string name="wizard_result_bg_tt">ГК (ТТ: %1$s)</string>
     <string name="wizard_result_carbs">Углеводы (%1$d г)</string>
     <string name="wizard_result_cob">Активные углеводы (COB): %1$.1f г</string>
     <string name="wizard_result_correction">Коррекция</string>
     <string name="wizard_result_correction_percentage">Корр. %1$d%%</string>
     <string name="wizard_result_ecarbs" comment="%1$d=grams, %2$d=duration hours, %3$d=delay minutes. Example: 16 g / 2 h (+90 min)">%1$d г / %2$d ч (+%3$d мин)</string>
 <string name="wizard_result_iob">Активный инсулин (IOB)</string>
-    <string name="wizard_result_new_iob">Новый IOB: %1$s ед.</string>
+    <string name="wizard_result_new_iob">Новый IOB: %1$s Е</string>
     <string name="wizard_result_subtotal">Подытог</string>
     <string name="wizard_result_total">Итого</string>
     <string name="wizard_result_trend">Тренд за 15 мин</string>
-    <string name="wizard_settings_format">IC: %1$s | ИСФ: %2$s</string>
+    <string name="wizard_settings_format">IC: %1$s | ISF: %2$s</string>
     <string name="wizard_total_insulin">Всего инсулина</string>
     <string-array name="chart_timeframe">
         <item>@string/pref_1_hour</item>

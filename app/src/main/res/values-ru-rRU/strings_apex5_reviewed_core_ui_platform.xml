@@ -130,7 +130,7 @@
     <string name="uploader_short">ЗАГР</string>
     <string name="variable_sensitivity_shortname">DynISF</string>
     <string name="wizard_bg_label">ГК</string>
-    <string name="wizard_ecarbs">eCarbs: %1$d г / %2$d ч (+%3$d мин)</string>
+    <string name="wizard_ecarbs">Длительные углеводы: %1$d г / %2$d ч (+%3$d мин)</string>
     <string name="wizard_include_tt">Учитывать временную цель</string>
     <string name="bolus_with_volume">%1$s Е (%2$.1f мкл)</string>
     <string name="cloud_directory_path">Облачная папка: %1$s</string>

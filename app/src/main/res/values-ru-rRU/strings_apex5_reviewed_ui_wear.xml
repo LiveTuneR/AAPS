@@ -21,7 +21,7 @@
     <string name="clientcontrol_pending_unconfirmed_title">Подтверждение не получено</string>
     <string name="clientcontrol_pending_working_text">Ожидание подтверждения от ведущего устройства…</string>
     <string name="dexcom_tir">Dexcom TIR</string>
-    <string name="ecarbs_additional">Растянутые углеводы (eCarbs)</string>
+    <string name="ecarbs_additional">Длительные углеводы</string>
     <string name="exercise_icon_label">Бег</string>
     <string name="fill_prime_amount">Количество для заполнения</string>
     <string name="fill_pump_units_note">Количество для заполнения указано в единицах помпы.</string>
@@ -49,19 +49,7 @@
     <string name="volleyball_icon_label">Гимнастика</string>
     <string name="widget_rm_resume">Возобновить</string>
     <string name="widget_small_description">AAPS: малый</string>
-    <string name="wizard_carbs_type_bread_desc" formatted="false">Все углеводы сразу, без растянутых углеводов (eCarbs)</string>
-    <string name="wizard_carbs_type_desc">Доля углеводов сразу уменьшена на %1$d%%; добавлено %2$d%% растянутых углеводов (eCarbs) с задержкой %3$d мин на %4$d ч</string>
+    <string name="wizard_carbs_type_bread_desc" formatted="false">Все углеводы сразу, без длительных углеводов</string>
+    <string name="wizard_carbs_type_desc">Доля углеводов сразу уменьшена на %1$d%%; добавлено %2$d%% длительных углеводов с задержкой %3$d мин на %4$d ч</string>
     <string name="wizard_include_info">Нажмите, чтобы включить или исключить из расчёта:\n• ГК — глюкоза крови (включено при открытии)\n• ТТ — временная цель (включено при открытии)\n• Тренд — тренд ГК (запоминается последнее состояние)\n• IOB — активный инсулин (включено при открытии)\n• COB — активные углеводы (запоминается последнее состояние)</string>
-    <string name="complication_bg_graph">График ГК</string>
-    <string name="contacting_master">Связь с ведущим устройством…</string>
-    <string name="label_bg_graph_tile">График ГК</string>
-    <string name="menu_bg_graph">График ГК</string>
-    <string name="quick_wizard_tile_insulin">%1$.2f Е</string>
-    <string name="scene_end">Завершить</string>
-    <string name="tile_tap_bg_graph">График ГК</string>
-    <string name="wizard_insulin_format">%1$s Е</string>
-    <string name="wizard_result_bg">ГК</string>
-    <string name="wizard_result_bg_tt">ГК (ТТ: %1$s)</string>
-    <string name="wizard_result_new_iob">Новый IOB: %1$s Е</string>
-    <string name="wizard_settings_format">IC: %1$s | ISF: %2$s</string>
 </resources>

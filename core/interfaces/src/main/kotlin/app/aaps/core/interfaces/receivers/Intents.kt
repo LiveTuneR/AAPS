@@ -66,6 +66,8 @@ interface Intents {
         const val AIDEX_TRANSMITTER_SN = "com.microtechmd.cgms.aidex.TransmitterSerialNumber"
         const val AIDEX_SENSOR_ID = "com.microtechmd.cgms.aidex.SensorId"
         const val AIDEX_SENSOR_EXPIRED = "com.microtechmd.cgms.aidex.SensorExpired"
+        const val AIDEX_SENT_AT = "com.microtechmd.cgms.aidex.SentAt"
+        const val AIDEX_SOURCE_APP = "com.microtechmd.cgms.aidex.SourceApp"
 
         const val EXTRA_SENSOR_ERROR = "com.microtechmd.cgms.aidex.SensorError"
 
