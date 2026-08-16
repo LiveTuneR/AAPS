@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Curated Apex5 Russian localization: ui wear. -->
+    <string name="aaps_activity_icon_label">Физическая активность</string>
+    <string name="aaps_smb_icon_label">SMB</string>
+    <string name="aaps_tbr_icon_label">Временный базал</string>
+    <string name="aaps_tt_eating_icon_label">ТТ «Скоро еда»</string>
+    <string name="aaps_tt_manual_icon_label">ТТ вручную</string>
+    <string name="alarm_icon_label">Тревога</string>
+    <string name="cal_precheck_warmup">Сенсор ещё прогревается. Калибровка будет доступна в %1$s.</string>
+    <string name="car_icon_label">Вождение</string>
+    <string name="carbs_constraint_violation">Количество углеводов ограничено настройками безопасности</string>
+    <string name="cgp_pgr">PGR</string>
+    <string name="cgp_tor">ToR</string>
+    <string name="clientcontrol_pending_failed_format">Не удалось выполнить «%1$s».\n%2$s</string>
+    <string name="clientcontrol_pending_partial_format">«%1$s» применено, но некоторые действия выполнить не удалось.\nПроверьте текущее состояние.</string>
+    <string name="clientcontrol_pending_partial_title">Применено частично</string>
+    <string name="clientcontrol_pending_rejected_title">Не применено</string>
+    <string name="clientcontrol_pending_stop_waiting">Перестать ждать</string>
+    <string name="clientcontrol_pending_unconfirmed_format">«%1$s» отправлено, но подтверждение не получено.\n%2$s\nЕсли ведущее устройство применит действие, оно появится здесь после синхронизации.</string>
+    <string name="clientcontrol_pending_unconfirmed_title">Подтверждение не получено</string>
+    <string name="clientcontrol_pending_working_text">Ожидание подтверждения от ведущего устройства…</string>
+    <string name="dexcom_tir">Dexcom TIR</string>
+    <string name="ecarbs_additional">Растянутые углеводы (eCarbs)</string>
+    <string name="exercise_icon_label">Бег</string>
+    <string name="fill_prime_amount">Количество для заполнения</string>
+    <string name="fill_pump_units_note">Количество для заполнения указано в единицах помпы.</string>
+    <string name="no_temp_basal_running">Временный базал не активен</string>
+    <string name="permission_grant">Разрешить</string>
+    <string name="quick_launch_category_care">CarePortal</string>
+    <string name="quick_launch_category_quick_wizard">Быстрый калькулятор</string>
+    <string name="quick_launch_category_temp_target">Пресеты временной цели</string>
+    <string name="quick_launch_no_automation">Создайте пользовательские действия автоматизации, чтобы использовать их здесь.</string>
+    <string name="quick_launch_no_dynamic_items">Нет доступных элементов</string>
+    <string name="quick_launch_no_profiles">Создайте профили в Local Profile, чтобы использовать их здесь.</string>
+    <string name="quick_launch_no_quick_wizard">Добавьте записи быстрого калькулятора, чтобы использовать их здесь.</string>
+    <string name="quick_launch_no_tt_presets">Добавьте пресеты временной цели, чтобы использовать их здесь.</string>
+    <string name="quick_wizard_mode_wizard">Калькулятор</string>
+    <string name="scene_cat_activity">Активность</string>
+    <string name="scene_cat_general">Общее</string>
+    <string name="scene_cat_sleep">Сон</string>
+    <string name="scene_cat_wellness">Самочувствие</string>
+    <string name="sleep_icon_label">Сон</string>
+    <string name="swim_icon_label">Плавание</string>
+    <string name="trend_positive_only">Только положительные</string>
+    <string name="use_bg">Учитывать ГК</string>
+    <string name="use_cob">Учитывать COB</string>
+    <string name="use_iob">Учитывать IOB</string>
+    <string name="volleyball_icon_label">Гимнастика</string>
+    <string name="widget_rm_resume">Возобновить</string>
+    <string name="widget_small_description">AAPS: малый</string>
+    <string name="wizard_carbs_type_bread_desc" formatted="false">Все углеводы сразу, без растянутых углеводов (eCarbs)</string>
+    <string name="wizard_carbs_type_desc">Доля углеводов сразу уменьшена на %1$d%%; добавлено %2$d%% растянутых углеводов (eCarbs) с задержкой %3$d мин на %4$d ч</string>
+    <string name="wizard_include_info">Нажмите, чтобы включить или исключить из расчёта:\n• ГК — глюкоза крови (включено при открытии)\n• ТТ — временная цель (включено при открытии)\n• Тренд — тренд ГК (запоминается последнее состояние)\n• IOB — активный инсулин (включено при открытии)\n• COB — активные углеводы (запоминается последнее состояние)</string>
+    <string name="complication_bg_graph">График ГК</string>
+    <string name="contacting_master">Связь с ведущим устройством…</string>
+    <string name="label_bg_graph_tile">График ГК</string>
+    <string name="menu_bg_graph">График ГК</string>
+    <string name="quick_wizard_tile_insulin">%1$.2f Е</string>
+    <string name="scene_end">Завершить</string>
+    <string name="tile_tap_bg_graph">График ГК</string>
+    <string name="wizard_insulin_format">%1$s Е</string>
+    <string name="wizard_result_bg">ГК</string>
+    <string name="wizard_result_bg_tt">ГК (ТТ: %1$s)</string>
+    <string name="wizard_result_new_iob">Новый IOB: %1$s Е</string>
+    <string name="wizard_settings_format">IC: %1$s | ISF: %2$s</string>
+</resources>
