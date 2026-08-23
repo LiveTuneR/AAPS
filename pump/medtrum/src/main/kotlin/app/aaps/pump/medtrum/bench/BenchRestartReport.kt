@@ -10,96 +10,109 @@ class BenchRestartReport(private val campaignId: String) {
         events += event
     }
 
-    fun toJson(result: BenchRestartResult): String {
-        val baseline = fieldsOf("bench_restart_baseline_snapshot")
-        val before = fieldsOf("bench_restart_pre_transition_snapshot")
-        val after = fieldsOf("bench_restart_activate_verify")
-        val subsequent = fieldsOf("bench_restart_final_snapshot")
-        return JSONObject()
-            .put("schema", 1)
-            .put("campaignId", campaignId)
-            .put("finalVerdict", verdict(result))
-            .put("message", result.message)
-            .put("restartProven", result.restartProven)
-            .put("baseline", JSONObject(baseline))
-            .put("setPatchProbe", eventGroup("bench_restart_settings_"))
-            .put("restartCandidate", eventGroup("bench_restart_transition_"))
-            .put("activate", eventGroup("bench_restart_activate_"))
-            .put("restartEvidence", restartEvidence(before, after, subsequent))
-            .put("commandSummary", commandSummary())
-            .put("errorsAndTimeouts", eventArray { event ->
-                event.name.contains("failed") || event.name.contains("blocked") || event.name.contains("timeout")
-            })
-            .put("campaignStateTransitions", eventArray { true })
-            .put("finalDeviceState", (baseline + before + after + subsequent)["realPumpState"] ?: JSONObject.NULL)
-            .toString(2)
+    fun toJson(result: BenchRestartResult): String = JSONObject()
+        .put("schema", 2)
+        .put("campaignId", campaignId)
+        .put("finalVerdict", result.overallVerdict.name)
+        .put("message", result.message)
+        .put("restartProven", result.restartProven)
+        .put("resultDimensions", resultDimensions(result))
+        .put("snapshots", snapshotTableJson())
+        .put("setPatchProbe", eventGroup("bench_real_set_patch_"))
+        .put("activateProbe", eventGroup("bench_real_activate_"))
+        .put("hiddenTransition", eventGroup("bench_restart_hidden_transition_"))
+        .put("commandSummary", commandSummary(result))
+        .put("errorsAndTimeouts", eventArray { event ->
+            event.name.contains("failed") || event.name.contains("blocked") ||
+                event.fields["timeout"] == true || event.fields["success"] == false
+        })
+        .put("campaignStateTransitions", eventArray { true })
+        .put("finalDeviceState", finalDeviceState())
+        .toString(2)
+
+    fun toMarkdown(result: BenchRestartResult): String = buildString {
+        appendLine("# Medtrum real BLE bench restart campaign")
+        appendLine()
+        appendLine("- Campaign ID: `$campaignId`")
+        appendLine("- Known hardware probes: **${result.knownHardwareProbes}**")
+        appendLine("- SET_PATCH while ACTIVE: **${result.setPatchWhileActive}**")
+        appendLine("- SET_PATCH timer effect: **${result.setPatchTimerEffect}**")
+        appendLine("- ACTIVATE while ACTIVE: **${result.activateWhileActive}**")
+        appendLine("- ACTIVATE protocol result: `${result.activateResponseCode ?: "UNKNOWN"}`")
+        appendLine("- ACTIVATE timer effect: **${result.activateTimerEffect}**")
+        appendLine("- Hidden ACTIVE -> activation-ready transition: **${result.hiddenTransition}**")
+        appendLine("- Overall experimental restart: **${result.overallVerdict}**")
+        appendLine("- Message: ${result.message}")
+        appendLine()
+        appendLine("## Device timer snapshots")
+        appendLine()
+        appendLine("| Snapshot | state | deviceStart | deviceAge | patchId | reservoir |")
+        appendLine("|---|---:|---:|---:|---:|---:|")
+        SNAPSHOT_EVENTS.forEach { (label, eventName) ->
+            val fields = fieldsOf(eventName)
+            appendLine(
+                "| $label | ${value(fields, "realPumpState")} | ${timerValue(fields, "deviceReportedStartTime", "deviceReportedStartTimeAvailable")} | " +
+                    "${timerValue(fields, "deviceReportedPatchAge", "deviceReportedPatchAgeAvailable")} | ${value(fields, "patchId")} | ${value(fields, "reservoir")} |"
+            )
+        }
+        appendLine()
+        appendLine("## Command outcomes")
+        appendLine()
+        appendLine("- Real BLE writes attempted: ${result.realBleWritesAttempted}")
+        appendLine("- SET_PATCH: ${result.setPatchWrites}")
+        appendLine("- ACTIVATE: ${result.activateWrites}")
+        appendLine("- PRIME: 0")
+        appendLine("- STOP_PATCH: 0")
+        appendLine("- UNKNOWN/raw: 0")
+        appendLine("- Automatic retries of bench writes: 0")
+        appendLine()
+        appendLine("## SET_PATCH")
+        appendLine("- Events: ${eventNames("bench_real_set_patch_")}")
+        appendLine("- Independent expiration readback: unavailable; acceptance and device telemetry are reported separately.")
+        appendLine()
+        appendLine("## ACTIVATE")
+        appendLine("- Events: ${eventNames("bench_real_activate_")}")
+        appendLine()
+        appendLine("## Final device state")
+        appendLine("- ${finalDeviceState()}")
     }
 
-    fun toMarkdown(result: BenchRestartResult): String {
-        val baseline = fieldsOf("bench_restart_baseline_snapshot")
-        val before = fieldsOf("bench_restart_pre_transition_snapshot")
-        val after = fieldsOf("bench_restart_activate_verify")
-        val subsequent = fieldsOf("bench_restart_final_snapshot")
-        return buildString {
-            appendLine("# Medtrum bench restart campaign")
-            appendLine()
-            appendLine("- Campaign ID: `$campaignId`")
-            appendLine("- Final verdict: **${verdict(result)}**")
-            appendLine("- Message: ${result.message}")
-            appendLine()
-            appendLine("## Baseline")
-            appendFields(baseline, BASELINE_FIELDS)
-            appendLine()
-            appendLine("## SET_PATCH probe")
-            appendLine("- Events: ${eventNames("bench_restart_settings_")}")
-            appendLine()
-            appendLine("## Restart candidate")
-            appendLine("- Events: ${eventNames("bench_restart_transition_")}")
-            appendLine()
-            appendLine("## ACTIVATE")
-            appendLine("- Events: ${eventNames("bench_restart_activate_")}")
-            appendLine()
-            appendLine("## Restart evidence")
-            appendLine("- Device start before: ${value(before, "deviceReportedStartTime")}")
-            appendLine("- Device start after: ${value(after, "deviceReportedStartTime")}")
-            appendLine("- Age before: ${value(before, "deviceReportedPatchAge")}")
-            appendLine("- Age immediately after: ${value(after, "deviceReportedPatchAge")}")
-            appendLine("- Age second sample: ${value(subsequent, "deviceReportedPatchAge")}")
-            appendLine("- Patch ID before/after: ${value(before, "patchId")} / ${value(after, "patchId")}")
-            appendLine("- Sequence before/after: ${value(before, "currentSequence")} / ${value(after, "currentSequence")}")
-            appendLine("- Reservoir before/after: ${value(before, "reservoir")} / ${value(after, "reservoir")}")
-            appendLine()
-            appendLine("## Command summary")
-            appendLine("- TX events: ${events.count { it.name.endsWith("_tx") }}")
-            appendLine("- PRIME TX: 0")
-            appendLine("- STOP_PATCH TX: 0")
-            appendLine()
-            appendLine("## Final device state")
-            appendLine("- ${(baseline + before + after + subsequent)["realPumpState"] ?: "UNKNOWN"}")
+    private fun resultDimensions(result: BenchRestartResult): JSONObject = JSONObject()
+        .put("knownHardwareProbes", result.knownHardwareProbes.name)
+        .put("setPatchWhileActive", result.setPatchWhileActive.name)
+        .put("setPatchTimerEffect", result.setPatchTimerEffect.name)
+        .put("activateWhileActive", result.activateWhileActive.name)
+        .put("activateResponseCode", result.activateResponseCode ?: JSONObject.NULL)
+        .put("activateTimerEffect", result.activateTimerEffect.name)
+        .put("hiddenTransition", result.hiddenTransition.name)
+        .put("overallExperimentalRestart", result.overallVerdict.name)
+
+    private fun commandSummary(result: BenchRestartResult): JSONObject = JSONObject()
+        .put("realBleWritesAttempted", result.realBleWritesAttempted)
+        .put("setPatch", result.setPatchWrites)
+        .put("activate", result.activateWrites)
+        .put("prime", 0)
+        .put("stopPatch", 0)
+        .put("unknownRaw", 0)
+        .put("automaticBenchWriteRetries", 0)
+
+    private fun snapshotTableJson(): JSONArray = JSONArray().apply {
+        SNAPSHOT_EVENTS.forEach { (label, eventName) ->
+            val fields = fieldsOf(eventName)
+            if (fields.isNotEmpty()) {
+                put(
+                    JSONObject()
+                        .put("snapshot", label)
+                        .put("state", encode(fields["realPumpState"]))
+                        .put("deviceStart", timerEncode(fields, "deviceReportedStartTime", "deviceReportedStartTimeAvailable"))
+                        .put("deviceAge", timerEncode(fields, "deviceReportedPatchAge", "deviceReportedPatchAgeAvailable"))
+                        .put("patchId", encode(fields["patchId"]))
+                        .put("reservoir", encode(fields["reservoir"]))
+                        .put("fields", JSONObject(fields.mapValues { encode(it.value) }))
+                )
+            }
         }
     }
-
-    private fun commandSummary(): JSONObject = JSONObject()
-        .put("txEvents", events.count { it.name.endsWith("_tx") })
-        .put("settingsTx", events.count { it.name in SETTINGS_WRITE_EVENTS })
-        .put("candidateTx", events.count { it.name == "bench_restart_transition_tx" })
-        .put("activateTx", events.count { it.name == "bench_restart_activate_tx" })
-        .put("primeTx", 0)
-        .put("stopPatchTx", 0)
-
-    private fun restartEvidence(before: Map<String, Any?>, after: Map<String, Any?>, subsequent: Map<String, Any?>): JSONObject =
-        JSONObject()
-            .put("deviceStartBefore", encode(before["deviceReportedStartTime"]))
-            .put("deviceStartAfter", encode(after["deviceReportedStartTime"]))
-            .put("ageBefore", encode(before["deviceReportedPatchAge"]))
-            .put("ageImmediatelyAfter", encode(after["deviceReportedPatchAge"]))
-            .put("ageSecondSample", encode(subsequent["deviceReportedPatchAge"]))
-            .put("patchIdBefore", encode(before["patchId"]))
-            .put("patchIdAfter", encode(after["patchId"]))
-            .put("sequenceBefore", encode(before["currentSequence"]))
-            .put("sequenceAfter", encode(after["currentSequence"]))
-            .put("reservoirBefore", encode(before["reservoir"]))
-            .put("reservoirAfter", encode(after["reservoir"]))
 
     private fun eventGroup(prefix: String): JSONArray = eventArray { it.name.startsWith(prefix) }
 
@@ -121,11 +134,13 @@ class BenchRestartReport(private val campaignId: String) {
     private fun eventNames(prefix: String): String =
         events.filter { it.name.startsWith(prefix) }.joinToString { it.name }.ifBlank { "none" }
 
-    private fun StringBuilder.appendFields(fields: Map<String, Any?>, names: List<String>) {
-        names.forEach { name -> appendLine("- $name: ${value(fields, name)}") }
-    }
-
     private fun value(fields: Map<String, Any?>, name: String): Any = fields[name] ?: "UNKNOWN"
+
+    private fun timerValue(fields: Map<String, Any?>, valueName: String, availableName: String): Any =
+        if (fields[availableName] == true) value(fields, valueName) else "NOT_EMITTED"
+
+    private fun timerEncode(fields: Map<String, Any?>, valueName: String, availableName: String): Any =
+        if (fields[availableName] == true) encode(fields[valueName]) else JSONObject.NULL
 
     private fun encode(value: Any?): Any = when (value) {
         null         -> JSONObject.NULL
@@ -133,30 +148,20 @@ class BenchRestartReport(private val campaignId: String) {
         else         -> value
     }
 
-    private fun verdict(result: BenchRestartResult): String = when {
-        result.state == BenchRestartState.BLOCKED -> "BLOCKED"
-        result.state == BenchRestartState.FAILED -> "FAILED"
-        result.restartProven -> "CONFIRMED"
-        else -> "NOT_CONFIRMED"
-    }
+    private fun finalDeviceState(): Any = SNAPSHOT_EVENTS
+        .asReversed()
+        .firstNotNullOfOrNull { (_, name) -> fieldsOf(name)["realPumpState"] }
+        ?: "UNKNOWN"
 
     companion object {
-        private val SETTINGS_WRITE_EVENTS = setOf("bench_restart_settings_probe_tx", "bench_restart_settings_restore_tx")
-        private val BASELINE_FIELDS = listOf(
-            "realPumpState",
-            "firmware",
-            "deviceType",
-            "patchId",
-            "deviceReportedStartTime",
-            "deviceReportedPatchAge",
-            "reservoir",
-            "batteryA",
-            "batteryB",
-            "basalType",
-            "basalRate",
-            "currentSequence",
-            "syncedSequence",
-            "activeAlarms"
+        private val SNAPSHOT_EVENTS = listOf(
+            "A0" to "bench_restart_snapshot_a0",
+            "B1" to "bench_real_set_patch_idempotent_snapshot",
+            "B2" to "bench_real_set_patch_toggle_snapshot",
+            "B3" to "bench_real_set_patch_restore_snapshot",
+            "PRE-ACTIVATE" to "bench_restart_pre_activate_snapshot",
+            "C1" to "bench_real_activate_snapshot_c1",
+            "C2" to "bench_real_activate_snapshot_c2"
         )
     }
 }

@@ -34,9 +34,12 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.pump.medtrum.MedtrumPlugin
 import app.aaps.pump.medtrum.MedtrumPump
 import app.aaps.pump.medtrum.R
+import app.aaps.pump.medtrum.bench.BenchPatchSettings
+import app.aaps.pump.medtrum.bench.BenchWriteResult
 import app.aaps.pump.medtrum.ble.MedtrumBleCallback
 import app.aaps.pump.medtrum.ble.MedtrumBleTransport
 import app.aaps.pump.medtrum.code.ConnectionState
+import app.aaps.pump.medtrum.comm.enums.AlarmSetting
 import app.aaps.pump.medtrum.comm.enums.AlarmState
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
 import app.aaps.pump.medtrum.comm.packets.ActivatePacket
@@ -77,6 +80,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.security.MessageDigest
 import javax.inject.Inject
 import kotlin.math.abs
 
@@ -119,6 +123,10 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
 
     private var currentState: State = IdleState()
     private var mPacket: MedtrumPacket? = null
+    private var lastCommandTimedOut = false
+    private var lastCommandTransmitted = false
+    private var lastCommandFailureReason: String? = null
+    @Volatile private var benchReadOnlyRecovery = false
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -307,6 +315,116 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
     fun readBenchRestartBaseline(includeHistory: Boolean): Boolean =
         if (includeHistory) loadEvents()
         else sendPacketAndGetResponse(SynchronizePacket(injector), COMMAND_SYNC_TIMEOUT_SEC)
+
+    /** One known-protocol SET_PATCH write with transport retries disabled. */
+    fun sendBenchSetPatch(settings: BenchPatchSettings): BenchWriteResult {
+        val alarmSetting = AlarmSetting.entries.firstOrNull { (it.code.toInt() and 0xFF) == settings.alarmSetting }
+            ?: return BenchWriteResult(
+                success = false,
+                transmitted = false,
+                transport = "REAL_BLE",
+                failureReason = "Unsupported alarm setting ${settings.alarmSetting}"
+            )
+        val packet = SetPatchPacket(
+            injector,
+            SetPatchPacket.Configuration(
+                alarmSetting = alarmSetting,
+                hourlyMaxInsulin = settings.hourlyMaxInsulin,
+                dailyMaxInsulin = settings.dailyMaxInsulin,
+                patchExpiration = settings.expirationEnabled,
+                autoSuspendEnable = settings.autoSuspendEnabled.toByte(),
+                autoSuspendTime = settings.autoSuspendTime.toByte(),
+                lowSuspend = settings.lowSuspend.toByte(),
+                predictiveLowSuspend = settings.predictiveLowSuspend.toByte(),
+                predictiveLowSuspendRange = settings.predictiveLowSuspendRange.toByte()
+            )
+        )
+        return sendBenchKnownPacket(packet)
+    }
+
+    /** One standard ACTIVATE write with the current profile and no automatic retry. */
+    fun sendBenchActivate(): BenchWriteResult {
+        val pumpProfile = runBlocking { pumpSync.expectedPumpState() }.profile
+            ?: return benchPreparationFailure("No requested profile")
+        val profileBytes = medtrumPump.buildMedtrumProfileArray(pumpProfile)
+            ?: return benchPreparationFailure("Unable to encode current basal profile")
+        return sendBenchKnownPacket(
+            ActivatePacket(injector, profileBytes),
+            profileHash = sha256(profileBytes)
+        )
+    }
+
+    /** Reconnects through the normal authentication FSM, but never writes pump time. */
+    fun recoverBenchReadOnly(): Boolean {
+        benchReadOnlyRecovery = true
+        return try {
+            val deadline = SystemClock.elapsedRealtime() + T.secs(COMMAND_CONNECTING_TIMEOUT_SEC).msecs()
+            var connectIssued = false
+            while (currentState !is ReadyState && SystemClock.elapsedRealtime() < deadline) {
+                if (currentState is IdleState && !connectIssued) {
+                    connectIssued = true
+                    if (!connect("benchReadOnlyRecovery")) return false
+                }
+                SystemClock.sleep(50)
+            }
+            currentState is ReadyState && sendPacketAndGetResponse(SynchronizePacket(injector), COMMAND_SYNC_TIMEOUT_SEC)
+        } finally {
+            benchReadOnlyRecovery = false
+        }
+    }
+
+    private fun sendBenchKnownPacket(packet: MedtrumPacket, profileHash: String? = null): BenchWriteResult {
+        packet.allowTransportRetries = false
+        lastCommandTimedOut = false
+        lastCommandTransmitted = false
+        lastCommandFailureReason = null
+        val startedAt = SystemClock.elapsedRealtime()
+        var request: ByteArray? = null
+        return try {
+            request = packet.getRequest().copyOf()
+            val success = sendPacketAndGetResponse(packet, requestOverride = request)
+            BenchWriteResult(
+                success = success,
+                timedOut = lastCommandTimedOut,
+                responseCode = packet.lastResponseCode,
+                transmitted = lastCommandTransmitted,
+                transport = "REAL_BLE",
+                latencyMs = SystemClock.elapsedRealtime() - startedAt,
+                rawRequest = request,
+                rawResponse = packet.lastResponse?.copyOf(),
+                profileHash = profileHash,
+                failureReason = lastCommandFailureReason
+            )
+        } catch (exception: Exception) {
+            aapsLogger.error(LTag.PUMPCOMM, "Known-protocol bench command failed", exception)
+            if (lastCommandTransmitted) {
+                disconnect("Bench command exception")
+                toState(IdleState())
+            }
+            BenchWriteResult(
+                success = false,
+                timedOut = lastCommandTimedOut,
+                responseCode = packet.lastResponseCode,
+                transmitted = lastCommandTransmitted,
+                transport = "REAL_BLE",
+                latencyMs = SystemClock.elapsedRealtime() - startedAt,
+                rawRequest = request,
+                rawResponse = packet.lastResponse?.copyOf(),
+                profileHash = profileHash,
+                failureReason = exception.message ?: exception.javaClass.simpleName
+            )
+        }
+    }
+
+    private fun benchPreparationFailure(reason: String) = BenchWriteResult(
+        success = false,
+        transmitted = false,
+        transport = "REAL_BLE",
+        failureReason = reason
+    )
+
+    private fun sha256(value: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(value).joinToString("") { "%02x".format(it) }
 
     fun timeUpdateNotification(updateSuccess: Boolean) {
         if (updateSuccess) {
@@ -892,15 +1010,24 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
         currentState.onEnter()
     }
 
-    private fun sendPacketAndGetResponse(packet: MedtrumPacket, timeout: Long = COMMAND_DEFAULT_TIMEOUT_SEC): Boolean {
+    private fun sendPacketAndGetResponse(
+        packet: MedtrumPacket,
+        timeout: Long = COMMAND_DEFAULT_TIMEOUT_SEC,
+        requestOverride: ByteArray? = null
+    ): Boolean {
         var result = false
+        lastCommandTimedOut = false
+        lastCommandTransmitted = false
+        lastCommandFailureReason = null
         if (currentState is ReadyState) {
             toState(CommandState())
             mPacket = packet
-            mPacket?.getRequest()?.let { bleTransport.sendMessage(it) }
+            lastCommandTransmitted = true
+            bleTransport.sendMessage(requestOverride ?: packet.getRequest())
             result = currentState.waitForResponse(timeout)
             SystemClock.sleep(100)
         } else {
+            lastCommandFailureReason = "Service not ready: $currentState"
             aapsLogger.error(LTag.PUMPCOMM, "Send packet attempt when in state: $currentState")
         }
         return result
@@ -940,6 +1067,8 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                 if (System.currentTimeMillis() - startTime > timeoutMillis) {
                     // If we haven't received a response in the specified time, assume the command failed
                     aapsLogger.debug(LTag.PUMPCOMM, "Medtrum Service State timeout")
+                    lastCommandTimedOut = true
+                    lastCommandFailureReason = "Response timeout"
                     // Disconnect to cancel any outstanding commands and go back to ready state
                     disconnect("Timeout")
                     toState(IdleState())
@@ -954,10 +1083,11 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
         fun onSendMessageError(reason: String, isRetryAble: Boolean) {
             aapsLogger.warn(LTag.PUMPCOMM, "onSendMessageError: " + this.toString() + "reason: $reason")
             // Retry 3 times
-            if (sendRetryCounter < 3 && isRetryAble) {
+            if (mPacket?.allowTransportRetries != false && sendRetryCounter < 3 && isRetryAble) {
                 sendRetryCounter++
                 mPacket?.getRequest()?.let { bleTransport.sendMessage(it) }
             } else {
+                lastCommandFailureReason = reason
                 responseHandled = true
                 responseSuccess = false
                 disconnect("onSendMessageError")
@@ -1057,7 +1187,7 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
                 responseSuccess = true
                 val currTime = dateUtil.now()
                 aapsLogger.debug(LTag.PUMPCOMM, "GetTimeState.onIndication systemTime: $currTime, pumpTime: ${medtrumPump.lastTimeReceivedFromPump}")
-                if (abs(medtrumPump.lastTimeReceivedFromPump - currTime) <= T.secs(10).msecs()) { // Allow 10 sec deviation
+                if (benchReadOnlyRecovery || abs(medtrumPump.lastTimeReceivedFromPump - currTime) <= T.secs(10).msecs()) { // Allow 10 sec deviation
                     toState(SynchronizeState())
                 } else {
                     aapsLogger.warn(LTag.PUMPCOMM, "GetTimeState.onIndication time difference too big, setting time")

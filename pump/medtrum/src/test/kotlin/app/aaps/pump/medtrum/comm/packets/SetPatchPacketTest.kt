@@ -24,7 +24,7 @@ class SetPatchPacketTest : MedtrumTestBase() {
         // Inputs
         medtrumPump.desiredPatchExpiration = false
         medtrumPump.desiredAlarmSetting = AlarmSetting.LIGHT_AND_VIBRATE
-        medtrumPump.desiredDailyMaxInsulin = 40
+        medtrumPump.desiredHourlyMaxInsulin = 40
         medtrumPump.desiredDailyMaxInsulin = 180
 
         // Call
@@ -34,5 +34,25 @@ class SetPatchPacketTest : MedtrumTestBase() {
         // Expected values
         val expected = byteArrayOf(35, 1, 32, 3, 16, 14, 0, 0, 12, 0, 0, 30)
         assertThat(result).asList().containsExactlyElementsIn(expected.toList()).inOrder()
+    }
+
+    @Test fun exactBenchConfigurationPreservesAllSetPatchFields() {
+        val packet = SetPatchPacket(
+            packetInjector,
+            SetPatchPacket.Configuration(
+                alarmSetting = AlarmSetting.BEEP_ONLY,
+                hourlyMaxInsulin = 25,
+                dailyMaxInsulin = 99,
+                patchExpiration = true,
+                autoSuspendEnable = 1,
+                autoSuspendTime = 9,
+                lowSuspend = 2,
+                predictiveLowSuspend = 3,
+                predictiveLowSuspendRange = 17
+            )
+        )
+
+        val expected = byteArrayOf(35, 6, -12, 1, -68, 7, 1, 1, 9, 2, 3, 17)
+        assertThat(packet.getRequest()).asList().containsExactlyElementsIn(expected.toList()).inOrder()
     }
 }

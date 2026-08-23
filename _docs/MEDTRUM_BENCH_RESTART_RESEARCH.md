@@ -2,12 +2,18 @@
 
 ## Executive result
 
-The restart evidence gate is **BLOCKED**. No non-STOP, non-PRIME transition
-from a real `ACTIVE`/`ACTIVE_ALT` device state to `PRIMED`/`EJECTED` reached
-`CONFIRMED` confidence. The bench build therefore performs the maximum known
-read-only baseline, exports evidence, and stops before every write.
+The undocumented restart-candidate gate remains **BLOCKED**. No non-STOP,
+non-PRIME transition from a real `ACTIVE`/`ACTIVE_ALT` device state to
+`PRIMED`/`EJECTED` reached `CONFIRMED` confidence.
 
-This is an intentional patch-preservation result, not a partial runtime guess.
+The `apex6` bench build now runs a bounded real-hardware campaign using only
+known AAPS protocol encoders: three `SET_PATCH` writes and one standard
+`ACTIVATE` negative-state probe. Every bench write has automatic retries
+disabled. The hidden/unknown transition remains impossible.
+
+Implementation and unit verification are complete. **No physical patch
+experiment was run while producing this build.** Runtime conclusions must come
+from the archive produced on the off-body device.
 
 ## A. Repository
 
@@ -161,11 +167,13 @@ does exist, but is a different command and must not be confused with decimal
 
 ## J. Restart candidate
 
-Final gate: **BLOCKED**.
+Hidden-transition gate: **BLOCKED**.
 
 No candidate has both an official PDM/capture sender and an independently
 matching base handler. Runtime candidate registry therefore returns `null`.
-No opcode scan, payload fuzzing or fallback list exists.
+This no longer blocks the known-protocol probes; it becomes the final campaign
+stage after the real `SET_PATCH` and rejected/no-effect `ACTIVATE` checks. No
+opcode scan, payload fuzzing or fallback list exists.
 
 ## K. Android implementation
 
@@ -176,8 +184,14 @@ No opcode scan, payload fuzzing or fallback list exists.
   retry activation FSMs are untouched.
 - A queued custom command provides the exclusive serialized command window and
   checks command-queue/bolus safety before the campaign.
-- Production IO is explicitly read-only: two SYNCHRONIZE operations, existing
-  read-only history and trace export.
+- Production IO has a strict two-command whitelist. It sends current
+  `SET_PATCH`, toggles only expiration, restores the original packet, then uses
+  the existing `ActivatePacket` exactly once while real state is still ACTIVE.
+- `SET_PATCH` and `ACTIVATE` disable transport retries. Timeout recovery uses
+  reconnect/authentication/SYNCHRONIZE and skips pump clock writes.
+- Device `START_TIME` and `AGE` have explicit availability markers and raw
+  field-byte diagnostics. Missing device fields are reported as not emitted,
+  never replaced with local values.
 - Minimal process-death journal persists campaign ID, phase, last write command,
   last confirmed real device state, start/update timestamps. Restart marks an
   incomplete campaign `INTERRUPTED`; no write resumes.
@@ -191,8 +205,10 @@ No opcode scan, payload fuzzing or fallback list exists.
 - No local pump-state spoofing is present.
 - No deactivation, unpair, local reset, destructive cleanup or automatic
   ambiguous-write retry is reachable.
-- Current production write whitelist is empty; all three future write-port
-  methods fail closed without touching BLE.
+- Current production write whitelist is exactly `SET_PATCH` and `ACTIVATE`.
+- Maximum campaign counts are `SET_PATCH=3`, `ACTIVATE=1`, `PRIME=0`,
+  `STOP_PATCH=0`, `UNKNOWN=0`.
+- No arbitrary raw packet API or undocumented candidate transport exists.
 
 ## M. Tests
 
@@ -202,7 +218,7 @@ Focused mandatory tests:
 .\gradlew.bat :pump:medtrum:testFullDebugUnitTest --tests "app.aaps.pump.medtrum.bench.BenchRestartCampaignTest"
 ```
 
-Result: **25/25 PASS**.
+Result: **27/27 PASS**.
 
 Full module, lint and application build:
 
@@ -210,22 +226,24 @@ Full module, lint and application build:
 .\gradlew.bat :pump:medtrum:testFullDebugUnitTest :pump:medtrum:lintFullDebug :app:assembleFullDebug
 ```
 
-Result: **140/140 PASS**, 0 failed, 0 skipped; lint 0 errors (47 warnings);
-build successful. The extra report test verifies the blocked JSON
-and Markdown summary and zero PRIME/STOP counts.
+Current module result: **143/143 PASS**, 0 failed. The campaign tests verify
+the real known-command phase ordering, exact settings restoration, one-shot
+timeout behavior, standard `ActivatePacket` reuse, device-evidence collection,
+and the absence of PRIME/STOP/raw command paths. Final lint/build evidence and
+signed APK hashes are recorded with the delivery commit.
 
 Python tooling passed `py_compile`. Static forbidden-symbol audit and
 `git diff --check` are part of final repository verification.
 
 ## N. Build
 
-- Task: `:app:assembleFullDebug`.
-- APK: `X:\Projects\lumiflex\aaps-medtrum-bench-research-de285e0-e72e8e20.apk`.
-- Size: `202,692,475` bytes.
-- SHA-256: `e72e8e20a9fadf6d7cd666cea9985aeb43db8c58b52952cd18484dbbadb7bd1f`.
-- Embedded `BUILDVERSION`: `de285e0-2026.08.23`; application ID
-  `info.nightscout.androidaps`, version `4.0.0-beta-apex5` (`2004`).
-- Signing: normal Gradle Full Debug signing, not a release/production key.
+- Local verification task: `:app:assembleFullDebug`.
+- Release delivery: GitHub Branch CI `fullRelease`, using the repository
+  keystore configured by the owner.
+- Application ID: `info.nightscout.androidaps`.
+- Version: `4.0.0-beta-apex6` (`2005`), strictly newer than apex5.
+- Exact final commit, signed APK path and SHA-256 are recorded in the delivery
+  response after CI completes.
 - No live pump command was run from Codex.
 
 ## O. One-button bench procedure
@@ -235,10 +253,11 @@ Python tooling passed `py_compile`. Static forbidden-symbol audit and
 3. Open Medtrum overview.
 4. Press **Перезапуск — тест** exactly once.
 5. Do not use Change Patch or Deactivate during the campaign.
-6. Wait for `BLOCKED`.
+6. Wait for `COMPLETE`, `FAILED`, or `BLOCKED`.
 7. Share the automatically produced diagnostic archive.
 
-In this build the button cannot restart the patch. It collects the read-only
-baseline and blocks before every settings, candidate or ACTIVATE write. A real
-restart path must not be enabled until an official TX capture or PDM packet
-builder independently confirms the missing base transition.
+The button performs real known-protocol BLE writes. A normal expected outcome
+is `BLOCKED` with known hardware probes marked `COMPLETED`: this means the
+`SET_PATCH`/`ACTIVATE` evidence was collected while the missing undocumented
+transition remains unproven. Analyze the automatic archive before changing the
+campaign or considering any new command.

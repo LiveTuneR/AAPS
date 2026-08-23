@@ -1,5 +1,6 @@
 package app.aaps.pump.medtrum.bench
 
+import android.os.SystemClock
 import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.keys.interfaces.Preferences
@@ -40,13 +41,21 @@ class MedtrumBenchRestartController @Inject constructor(
         val campaignId = UUID.randomUUID().toString()
         journal.begin(campaignId)
         trace.record("bench_restart_requested", mapOf("campaignId" to campaignId))
-        val io = ReadOnlyProductionIo(service, pump)
+        val io = RealBleProductionIo(service, pump)
         val report = BenchRestartReport(campaignId)
         val campaign = BenchRestartCampaign(io) { event ->
-            report.record(event)
-            _status.value = BenchRestartStatus(campaignId, event.state, event.fields["reason"]?.toString().orEmpty())
-            journal.update(campaignId, event)
-            trace.record(event.name, event.fields + ("campaignId" to campaignId))
+            val enriched = event.copy(
+                fields = event.fields + mapOf(
+                    "campaignId" to campaignId,
+                    "deviceSerialFingerprint" to fingerprint(pump.pumpSN),
+                    "firmware" to pump.swVersion,
+                    "monotonicMs" to SystemClock.elapsedRealtime()
+                )
+            )
+            report.record(enriched)
+            _status.value = BenchRestartStatus(campaignId, enriched.state, enriched.fields["reason"]?.toString().orEmpty())
+            journal.update(campaignId, enriched)
+            trace.record(enriched.name, enriched.fields)
         }
         val result = campaign.run(
             BenchRestartRequest(
@@ -74,7 +83,7 @@ class MedtrumBenchRestartController @Inject constructor(
         return result
     }
 
-    private class ReadOnlyProductionIo(
+    private class RealBleProductionIo(
         private val service: MedtrumService?,
         private val pump: MedtrumPump
     ) : BenchRestartIo {
@@ -94,7 +103,9 @@ class MedtrumBenchRestartController @Inject constructor(
             patchId = pump.patchId,
             localPatchStartTime = pump.patchStartTime,
             deviceReportedStartTime = pump.deviceReportedPatchStartTime,
+            deviceReportedStartTimeAvailable = pump.deviceReportedPatchStartTimeAvailable,
             deviceReportedPatchAge = pump.deviceReportedPatchAge,
+            deviceReportedPatchAgeAvailable = pump.deviceReportedPatchAgeAvailable,
             reservoir = pump.reservoir,
             batteryA = pump.batteryVoltage_A,
             batteryB = pump.batteryVoltage_B,
@@ -107,21 +118,46 @@ class MedtrumBenchRestartController @Inject constructor(
             desiredPatchExpiration = pump.desiredPatchExpiration
         )
 
-        override fun readPatchSettings(): BenchPatchSettings? = null
+        override fun readPatchSettings(): BenchPatchSettings = BenchPatchSettings(
+            alarmSetting = pump.desiredAlarmSetting.code.toInt() and 0xFF,
+            hourlyMaxInsulin = pump.desiredHourlyMaxInsulin,
+            dailyMaxInsulin = pump.desiredDailyMaxInsulin,
+            expirationEnabled = pump.desiredPatchExpiration,
+            autoSuspendEnabled = 0,
+            autoSuspendTime = 12,
+            lowSuspend = 0,
+            predictiveLowSuspend = 0,
+            predictiveLowSuspendRange = 30
+        )
 
-        override fun transmitSettings(settings: BenchPatchSettings): BenchWriteResult = forbiddenWrite()
+        override fun transmitSettings(settings: BenchPatchSettings): BenchWriteResult =
+            service?.sendBenchSetPatch(settings) ?: unavailableService()
 
-        override fun transmitCandidate(candidate: ConfirmedRestartCandidate): BenchWriteResult = forbiddenWrite()
+        override fun transmitActivate(): BenchWriteResult = service?.sendBenchActivate() ?: unavailableService()
 
-        override fun transmitActivate(): BenchWriteResult = forbiddenWrite()
+        override fun readOnlyRecovery(): Boolean = service?.recoverBenchReadOnly() == true
 
-        override fun readOnlyRecovery(): Boolean = service?.readBenchRestartBaseline(includeHistory = false) == true
+        override fun waitForTimerObservation() = SystemClock.sleep(TIMER_OBSERVATION_MS)
 
-        private fun forbiddenWrite(): BenchWriteResult = BenchWriteResult(success = false)
+        private fun unavailableService(): BenchWriteResult = BenchWriteResult(
+            success = false,
+            transmitted = false,
+            transport = "REAL_BLE",
+            failureReason = "Medtrum service unavailable"
+        )
 
         private fun tokenFingerprint(token: Long): String {
             val bytes = ByteBuffer.allocate(Long.SIZE_BYTES).putLong(token).array()
             return MessageDigest.getInstance("SHA-256").digest(bytes).take(6).joinToString("") { "%02x".format(it) }
         }
+
+        companion object {
+            private const val TIMER_OBSERVATION_MS = 1_500L
+        }
+    }
+
+    private fun fingerprint(value: Long): String {
+        val bytes = ByteBuffer.allocate(Long.SIZE_BYTES).putLong(value).array()
+        return MessageDigest.getInstance("SHA-256").digest(bytes).take(6).joinToString("") { "%02x".format(it) }
     }
 }

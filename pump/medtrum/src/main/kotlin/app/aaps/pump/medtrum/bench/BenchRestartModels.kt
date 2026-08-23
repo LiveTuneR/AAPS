@@ -40,7 +40,9 @@ data class BenchRestartSnapshot(
     val patchId: Long,
     val localPatchStartTime: Long,
     val deviceReportedStartTime: Long,
+    val deviceReportedStartTimeAvailable: Boolean,
     val deviceReportedPatchAge: Long,
+    val deviceReportedPatchAgeAvailable: Boolean,
     val reservoir: Double,
     val batteryA: Double,
     val batteryB: Double,
@@ -61,7 +63,9 @@ data class BenchRestartSnapshot(
         "patchId" to patchId,
         "localPatchStartTime" to localPatchStartTime,
         "deviceReportedStartTime" to deviceReportedStartTime,
+        "deviceReportedStartTimeAvailable" to deviceReportedStartTimeAvailable,
         "deviceReportedPatchAge" to deviceReportedPatchAge,
+        "deviceReportedPatchAgeAvailable" to deviceReportedPatchAgeAvailable,
         "reservoir" to reservoir,
         "batteryA" to batteryA,
         "batteryB" to batteryB,
@@ -87,6 +91,18 @@ data class BenchPatchSettings(
     val predictiveLowSuspendRange: Int
 ) {
     fun expirationProbe(): BenchPatchSettings = copy(expirationEnabled = !expirationEnabled)
+
+    fun traceFields(): Map<String, Any> = mapOf(
+        "alarmSetting" to alarmSetting,
+        "hourlyMaxInsulin" to hourlyMaxInsulin,
+        "dailyMaxInsulin" to dailyMaxInsulin,
+        "expirationEnabled" to expirationEnabled,
+        "autoSuspendEnabled" to autoSuspendEnabled,
+        "autoSuspendTime" to autoSuspendTime,
+        "lowSuspend" to lowSuspend,
+        "predictiveLowSuspend" to predictiveLowSuspend,
+        "predictiveLowSuspendRange" to predictiveLowSuspendRange
+    )
 }
 
 enum class CandidateConfidence { UNKNOWN, INFERRED, CONFIRMED, DISPROVED }
@@ -105,8 +121,21 @@ data class ConfirmedRestartCandidate(
 data class BenchWriteResult(
     val success: Boolean,
     val timedOut: Boolean = false,
-    val responseCode: Int? = null
+    val responseCode: Int? = null,
+    val transmitted: Boolean = true,
+    val transport: String = "TEST_DOUBLE",
+    val latencyMs: Long = 0,
+    val rawRequest: ByteArray? = null,
+    val rawResponse: ByteArray? = null,
+    val profileHash: String? = null,
+    val failureReason: String? = null
 )
+
+enum class KnownHardwareProbeStatus { NOT_RUN, COMPLETED, PARTIAL, FAILED }
+enum class BenchProbeOutcome { NOT_RUN, ACCEPTED, REJECTED, TIMEOUT, UNKNOWN }
+enum class BenchTimerEffect { NO_RESET_OBSERVED, RESET_OBSERVED, UNKNOWN }
+enum class HiddenTransitionStatus { CONFIRMED, NOT_FOUND, BLOCKED }
+enum class OverallRestartVerdict { CONFIRMED, NOT_CONFIRMED, BLOCKED, FAILED }
 
 data class BenchRestartRequest(
     val engineeringMode: Boolean,
@@ -118,7 +147,18 @@ data class BenchRestartRequest(
 data class BenchRestartResult(
     val state: BenchRestartState,
     val message: String,
-    val restartProven: Boolean = false
+    val restartProven: Boolean = false,
+    val knownHardwareProbes: KnownHardwareProbeStatus = KnownHardwareProbeStatus.NOT_RUN,
+    val setPatchWhileActive: BenchProbeOutcome = BenchProbeOutcome.NOT_RUN,
+    val setPatchTimerEffect: BenchTimerEffect = BenchTimerEffect.UNKNOWN,
+    val activateWhileActive: BenchProbeOutcome = BenchProbeOutcome.NOT_RUN,
+    val activateResponseCode: Int? = null,
+    val activateTimerEffect: BenchTimerEffect = BenchTimerEffect.UNKNOWN,
+    val hiddenTransition: HiddenTransitionStatus = HiddenTransitionStatus.BLOCKED,
+    val overallVerdict: OverallRestartVerdict = OverallRestartVerdict.BLOCKED,
+    val realBleWritesAttempted: Int = 0,
+    val setPatchWrites: Int = 0,
+    val activateWrites: Int = 0
 )
 
 data class BenchRestartEvent(
@@ -133,9 +173,9 @@ interface BenchRestartIo {
     fun snapshot(): BenchRestartSnapshot
     fun readPatchSettings(): BenchPatchSettings?
     fun transmitSettings(settings: BenchPatchSettings): BenchWriteResult
-    fun transmitCandidate(candidate: ConfirmedRestartCandidate): BenchWriteResult
     fun transmitActivate(): BenchWriteResult
     fun readOnlyRecovery(): Boolean
+    fun waitForTimerObservation()
 }
 
 object BenchRestartCandidateRegistry {

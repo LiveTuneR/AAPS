@@ -153,5 +153,5 @@
     <string name="bench_restart_action">Restart — test</string>
     <string name="bench_restart_status_label">Bench restart campaign</string>
     <string name="bench_restart_experimental_title">Experimental Medtrum bench restart</string>
-    <string name="bench_restart_experimental_summary">Off-body research only. Current build collects a read-only baseline and blocks before writes until a restart command is confirmed.</string>
+    <string name="bench_restart_experimental_summary">Off-body research only. Sends known SET_PATCH and ACTIVATE probes once, then blocks before undocumented commands.</string>
 </resources>

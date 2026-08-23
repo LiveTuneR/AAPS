@@ -13,6 +13,11 @@ open class MedtrumPacket(protected var injector: HasAndroidInjector) {
     var opCode: Byte = 0
     var failed = false
     var expectedMinRespLength = RESP_RESULT_END
+    var allowTransportRetries = true
+    var lastResponseCode: Int? = null
+        private set
+    var lastResponse: ByteArray? = null
+        private set
 
     companion object {
 
@@ -35,6 +40,7 @@ open class MedtrumPacket(protected var injector: HasAndroidInjector) {
 
     /**  handles a response from the Medtrum pump, returns true if command was successful, returns false if command failed or waiting for response */
     open fun handleResponse(data: ByteArray): Boolean {
+        lastResponse = data.copyOf()
         // Check for broken packets
         if (RESP_RESULT_END > data.size) {
             failed = true
@@ -44,6 +50,7 @@ open class MedtrumPacket(protected var injector: HasAndroidInjector) {
 
         val incomingOpCode: Byte = data.copyOfRange(RESP_OPCODE_START, RESP_OPCODE_END).first()
         val responseCode = data.copyOfRange(RESP_RESULT_START, RESP_RESULT_END).toInt()
+        lastResponseCode = responseCode
 
         return when {
             incomingOpCode != opCode     -> {

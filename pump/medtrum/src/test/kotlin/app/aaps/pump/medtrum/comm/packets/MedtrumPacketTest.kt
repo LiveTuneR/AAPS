@@ -46,6 +46,8 @@ class MedtrumPacketTest : MedtrumTestBase() {
         // Expected values
         assertThat(result).isTrue()
         assertThat(packet.failed).isFalse()
+        assertThat(packet.lastResponseCode).isEqualTo(0)
+        assertThat(packet.lastResponse).asList().containsExactlyElementsIn(response.toList()).inOrder()
     }
 
     @Test fun handleResponseGivenResponseWhenOpcodeIsIncorrectThenResultFalse() {
@@ -94,6 +96,8 @@ class MedtrumPacketTest : MedtrumTestBase() {
         // Expected values
         assertThat(result).isFalse()
         assertThat(packet.failed).isTrue()
+        assertThat(packet.lastResponseCode).isEqualTo(1)
+        assertThat(packet.lastResponse).asList().containsExactlyElementsIn(response.toList()).inOrder()
     }
 
     @Test fun handleResponseGivenResponseWhenMessageTooShortThenResultFalse() {

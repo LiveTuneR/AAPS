@@ -304,12 +304,17 @@ class NotificationPacket(val injector: HasAndroidInjector) {
 
     private fun handleStartTime(data: ByteArray, offset: Int): Int {
         aapsLogger.debug(LTag.PUMPCOMM, "Start time notification received")
-        newPatchStartTime = medtrumTimeUtil.convertPumpTimeToSystemTimeMillis(data.copyOfRange(offset, offset + 4).toLong())
+        val rawStartTime = data.copyOfRange(offset, offset + SIZE_START_TIME)
+        newPatchStartTime = medtrumTimeUtil.convertPumpTimeToSystemTimeMillis(rawStartTime.toLong())
         medtrumPump.recordDeviceReportedPatchStartTime(newPatchStartTime)
         if (::trace.isInitialized) {
             trace.record(
                 "device_reported_start_time",
-                mapOf("deviceReportedStartTime" to newPatchStartTime, "localPatchStartTimeBefore" to medtrumPump.patchStartTime)
+                mapOf(
+                    "deviceReportedStartTime" to newPatchStartTime,
+                    "localPatchStartTimeBefore" to medtrumPump.patchStartTime,
+                    "rawField" to rawStartTime
+                )
             )
         }
         if (medtrumPump.patchStartTime != newPatchStartTime) {
@@ -379,9 +384,15 @@ class NotificationPacket(val injector: HasAndroidInjector) {
 
     private fun handleAge(data: ByteArray, offset: Int): Int {
         aapsLogger.debug(LTag.PUMPCOMM, "Age notification received")
-        val deviceAge = data.copyOfRange(offset, offset + 4).toLong()
+        val rawAge = data.copyOfRange(offset, offset + SIZE_AGE)
+        val deviceAge = rawAge.toLong()
         medtrumPump.recordDeviceReportedPatchAge(deviceAge)
-        if (::trace.isInitialized) trace.record("device_reported_patch_age", mapOf("deviceReportedPatchAge" to deviceAge))
+        if (::trace.isInitialized) {
+            trace.record(
+                "device_reported_patch_age",
+                mapOf("deviceReportedPatchAge" to deviceAge, "rawField" to rawAge)
+            )
+        }
         aapsLogger.debug(LTag.PUMPCOMM, "Patch age: $deviceAge")
         return offset + SIZE_AGE
     }

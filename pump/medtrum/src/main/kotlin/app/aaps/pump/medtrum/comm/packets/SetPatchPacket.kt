@@ -9,7 +9,10 @@ import app.aaps.pump.medtrum.extension.toByteArray
 import javax.inject.Inject
 import kotlin.math.round
 
-class SetPatchPacket(injector: HasAndroidInjector) : MedtrumPacket(injector) {
+class SetPatchPacket(
+    injector: HasAndroidInjector,
+    private val configuration: Configuration? = null
+) : MedtrumPacket(injector) {
 
     @Inject lateinit var medtrumPump: MedtrumPump
 
@@ -31,16 +34,28 @@ class SetPatchPacket(injector: HasAndroidInjector) : MedtrumPacket(injector) {
          * byte 11: predictiveLowSuspendRange      // Value for auto mode, not used for AAPS
          */
 
-        val alarmSetting: AlarmSetting = medtrumPump.desiredAlarmSetting
-        val hourlyMaxInsulin: Int = round(medtrumPump.desiredHourlyMaxInsulin / 0.05).toInt()
-        val dailyMaxInsulin: Int = round(medtrumPump.desiredDailyMaxInsulin / 0.05).toInt()
-        val patchExpiration: Byte = medtrumPump.desiredPatchExpiration.toByte()
-        val autoSuspendEnable: Byte = 0
-        val autoSuspendTime: Byte = 12 // Not sure why, but pump needs this
-        val lowSuspend: Byte = 0
-        val predictiveLowSuspend: Byte = 0
-        val predictiveLowSuspendRange: Byte = 30 // Not sure why, but pump needs this
+        val values = configuration ?: Configuration(
+            alarmSetting = medtrumPump.desiredAlarmSetting,
+            hourlyMaxInsulin = medtrumPump.desiredHourlyMaxInsulin,
+            dailyMaxInsulin = medtrumPump.desiredDailyMaxInsulin,
+            patchExpiration = medtrumPump.desiredPatchExpiration
+        )
+        val hourlyMaxInsulin = round(values.hourlyMaxInsulin / 0.05).toInt()
+        val dailyMaxInsulin = round(values.dailyMaxInsulin / 0.05).toInt()
 
-        return byteArrayOf(opCode) + alarmSetting.code + hourlyMaxInsulin.toByteArray(2) + dailyMaxInsulin.toByteArray(2) + patchExpiration + autoSuspendEnable + autoSuspendTime + lowSuspend + predictiveLowSuspend + predictiveLowSuspendRange
+        return byteArrayOf(opCode) + values.alarmSetting.code + hourlyMaxInsulin.toByteArray(2) + dailyMaxInsulin.toByteArray(2) + values.patchExpiration.toByte() +
+            values.autoSuspendEnable + values.autoSuspendTime + values.lowSuspend + values.predictiveLowSuspend + values.predictiveLowSuspendRange
     }
+
+    data class Configuration(
+        val alarmSetting: AlarmSetting,
+        val hourlyMaxInsulin: Int,
+        val dailyMaxInsulin: Int,
+        val patchExpiration: Boolean,
+        val autoSuspendEnable: Byte = 0,
+        val autoSuspendTime: Byte = 12,
+        val lowSuspend: Byte = 0,
+        val predictiveLowSuspend: Byte = 0,
+        val predictiveLowSuspendRange: Byte = 30
+    )
 }

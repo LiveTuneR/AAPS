@@ -130,5 +130,5 @@
     <string name="bench_restart_action">Перезапуск — тест</string>
     <string name="bench_restart_status_label">Тестовый перезапуск</string>
     <string name="bench_restart_experimental_title">Экспериментальный перезапуск Medtrum</string>
-    <string name="bench_restart_experimental_summary">Только для исследования снятого с тела патча. Текущая сборка собирает данные чтением и блокируется до отправки, пока команда перезапуска не подтверждена.</string>
+    <string name="bench_restart_experimental_summary">Только для снятого с тела патча. Один раз отправляет известные SET_PATCH и ACTIVATE, затем блокирует неизвестные команды.</string>
 </resources>

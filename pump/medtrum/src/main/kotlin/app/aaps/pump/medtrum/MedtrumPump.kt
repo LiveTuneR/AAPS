@@ -269,21 +269,29 @@ class MedtrumPump @Inject constructor(
     var patchAge = 0L // Kept for normal driver compatibility.
     var deviceReportedPatchStartTime = 0L
         private set
+    var deviceReportedPatchStartTimeAvailable = false
+        private set
     var deviceReportedPatchAge = 0L
+        private set
+    var deviceReportedPatchAgeAvailable = false
         private set
 
     fun recordDeviceReportedPatchStartTime(value: Long) {
         deviceReportedPatchStartTime = value
+        deviceReportedPatchStartTimeAvailable = true
     }
 
     fun recordDeviceReportedPatchAge(value: Long) {
         deviceReportedPatchAge = value
+        deviceReportedPatchAgeAvailable = true
         patchAge = value
     }
 
     fun clearDeviceReportedSessionTelemetry() {
         deviceReportedPatchStartTime = 0L
+        deviceReportedPatchStartTimeAvailable = false
         deviceReportedPatchAge = 0L
+        deviceReportedPatchAgeAvailable = false
     }
 
     // bolus status

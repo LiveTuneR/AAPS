@@ -145,6 +145,8 @@ class SynchronizePacketTest : MedtrumTestBase() {
         assertThat(packet.medtrumPump.lastBasalPatchId).isEqualTo(14)
         assertThat(packet.medtrumPump.lastBasalStartTime).isEqualTo(1685126612000)
         assertThat(packet.medtrumPump.patchAge).isEqualTo(8123)
+        assertThat(packet.medtrumPump.deviceReportedPatchAgeAvailable).isTrue()
+        assertThat(packet.medtrumPump.deviceReportedPatchStartTimeAvailable).isTrue()
         assertThat(packet.medtrumPump.reservoir).isWithin(0.01).of(186.80)
         assertThat(packet.medtrumPump.patchStartTime).isEqualTo(1685120120000)
         assertThat(packet.medtrumPump.batteryVoltage_A).isWithin(0.01).of(5.96875)

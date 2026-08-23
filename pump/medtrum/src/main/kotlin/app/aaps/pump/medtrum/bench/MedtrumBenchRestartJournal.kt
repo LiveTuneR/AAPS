@@ -106,10 +106,10 @@ class MedtrumBenchRestartJournal @Inject constructor(
     companion object {
         private val TERMINAL_STATES = setOf(BenchRestartState.COMPLETE, BenchRestartState.FAILED, BenchRestartState.BLOCKED, BenchRestartState.INTERRUPTED)
         private val WRITE_EVENTS = setOf(
-            "bench_restart_settings_probe_tx",
-            "bench_restart_settings_restore_tx",
-            "bench_restart_transition_tx",
-            "bench_restart_activate_tx"
+            "bench_real_set_patch_idempotent_tx",
+            "bench_real_set_patch_toggle_tx",
+            "bench_real_set_patch_restore_tx",
+            "bench_real_activate_active_state_tx"
         )
     }
 }
