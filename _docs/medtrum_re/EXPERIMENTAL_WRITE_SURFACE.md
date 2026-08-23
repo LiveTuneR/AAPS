@@ -1,8 +1,9 @@
 # Experimental write surface
 
-This surface is available only in engineering mode with the explicit Medtrum
-bench option enabled. It is intended exclusively for a physically off-body,
-already `ACTIVE` Medtrum Nano running firmware `1.80.89`.
+This surface is available in normal and Simple mode with the explicit Medtrum
+bench option enabled. Engineering mode is not required. It is intended
+exclusively for a physically off-body, already `ACTIVE` Medtrum Nano running
+firmware `1.80.89`.
 
 ## Whitelist
 

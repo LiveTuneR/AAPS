@@ -2,7 +2,6 @@ package app.aaps.pump.medtrum.bench
 
 import android.os.SystemClock
 import app.aaps.core.data.pump.defs.PumpType
-import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.pump.medtrum.MedtrumPump
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
@@ -21,7 +20,6 @@ import javax.inject.Singleton
 
 @Singleton
 class MedtrumBenchRestartController @Inject constructor(
-    private val config: Config,
     private val preferences: Preferences,
     private val pump: MedtrumPump,
     private val trace: MedtrumBleTrace,
@@ -59,7 +57,6 @@ class MedtrumBenchRestartController @Inject constructor(
         }
         val result = campaign.run(
             BenchRestartRequest(
-                engineeringMode = config.isEngineeringMode(),
                 experimentalEnabled = preferences.get(MedtrumBooleanKey.MedtrumBenchRestartExperimental),
                 queueSafe = command.queueWasSafe,
                 bolusSafe = command.bolusWasSafe

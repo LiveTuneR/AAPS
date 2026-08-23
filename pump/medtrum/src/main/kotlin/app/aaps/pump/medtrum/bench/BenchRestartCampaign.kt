@@ -21,7 +21,7 @@ class BenchRestartCampaign(
     fun run(request: BenchRestartRequest): BenchRestartResult {
         resetResultState()
         event(BenchRestartState.PREFLIGHT, "bench_restart_preflight")
-        if (!request.engineeringMode || !request.experimentalEnabled) return blocked("Experimental option is disabled")
+        if (!request.experimentalEnabled) return blocked("Experimental option is disabled")
         if (!request.queueSafe || !request.bolusSafe) return blocked("Command queue or bolus state is unsafe")
 
         event(BenchRestartState.ACQUIRE_EXCLUSIVE_ACCESS, "bench_restart_lock_acquired")

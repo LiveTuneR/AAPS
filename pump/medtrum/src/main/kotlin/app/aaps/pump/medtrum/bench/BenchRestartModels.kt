@@ -138,7 +138,6 @@ enum class HiddenTransitionStatus { CONFIRMED, NOT_FOUND, BLOCKED }
 enum class OverallRestartVerdict { CONFIRMED, NOT_CONFIRMED, BLOCKED, FAILED }
 
 data class BenchRestartRequest(
-    val engineeringMode: Boolean,
     val experimentalEnabled: Boolean,
     val queueSafe: Boolean,
     val bolusSafe: Boolean
@@ -184,6 +183,5 @@ object BenchRestartCandidateRegistry {
 }
 
 object BenchRestartVisibility {
-    fun isVisible(engineeringMode: Boolean, experimentalEnabled: Boolean): Boolean =
-        engineeringMode && experimentalEnabled
+    fun isVisible(experimentalEnabled: Boolean): Boolean = experimentalEnabled
 }

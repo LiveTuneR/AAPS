@@ -1,14 +1,19 @@
 package app.aaps.pump.medtrum.bench
 
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
+import app.aaps.pump.medtrum.keys.MedtrumBooleanKey
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 import java.io.File
 
 class BenchRestartCampaignTest {
 
-    @Test fun `1 button hidden when experimental flag is false`() {
-        assertThat(BenchRestartVisibility.isVisible(engineeringMode = true, experimentalEnabled = false)).isFalse()
+    @Test fun `1 experimental option is available in normal and simple modes`() {
+        val key = MedtrumBooleanKey.MedtrumBenchRestartExperimental
+        assertThat(key.engineeringModeOnly).isFalse()
+        assertThat(key.defaultedBySM).isFalse()
+        assertThat(BenchRestartVisibility.isVisible(experimentalEnabled = false)).isFalse()
+        assertThat(BenchRestartVisibility.isVisible(experimentalEnabled = true)).isTrue()
     }
 
     @Test fun `2 unknown firmware blocks before writes`() {
@@ -217,7 +222,7 @@ class BenchRestartCampaignTest {
         events: MutableList<BenchRestartEvent>? = null
     ) = BenchRestartCampaign(io, candidateProvider = { candidate }, emit = { event -> events?.add(event) })
 
-    private fun validRequest() = BenchRestartRequest(true, true, queueSafe = true, bolusSafe = true)
+    private fun validRequest() = BenchRestartRequest(experimentalEnabled = true, queueSafe = true, bolusSafe = true)
 
     private fun assertBlockedWithoutWrites(result: BenchRestartResult, io: FakeIo) {
         assertThat(result.state).isEqualTo(BenchRestartState.BLOCKED)

@@ -13,7 +13,6 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
-import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -85,7 +84,6 @@ class MedtrumOverviewViewModel @Inject constructor(
     private val ch: ConcentrationHelper,
     private val preferences: Preferences,
     private val uel: UserEntryLogger,
-    private val config: Config,
     private val benchRestartController: MedtrumBenchRestartController,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -355,7 +353,6 @@ class MedtrumOverviewViewModel @Inject constructor(
                     icon = Icons.Filled.Refresh,
                     category = ActionCategory.MANAGEMENT,
                     visible = BenchRestartVisibility.isVisible(
-                        config.isEngineeringMode(),
                         preferences.get(app.aaps.pump.medtrum.keys.MedtrumBooleanKey.MedtrumBenchRestartExperimental)
                     ),
                     enabled = benchRestartStatus.state in setOf(

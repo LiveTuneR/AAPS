@@ -43,7 +43,6 @@ enum class MedtrumBooleanKey(
         defaultValue = false,
         titleResId = R.string.bench_restart_experimental_title,
         summaryResId = R.string.bench_restart_experimental_summary,
-        engineeringModeOnly = true,
         exportable = false
     ),
 }

@@ -178,8 +178,8 @@ opcode scan, payload fuzzing or fallback list exists.
 ## K. Android implementation
 
 - One management action: `Restart — test` / `Перезапуск — тест`.
-- Visibility requires engineering mode **and** the explicit non-exportable
-  Medtrum experimental preference; default is hidden/off.
+- The explicit non-exportable Medtrum experimental preference is available in
+  normal and Simple mode; the action is visible after opt-in. Default is off.
 - Dedicated `BenchRestartCampaign` FSM and controller; normal Change Patch and
   retry activation FSMs are untouched.
 - A queued custom command provides the exclusive serialized command window and
@@ -241,7 +241,8 @@ Python tooling passed `py_compile`. Static forbidden-symbol audit and
 - Release delivery: GitHub Branch CI `fullRelease`, using the repository
   keystore configured by the owner.
 - Application ID: `info.nightscout.androidaps`.
-- Version: `4.0.0-beta-apex6` (`2005`), strictly newer than apex5.
+- Version: `4.0.0-beta-apex7` (`2006`), strictly newer than apex5 and the
+  engineering-mode-gated apex6 build.
 - Exact final commit, signed APK path and SHA-256 are recorded in the delivery
   response after CI completes.
 - No live pump command was run from Codex.
@@ -249,7 +250,8 @@ Python tooling passed `py_compile`. Static forbidden-symbol audit and
 ## O. One-button bench procedure
 
 1. Verify the patch is physically off-body and `ACTIVE`.
-2. Enable engineering mode and the Medtrum experimental option.
+2. Enable the Medtrum experimental option in Advanced settings. Engineering
+   mode is not required.
 3. Open Medtrum overview.
 4. Press **Перезапуск — тест** exactly once.
 5. Do not use Change Patch or Deactivate during the campaign.

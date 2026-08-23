@@ -1,7 +1,6 @@
 package app.aaps.pump.medtrum.compose
 
 import android.content.Context
-import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -23,6 +22,7 @@ import app.aaps.pump.medtrum.code.ConnectionState
 import app.aaps.pump.medtrum.comm.enums.AlarmState
 import app.aaps.pump.medtrum.comm.enums.BasalType
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
+import app.aaps.pump.medtrum.keys.MedtrumBooleanKey
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,7 +58,6 @@ internal class MedtrumOverviewViewModelTest {
     @Mock private lateinit var ch: ConcentrationHelper
     @Mock private lateinit var preferences: Preferences
     @Mock private lateinit var uel: UserEntryLogger
-    @Mock private lateinit var config: Config
     @Mock private lateinit var benchRestartController: MedtrumBenchRestartController
     @Mock private lateinit var context: Context
 
@@ -124,7 +123,7 @@ internal class MedtrumOverviewViewModelTest {
 
     private fun createViewModel() = MedtrumOverviewViewModel(
         aapsLogger, rh, profileFunction, commandQueue, rxBus, dateUtil,
-        medtrumPlugin, medtrumPump, ch, preferences, uel, config, benchRestartController, context
+        medtrumPlugin, medtrumPump, ch, preferences, uel, benchRestartController, context
     )
 
     @Test
@@ -157,5 +156,17 @@ internal class MedtrumOverviewViewModelTest {
         // disconnected + pump-active -> refresh enabled
         assertThat(state.primaryActions.first { it.label == "Refresh" }.enabled).isTrue()
         assertThat(state.managementActions.map { it.label }).contains("Unpair")
+    }
+
+    @Test
+    fun benchRestart_isAvailableWithoutEngineeringModeAfterExplicitOptIn() {
+        whenever(preferences.get(MedtrumBooleanKey.MedtrumBenchRestartExperimental)).thenReturn(true)
+        whenever(medtrumPump.connectionState).thenReturn(ConnectionState.DISCONNECTED)
+        whenever(medtrumPump.pumpState).thenReturn(MedtrumPumpState.NONE)
+        whenever(medtrumPump.pumpSN).thenReturn(0L)
+
+        val state = createViewModel().uiState.value
+
+        assertThat(state.managementActions.map { it.label }).contains("Restart - test")
     }
 }
