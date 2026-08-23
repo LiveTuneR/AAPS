@@ -14,7 +14,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import app.aaps.core.interfaces.protection.ProtectionCheck
@@ -48,7 +47,7 @@ class MedtrumComposeContent(
     ) {
         val overviewViewModel: MedtrumOverviewViewModel = hiltViewModel()
         val patchViewModel: MedtrumPatchViewModel = hiltViewModel()
-        val context = LocalContext.current
+        val exportFailedMessage = stringResource(MedtrumR.string.ble_diagnostic_export_failed)
         val snackbar = LocalSnackbarHostState.current
         val scope = rememberCoroutineScope()
 
@@ -73,7 +72,7 @@ class MedtrumComposeContent(
                 scope.launch {
                     trace.record("manual_export_requested")
                     if (runCatching { trace.share() }.isFailure) {
-                        snackbar.showSnackbar(context.getString(MedtrumR.string.ble_diagnostic_export_failed))
+                        snackbar.showSnackbar(exportFailedMessage)
                     }
                 }
             }) {

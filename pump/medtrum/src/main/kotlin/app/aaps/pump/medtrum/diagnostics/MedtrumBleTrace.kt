@@ -43,7 +43,7 @@ class MedtrumBleTrace @Inject constructor(
         }
     }
 
-    suspend fun export(): File = withContext(dispatcher) {
+    suspend fun export(additionalEntries: Map<String, String> = emptyMap()): File = withContext(dispatcher) {
         traceDirectory.mkdirs()
         exportDirectory.mkdirs()
         val output = File(exportDirectory, "medtrum-ble-${System.currentTimeMillis()}.zip")
@@ -60,6 +60,12 @@ class MedtrumBleTrace @Inject constructor(
             zip.putNextEntry(ZipEntry("metadata.json"))
             zip.write(metadata.toByteArray())
             zip.closeEntry()
+            additionalEntries.forEach { (name, content) ->
+                require(name == File(name).name) { "Archive entry must be a plain file name" }
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(content.toByteArray())
+                zip.closeEntry()
+            }
             traceFiles().reversed().forEach { file ->
                 zip.putNextEntry(ZipEntry(file.name))
                 file.inputStream().use { it.copyTo(zip) }

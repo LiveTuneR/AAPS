@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "artifacts": [
+    {
+      "path": "X:\\Projects\\lumiflex\\Medtrum_EasyTouch_mmol_L_1.4.67_APKPure.apk",
+      "size": 43852983,
+      "sha256": "1f7fa7c77a7835421f429bf111ec72eabba5b0770840e3ee02e2693b1c12e1a3",
+      "kind": "android-apk",
+      "architecture": "Android multi-ABI",
+      "load_address": "UNKNOWN"
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\analysis\\easytouch_1.4.67\\assets\\upgrade\\fm008_latest.hex",
+      "size": 7487866,
+      "sha256": "999e56068780a4dae8233d9325a1382e9a2206ea1152c53f84b1a9276a9f34b0",
+      "kind": "intel-hex",
+      "architecture": "ARM Thumb (vector-table inference)",
+      "load_address": [
+        {
+          "start": "0x80f8000",
+          "end_exclusive": "0x80f8014"
+        },
+        {
+          "start": "0x90000000",
+          "end_exclusive": "0x90000234"
+        },
+        {
+          "start": "0x90000238",
+          "end_exclusive": "0x9024bae4"
+        },
+        {
+          "start": "0x9024bae8",
+          "end_exclusive": "0x9028987f"
+        },
+        {
+          "start": "0x90289880",
+          "end_exclusive": "0x90289ea4"
+        }
+      ]
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\analysis\\easytouch_1.4.67\\assets\\upgrade\\bin_file_jn.bin",
+      "size": 106739,
+      "sha256": "5e6e7894dfa2975e756bc24b3f0cad6eb7984eee894a8afe9fe82e3712eebd86",
+      "kind": "raw-firmware",
+      "architecture": "ARM Cortex-M Thumb (vector-table inference)",
+      "load_address": "0x26000",
+      "load_address_confidence": "STRONG_INFERENCE",
+      "load_address_evidence": "Vector targets and reset handler land on plausible Thumb functions only at this base",
+      "vector_initial_sp": "0x20006420",
+      "vector_reset": "0x3ff9d"
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\analysis\\easytouch_1.4.67\\assets\\upgrade\\bin_file_ty.bin",
+      "size": 48684,
+      "sha256": "679bdfe5a87ea6a1e8b9e245f92774e6d86624f3f1433cb41c26bd680997a4bf",
+      "kind": "raw-firmware",
+      "architecture": "ARM Cortex-M Thumb (vector-table inference)",
+      "load_address": "0x16000",
+      "load_address_confidence": "STRONG_INFERENCE",
+      "load_address_evidence": "Vector targets land on plausible Thumb functions at this base; image appears CGM-related, not pump base",
+      "vector_initial_sp": "0x20003ec8",
+      "vector_reset": "0x1627d"
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\analysis\\easytouch_1.4.67\\jadx\\resources\\assets\\libjiagu.so",
+      "size": 837012,
+      "sha256": "2312314fad6d8f315940ccf2c616024a136368894dddab7ce738a770f64df47d",
+      "kind": "elf-shared-object",
+      "architecture": "ARM 32-bit",
+      "load_address": "UNKNOWN"
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\analysis\\easytouch_1.4.67\\jadx\\resources\\assets\\libjiagu_a64.so",
+      "size": 1155504,
+      "sha256": "1042a284aa476e36b249d1914d9713ed7f240d2d4db6ddf584c93063586eb818",
+      "kind": "elf-shared-object",
+      "architecture": "AArch64 64-bit",
+      "load_address": "UNKNOWN"
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\medtrum-ble-1786642965648.zip",
+      "size": 7992,
+      "sha256": "667c72a8703a6f2532d8cfd8e6e2580833a0ea89db154022170f4e43c8cd6611",
+      "kind": "zip-archive",
+      "architecture": "UNKNOWN",
+      "load_address": "UNKNOWN"
+    },
+    {
+      "path": "X:\\Projects\\lumiflex\\medtrum-ble-1786894052421.zip",
+      "size": 810766,
+      "sha256": "bde58acb5bdabbb5b6d2524141003aaa9254c737c9ac5cb345983645f98084be",
+      "kind": "zip-archive",
+      "architecture": "UNKNOWN",
+      "load_address": "UNKNOWN"
+    }
+  ]
+}

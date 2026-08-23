@@ -127,4 +127,8 @@
     <string name="bolus_error_reason_pump_error">Ошибка помпы</string>
     <string name="ble_diagnostic_export">Экспорт диагностики Medtrum BLE</string>
     <string name="ble_diagnostic_export_failed">Не удалось экспортировать диагностику Medtrum BLE</string>
+    <string name="bench_restart_action">Перезапуск — тест</string>
+    <string name="bench_restart_status_label">Тестовый перезапуск</string>
+    <string name="bench_restart_experimental_title">Экспериментальный перезапуск Medtrum</string>
+    <string name="bench_restart_experimental_summary">Только для исследования снятого с тела патча. Текущая сборка собирает данные чтением и блокируется до отправки, пока команда перезапуска не подтверждена.</string>
 </resources>

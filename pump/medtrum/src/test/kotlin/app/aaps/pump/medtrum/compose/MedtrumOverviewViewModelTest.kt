@@ -1,6 +1,7 @@
 package app.aaps.pump.medtrum.compose
 
 import android.content.Context
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -15,6 +16,8 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.StatusLevel
 import app.aaps.pump.medtrum.MedtrumPlugin
 import app.aaps.pump.medtrum.MedtrumPump
+import app.aaps.pump.medtrum.bench.BenchRestartStatus
+import app.aaps.pump.medtrum.bench.MedtrumBenchRestartController
 import app.aaps.pump.medtrum.R
 import app.aaps.pump.medtrum.code.ConnectionState
 import app.aaps.pump.medtrum.comm.enums.AlarmState
@@ -55,6 +58,8 @@ internal class MedtrumOverviewViewModelTest {
     @Mock private lateinit var ch: ConcentrationHelper
     @Mock private lateinit var preferences: Preferences
     @Mock private lateinit var uel: UserEntryLogger
+    @Mock private lateinit var config: Config
+    @Mock private lateinit var benchRestartController: MedtrumBenchRestartController
     @Mock private lateinit var context: Context
 
     private val medtrumPlugin: MedtrumPlugin = mock()
@@ -87,6 +92,7 @@ internal class MedtrumOverviewViewModelTest {
         // PumpCommunicationStatus init subscribes to these two flows at construction
         whenever(rxBus.toFlow(EventPumpStatusChanged::class.java)).thenReturn(emptyFlow())
         whenever(rxBus.toFlow(EventQueueChanged::class.java)).thenReturn(emptyFlow())
+        whenever(benchRestartController.status).thenReturn(MutableStateFlow(BenchRestartStatus()))
 
         // Formatting collaborator (base basal rate row is always built)
         whenever(ch.basalRateString(any(), any(), any())).thenReturn("0.00 U/h")
@@ -112,11 +118,13 @@ internal class MedtrumOverviewViewModelTest {
         whenever(rh.gs(R.string.reset_alarms_label)).thenReturn("Reset alarms")
         whenever(rh.gs(R.string.change_patch_label)).thenReturn("Change patch")
         whenever(rh.gs(CoreUiR.string.pump_unpair)).thenReturn("Unpair")
+        whenever(rh.gs(R.string.bench_restart_action)).thenReturn("Restart - test")
+        whenever(rh.gs(R.string.bench_restart_status_label)).thenReturn("Bench restart")
     }
 
     private fun createViewModel() = MedtrumOverviewViewModel(
         aapsLogger, rh, profileFunction, commandQueue, rxBus, dateUtil,
-        medtrumPlugin, medtrumPump, ch, preferences, uel, context
+        medtrumPlugin, medtrumPump, ch, preferences, uel, config, benchRestartController, context
     )
 
     @Test

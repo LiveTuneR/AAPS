@@ -29,6 +29,7 @@ import app.aaps.core.interfaces.pump.TemporaryBasalStorage
 import app.aaps.core.interfaces.pump.defs.fillFor
 import app.aaps.core.interfaces.pump.mapState
 import app.aaps.core.interfaces.queue.CommandQueue
+import app.aaps.core.interfaces.queue.CustomCommand
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
 import app.aaps.core.interfaces.rx.bus.RxBus
@@ -43,6 +44,9 @@ import app.aaps.core.keys.interfaces.withEntriesProvider
 import app.aaps.core.ui.compose.icons.IcPluginMedtrum
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
+import app.aaps.pump.medtrum.bench.MedtrumBenchRestartCommand
+import app.aaps.pump.medtrum.bench.MedtrumBenchRestartController
+import app.aaps.pump.medtrum.bench.BenchRestartState
 import app.aaps.pump.medtrum.compose.MedtrumComposeContent
 import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
 import app.aaps.pump.medtrum.keys.MedtrumBooleanKey
@@ -85,6 +89,7 @@ class MedtrumPlugin @Inject constructor(
     private val protectionCheck: ProtectionCheck,
     private val blePreCheck: BlePreCheck,
     private val medtrumBleTrace: MedtrumBleTrace,
+    private val benchRestartController: MedtrumBenchRestartController,
 ) : PumpPluginBase(
     pluginDescription = PluginDescription()
         .mainType(PluginType.PUMP)
@@ -396,6 +401,15 @@ class MedtrumPlugin @Inject constructor(
         return pumpEnactResultProvider.get().success(connectionOK)
     }
 
+    override fun executeCustomCommand(customCommand: CustomCommand): PumpEnactResult? =
+        if (customCommand is MedtrumBenchRestartCommand) {
+            val result = benchRestartController.execute(customCommand, medtrumService)
+            pumpEnactResultProvider.get()
+                .success(result.state in setOf(BenchRestartState.COMPLETE, BenchRestartState.BLOCKED))
+                .enacted(false)
+                .comment(result.message)
+        } else null
+
     override fun deactivate(): PumpEnactResult {
         val connectionOK = medtrumService?.deactivatePatch() == true
         return pumpEnactResultProvider.get().success(connectionOK)
@@ -430,7 +444,8 @@ class MedtrumPlugin @Inject constructor(
                     key = "medtrum_advanced",
                     titleResId = app.aaps.core.ui.R.string.advanced_settings_title,
                     items = listOf(
-                        MedtrumBooleanKey.MedtrumScanOnConnectionErrors
+                        MedtrumBooleanKey.MedtrumScanOnConnectionErrors,
+                        MedtrumBooleanKey.MedtrumBenchRestartExperimental
                     )
                 )
             ),

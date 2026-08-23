@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "gate": "BLOCKED",
+  "confirmed_candidate": null,
+  "candidates": [
+    {
+      "id": "decimal-opcode-17",
+      "opcode": "0x11",
+      "pdm_sender_evidence": "NONE",
+      "base_handler_evidence": "DISPATCHER_SLOT_ABSENT",
+      "request_format": "UNSUPPORTED",
+      "allowed_source_states": [],
+      "resulting_state": "NONE",
+      "timer_effect": "NONE",
+      "nvm_effect": "NONE",
+      "reservoir_effect": "NONE",
+      "terminal_state_risk": "NOT_APPLICABLE",
+      "confidence": "DISPROVED"
+    },
+    {
+      "id": "opcode-0x94",
+      "opcode": "0x94",
+      "pdm_sender_evidence": "NONE_RECOVERED",
+      "base_handler_evidence": "HANDLER_0x2c240_CONFIRMED",
+      "request_format": "LARGE_STRUCTURED_CONFIGURATION_PAYLOAD_EXACT_SCHEMA_INCOMPLETE",
+      "allowed_source_states": ["EJECTED"],
+      "resulting_state": "ACTIVE",
+      "timer_effect": "SHARES_UNRESOLVED_POST_ACTIVATION_CALLS_0x32a88_0x33566",
+      "nvm_effect": "MULTIPLE_STORAGE_WRITES_PRESENT_EXACT_SEMANTICS_INCOMPLETE",
+      "reservoir_effect": "UNKNOWN",
+      "terminal_state_risk": "REJECTED_FROM_ACTIVE_BEFORE_EFFECT",
+      "confidence": "DISPROVED_FOR_ACTIVE_RESTART"
+    },
+    {
+      "id": "inj_jump_prime",
+      "opcode": null,
+      "pdm_sender_evidence": "STRING_WITHOUT_EXECUTABLE_XREF",
+      "base_handler_evidence": "NONE_LINKED",
+      "request_format": "UNKNOWN",
+      "allowed_source_states": "UNKNOWN",
+      "resulting_state": "UNKNOWN",
+      "timer_effect": "UNKNOWN",
+      "nvm_effect": "UNKNOWN",
+      "reservoir_effect": "UNKNOWN",
+      "terminal_state_risk": "UNKNOWN",
+      "confidence": "UNKNOWN"
+    }
+  ]
+}

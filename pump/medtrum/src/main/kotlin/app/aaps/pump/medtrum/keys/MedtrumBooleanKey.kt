@@ -38,4 +38,12 @@ enum class MedtrumBooleanKey(
         titleResId = R.string.scan_on_connection_error_title,
         summaryResId = R.string.scan_on_connection_error_summary
     ),
+    MedtrumBenchRestartExperimental(
+        key = "medtrum_bench_restart_experimental",
+        defaultValue = false,
+        titleResId = R.string.bench_restart_experimental_title,
+        summaryResId = R.string.bench_restart_experimental_summary,
+        engineeringModeOnly = true,
+        exportable = false
+    ),
 }

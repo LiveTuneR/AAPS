@@ -13,6 +13,7 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
+import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
@@ -35,6 +36,11 @@ import app.aaps.core.ui.compose.pump.StatusBanner
 import app.aaps.core.ui.compose.pump.tickerFlow
 import app.aaps.pump.medtrum.MedtrumPlugin
 import app.aaps.pump.medtrum.MedtrumPump
+import app.aaps.pump.medtrum.bench.BenchRestartState
+import app.aaps.pump.medtrum.bench.BenchRestartStatus
+import app.aaps.pump.medtrum.bench.BenchRestartVisibility
+import app.aaps.pump.medtrum.bench.MedtrumBenchRestartCommand
+import app.aaps.pump.medtrum.bench.MedtrumBenchRestartController
 import app.aaps.pump.medtrum.R
 import app.aaps.pump.medtrum.code.ConnectionState
 import app.aaps.pump.medtrum.code.PatchStep
@@ -79,6 +85,8 @@ class MedtrumOverviewViewModel @Inject constructor(
     private val ch: ConcentrationHelper,
     private val preferences: Preferences,
     private val uel: UserEntryLogger,
+    private val config: Config,
+    private val benchRestartController: MedtrumBenchRestartController,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -101,6 +109,7 @@ class MedtrumOverviewViewModel @Inject constructor(
         medtrumPump.lastBolusAmountFlow,
         medtrumPump.lastConnectionFlow,
         communicationStatus.refreshTrigger,
+        benchRestartController.status,
         tickerFlow(60_000L)
     ) { values ->
         @Suppress("UNCHECKED_CAST")
@@ -114,10 +123,11 @@ class MedtrumOverviewViewModel @Inject constructor(
         val lastBolusTime = values[7] as Long?
         val lastBolusAmount = values[8] as Double?
         val lastConnectionTime = values[9] as Long
+        val benchRestartStatus = values[11] as BenchRestartStatus
 
         buildUiState(
             connectionState, pumpState, medtrumPump.baseBasalRate, basalType, tempBasalRate, medtrumPump.lastBasalStartTime, medtrumPump.lastBasalDuration, reservoir, batteryVoltage,
-            bolusDelivered, lastBolusTime, lastBolusAmount, lastConnectionTime
+            bolusDelivered, lastBolusTime, lastBolusAmount, lastConnectionTime, benchRestartStatus
         )
     }.stateIn(scope, SharingStarted.WhileSubscribed(5000), buildInitialState())
 
@@ -151,6 +161,14 @@ class MedtrumOverviewViewModel @Inject constructor(
         }
     }
 
+    fun onClickBenchRestart() {
+        val queueSafe = commandQueue.size() == 0 && commandQueue.performing() == null && !commandQueue.bolusInQueue()
+        val bolusSafe = medtrumPump.bolusDone
+        viewModelScope.launch {
+            commandQueue.customCommand(MedtrumBenchRestartCommand(queueSafe, bolusSafe))
+        }
+    }
+
     fun onUnpairClick() {
         _events.tryEmit(MedtrumOverviewEvent.ConfirmUnpair)
     }
@@ -180,7 +198,8 @@ class MedtrumOverviewViewModel @Inject constructor(
             bolusDelivered = medtrumPump.bolusAmountDeliveredFlow.value,
             lastBolusTime = medtrumPump.lastBolusTime,
             lastBolusAmount = medtrumPump.lastBolusAmount,
-            lastConnectionTime = medtrumPump.lastConnection
+            lastConnectionTime = medtrumPump.lastConnection,
+            benchRestartStatus = benchRestartController.status.value
         )
     }
 
@@ -197,7 +216,8 @@ class MedtrumOverviewViewModel @Inject constructor(
         bolusDelivered: Double,
         lastBolusTime: Long?,
         lastBolusAmount: Double?,
-        lastConnectionTime: Long
+        lastConnectionTime: Long,
+        benchRestartStatus: BenchRestartStatus
     ): PumpOverviewUiState {
         // Status banner: communication status from shared helper, or pump-specific warning
         val statusBanner = buildStatusBanner(pumpState) ?: communicationStatus.statusBanner()
@@ -288,6 +308,14 @@ class MedtrumOverviewViewModel @Inject constructor(
             if (expiryText.isNotEmpty()) {
                 add(PumpInfoRow(label = rh.gs(R.string.patch_expiry_label), value = expiryText))
             }
+            if (benchRestartStatus.state != BenchRestartState.IDLE) {
+                add(
+                    PumpInfoRow(
+                        label = rh.gs(R.string.bench_restart_status_label),
+                        value = benchRestartStatus.state.name + benchRestartStatus.message.takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
+                    )
+                )
+            }
         }
 
         // Primary actions
@@ -319,6 +347,25 @@ class MedtrumOverviewViewModel @Inject constructor(
                     icon = Icons.Filled.SwapHoriz,
                     category = ActionCategory.MANAGEMENT,
                     onClick = { onClickChangePatch() }
+                )
+            )
+            add(
+                PumpAction(
+                    label = rh.gs(R.string.bench_restart_action),
+                    icon = Icons.Filled.Refresh,
+                    category = ActionCategory.MANAGEMENT,
+                    visible = BenchRestartVisibility.isVisible(
+                        config.isEngineeringMode(),
+                        preferences.get(app.aaps.pump.medtrum.keys.MedtrumBooleanKey.MedtrumBenchRestartExperimental)
+                    ),
+                    enabled = benchRestartStatus.state in setOf(
+                        BenchRestartState.IDLE,
+                        BenchRestartState.COMPLETE,
+                        BenchRestartState.FAILED,
+                        BenchRestartState.BLOCKED,
+                        BenchRestartState.INTERRUPTED
+                    ),
+                    onClick = { onClickBenchRestart() }
                 )
             )
             if (isPaired) {

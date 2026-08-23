@@ -266,7 +266,25 @@ class MedtrumPump @Inject constructor(
     var needCheckTimeUpdate = false
     var lastTimeReceivedFromPump = 0L // Time in ms!
     var suspendTime = 0L // Time in ms!
-    var patchAge = 0L // Time in seconds?! // As reported by pump, not used (yet)
+    var patchAge = 0L // Kept for normal driver compatibility.
+    var deviceReportedPatchStartTime = 0L
+        private set
+    var deviceReportedPatchAge = 0L
+        private set
+
+    fun recordDeviceReportedPatchStartTime(value: Long) {
+        deviceReportedPatchStartTime = value
+    }
+
+    fun recordDeviceReportedPatchAge(value: Long) {
+        deviceReportedPatchAge = value
+        patchAge = value
+    }
+
+    fun clearDeviceReportedSessionTelemetry() {
+        deviceReportedPatchStartTime = 0L
+        deviceReportedPatchAge = 0L
+    }
 
     // bolus status
     private var _bolusStartTime = 0L // Time in ms!

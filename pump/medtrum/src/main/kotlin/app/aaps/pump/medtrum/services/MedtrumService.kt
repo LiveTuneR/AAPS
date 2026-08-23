@@ -303,6 +303,11 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
         loadEvents()
     }
 
+    /** Read-only path used exclusively by the off-body bench campaign. */
+    fun readBenchRestartBaseline(includeHistory: Boolean): Boolean =
+        if (includeHistory) loadEvents()
+        else sendPacketAndGetResponse(SynchronizePacket(injector), COMMAND_SYNC_TIMEOUT_SEC)
+
     fun timeUpdateNotification(updateSuccess: Boolean) {
         if (updateSuccess) {
             aapsLogger.debug(LTag.PUMPCOMM, "Pump time updated")

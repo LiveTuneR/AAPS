@@ -6,6 +6,7 @@ import app.aaps.pump.medtrum.MedtrumPump
 import app.aaps.pump.medtrum.comm.enums.AlarmState
 import app.aaps.pump.medtrum.comm.enums.BasalType
 import app.aaps.pump.medtrum.comm.enums.MedtrumPumpState
+import app.aaps.pump.medtrum.diagnostics.MedtrumBleTrace
 import app.aaps.pump.medtrum.extension.toInt
 import app.aaps.pump.medtrum.extension.toLong
 import app.aaps.pump.medtrum.util.MedtrumTimeUtil
@@ -35,6 +36,7 @@ class NotificationPacket(val injector: HasAndroidInjector) {
     @Inject lateinit var aapsLogger: AAPSLogger
     @Inject lateinit var medtrumPump: MedtrumPump
     @Inject lateinit var medtrumTimeUtil: MedtrumTimeUtil
+    @Inject lateinit var trace: MedtrumBleTrace
 
     companion object {
 
@@ -303,6 +305,13 @@ class NotificationPacket(val injector: HasAndroidInjector) {
     private fun handleStartTime(data: ByteArray, offset: Int): Int {
         aapsLogger.debug(LTag.PUMPCOMM, "Start time notification received")
         newPatchStartTime = medtrumTimeUtil.convertPumpTimeToSystemTimeMillis(data.copyOfRange(offset, offset + 4).toLong())
+        medtrumPump.recordDeviceReportedPatchStartTime(newPatchStartTime)
+        if (::trace.isInitialized) {
+            trace.record(
+                "device_reported_start_time",
+                mapOf("deviceReportedStartTime" to newPatchStartTime, "localPatchStartTimeBefore" to medtrumPump.patchStartTime)
+            )
+        }
         if (medtrumPump.patchStartTime != newPatchStartTime) {
             aapsLogger.debug(LTag.PUMPCOMM, "Patch start time changed from ${medtrumPump.patchStartTime} to $newPatchStartTime")
             medtrumPump.patchStartTime = newPatchStartTime
@@ -370,8 +379,10 @@ class NotificationPacket(val injector: HasAndroidInjector) {
 
     private fun handleAge(data: ByteArray, offset: Int): Int {
         aapsLogger.debug(LTag.PUMPCOMM, "Age notification received")
-        medtrumPump.patchAge = data.copyOfRange(offset, offset + 4).toLong()
-        aapsLogger.debug(LTag.PUMPCOMM, "Patch age: ${medtrumPump.patchAge}")
+        val deviceAge = data.copyOfRange(offset, offset + 4).toLong()
+        medtrumPump.recordDeviceReportedPatchAge(deviceAge)
+        if (::trace.isInitialized) trace.record("device_reported_patch_age", mapOf("deviceReportedPatchAge" to deviceAge))
+        aapsLogger.debug(LTag.PUMPCOMM, "Patch age: $deviceAge")
         return offset + SIZE_AGE
     }
 

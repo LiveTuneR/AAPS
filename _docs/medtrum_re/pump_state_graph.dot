@@ -1,0 +1,26 @@
+digraph medtrum_base_states {
+  rankdir=LR;
+  node [shape=box];
+  NONE [label="0 NONE"];
+  IDLE [label="1 IDLE"];
+  FILLED [label="2 FILLED"];
+  PRIMING [label="3 PRIMING"];
+  PRIMED [label="4 PRIMED"];
+  EJECTING [label="5 EJECTING"];
+  EJECTED [label="6 EJECTED"];
+  ACTIVE [label="32 ACTIVE / 33 ACTIVE_ALT"];
+  SUSPENDED [label="64..70 suspended states"];
+  FAULT [label="96..103 fault states"];
+  STOPPED [label="128 STOPPED", color=red];
+
+  FILLED -> PRIMING [label="0x10 PRIME (normal)"];
+  PRIMING -> PRIMED [label="device progression"];
+  PRIMED -> EJECTING [label="device progression"];
+  EJECTING -> EJECTED [label="device progression"];
+  EJECTED -> ACTIVE [label="0x12 ACTIVATE / 0x94 handler"];
+  ACTIVE -> SUSPENDED [label="suspend/fault policy"];
+  SUSPENDED -> ACTIVE [label="resume where supported"];
+  ACTIVE -> STOPPED [label="0x1f STOP_PATCH", color=red];
+  SUSPENDED -> STOPPED [label="0x1f STOP_PATCH", color=red];
+  FAULT -> STOPPED [label="0x1f STOP_PATCH", color=red];
+}
