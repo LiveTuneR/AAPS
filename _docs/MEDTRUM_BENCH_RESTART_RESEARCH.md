@@ -15,6 +15,7 @@ This is an intentional patch-preservation result, not a partial runtime guess.
 - Exact base commit: `1483e350e81fe265c94c805ee9b288e7a9ddfed6`.
 - Reference/tracking branch: `livetuner/codex/apex-fsm`.
 - Research branch: `codex/medtrum-bench-restart-research`.
+- Implementation/build commit: `de285e05a5049bacd3961cf23e2589415b4b8eb7`.
 - Final commit: recorded in the delivery response; a commit cannot embed its
   own object ID.
 
@@ -219,9 +220,11 @@ Python tooling passed `py_compile`. Static forbidden-symbol audit and
 ## N. Build
 
 - Task: `:app:assembleFullDebug`.
-- APK: `X:\Projects\lumiflex\aaps-medtrum-bench-research-blocked-875ff9f3.apk`.
-- Size: `206,922,055` bytes.
-- SHA-256: `875ff9f318de9101e543f359498167b328187d108d9706d74d38d87e6ed41553`.
+- APK: `X:\Projects\lumiflex\aaps-medtrum-bench-research-de285e0-e72e8e20.apk`.
+- Size: `202,692,475` bytes.
+- SHA-256: `e72e8e20a9fadf6d7cd666cea9985aeb43db8c58b52952cd18484dbbadb7bd1f`.
+- Embedded `BUILDVERSION`: `de285e0-2026.08.23`; application ID
+  `info.nightscout.androidaps`, version `4.0.0-beta-apex5` (`2004`).
 - Signing: normal Gradle Full Debug signing, not a release/production key.
 - No live pump command was run from Codex.
 
