@@ -38,6 +38,8 @@ jobs:
         run: chmod +x gradlew
 
       - name: Test reliability and diagnostic modules
+        env:
+          APEX7_CAPTURE_SCREENSHOTS: 'true'
         run: |
           ./gradlew :workflow:testFullDebugUnitTest :plugins:main:testFullDebugUnitTest \
             :plugins:sensitivity:testFullDebugUnitTest :core:interfaces:testFullDebugUnitTest \
@@ -58,6 +60,7 @@ jobs:
             core/*/build/test-results/**/*.xml
             pump/apex/build/test-results/**/*.xml
             ui/build/test-results/**/*.xml
+            ui/build/reports/apex7-screenshots/*.png
           retention-days: 14
 
       - name: Decode signing key

@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import app.aaps.ui.R
@@ -15,6 +16,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -32,11 +34,22 @@ class EnhancedOverviewContentTest {
         compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { EnhancedOverviewContent(state) } } }
     }
 
+    private fun capture(name: String) {
+        if (System.getenv("APEX7_CAPTURE_SCREENSHOTS") != "true") return
+        compose.waitForIdle()
+        val bitmap = compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap()
+        val output = File("build/reports/apex7-screenshots/$name.png")
+        output.parentFile.mkdirs()
+        output.outputStream().use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
+    }
+
     @Test fun unknownFieldsAreNotReplacedWithZeroAndAllDetailsOpen() {
         render()
+        capture("overview-en-portrait-synthetic")
         val context = RuntimeEnvironment.getApplication()
         for (title in titles) {
             compose.onNodeWithText(context.getString(title)).performScrollTo().performClick()
+            capture("detail-${context.resources.getResourceEntryName(title)}-en-synthetic")
             compose.onNodeWithContentDescription(context.getString(R.string.apex7_close)).assertIsDisplayed().performClick()
             compose.waitForIdle()
         }
@@ -50,6 +63,7 @@ class EnhancedOverviewContentTest {
         compose.onNodeWithText(context.getString(R.string.apex7_loop)).performScrollTo().performClick()
         compose.onNodeWithText("12").assertExists()
         compose.onNodeWithContentDescription(context.getString(R.string.apex7_close)).assertIsDisplayed()
+        capture("loop-ru-landscape-synthetic")
     }
 
 }
