@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_milliseconds">%1$d ms</string>
+    <string name="apex7_access_available">Read access available</string>
+    <string name="apex7_access_unavailable">Source unavailable</string>
+    <string name="apex7_access_denied">Read permission denied</string>
+    <string name="apex7_access_error">Source read failed</string>
+    <string name="apex7_last_read">Last successful source read</string>
+    <string name="apex7_reachable">Watch reachable</string>
+    <string name="apex7_clock_skew">Source clock mismatch</string>
     <string name="apex7_overview">Enhanced Overview</string>
     <string name="apex7_unknown">Unknown / unavailable</string>
     <string name="apex7_autoisf">AutoISF</string>

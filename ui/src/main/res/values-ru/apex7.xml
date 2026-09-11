@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_milliseconds">%1$d мс</string>
+    <string name="apex7_access_available">Чтение разрешено</string>
+    <string name="apex7_access_unavailable">Источник недоступен</string>
+    <string name="apex7_access_denied">Нет разрешения на чтение</string>
+    <string name="apex7_access_error">Ошибка чтения источника</string>
+    <string name="apex7_last_read">Последнее успешное чтение источника</string>
+    <string name="apex7_reachable">Часы доступны</string>
+    <string name="apex7_clock_skew">Расхождение часов источника</string>
     <string name="apex7_overview">Расширенный обзор</string>
     <string name="apex7_unknown">Неизвестно / недоступно</string>
     <string name="apex7_autoisf">AutoISF</string>

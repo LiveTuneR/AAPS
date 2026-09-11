@@ -21,27 +21,26 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [35], qualifiers = "en-w400dp-h900dp")
 class EnhancedOverviewContentTest {
     @get:Rule val compose = createComposeRule()
+    private val titles = listOf(R.string.apex7_autoisf, R.string.apex7_activity, R.string.apex7_iob,
+        R.string.apex7_isfcr, R.string.apex7_cob, R.string.apex7_smb, R.string.apex7_pump,
+        R.string.apex7_site, R.string.apex7_sensor, R.string.apex7_loop)
 
     private fun render() {
-        val state = OverviewDashboardState(listOf(
-            DashboardTile(R.string.apex7_autoisf, null, listOf(DashboardField(R.string.apex7_factor, null))),
-            DashboardTile(R.string.apex7_activity, null, listOf(DashboardField(R.string.apex7_shadow, null))),
-            DashboardTile(R.string.apex7_pump, null, listOf(DashboardField(R.string.apex7_reservoir, null))),
-            DashboardTile(R.string.apex7_sensor, null, listOf(DashboardField(R.string.apex7_expiry, null))),
-            DashboardTile(R.string.apex7_loop, null, listOf(DashboardField(R.string.apex7_generation, "12")))
-        ))
+        val state = OverviewDashboardState(titles.map { title ->
+            DashboardTile(title, null, listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null)))
+        })
         compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { EnhancedOverviewContent(state) } } }
     }
 
     @Test fun unknownFieldsAreNotReplacedWithZeroAndAllDetailsOpen() {
         render()
         val context = RuntimeEnvironment.getApplication()
-        for (title in listOf(R.string.apex7_autoisf, R.string.apex7_activity, R.string.apex7_pump, R.string.apex7_sensor, R.string.apex7_loop)) {
+        for (title in titles) {
             compose.onNodeWithText(context.getString(title)).performScrollTo().performClick()
             compose.onNodeWithContentDescription(context.getString(R.string.apex7_close)).assertIsDisplayed().performClick()
             compose.waitForIdle()
         }
-        compose.onAllNodesWithText(context.getString(R.string.apex7_unknown)).assertCountEquals(5)
+        compose.onAllNodesWithText(context.getString(R.string.apex7_unknown)).assertCountEquals(10)
     }
 
     @Test @Config(qualifiers = "ru-w800dp-h480dp")

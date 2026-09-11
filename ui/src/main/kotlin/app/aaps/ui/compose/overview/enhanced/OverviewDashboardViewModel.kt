@@ -3,6 +3,7 @@ package app.aaps.ui.compose.overview.enhanced
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aaps.core.data.activity.ActivityState
+import app.aaps.core.data.activity.ActivityAccess
 import app.aaps.core.data.diagnostics.LoopHealthStatus
 import app.aaps.core.data.model.TE
 import app.aaps.core.interfaces.aps.Loop
@@ -76,6 +77,7 @@ class OverviewDashboardViewModel @Inject constructor(
     private fun time(value: Long?): String? = value?.takeIf { it > 0 }?.let { java.text.DateFormat.getDateTimeInstance().format(java.util.Date(it)) }
     private fun age(value: Long?, now: Long): String? = value?.takeIf { it > 0 && it <= now }?.let { rh.gs(R.string.apex7_minutes, (now - it) / 60_000) }
     private fun bool(value: Boolean) = rh.gs(if (value) R.string.apex7_yes else R.string.apex7_no)
+    private fun milliseconds(value: Long?) = value?.takeIf { it >= 0 }?.let { rh.gs(R.string.apex7_milliseconds, it) }
 
     private suspend fun refresh() {
         val now = System.currentTimeMillis()
@@ -128,17 +130,27 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_time to time(request?.date), R.string.apex7_age to age(request?.date, now),
                 R.string.apex7_trace to activePlugin.activeAPS?.getSensitivityOverviewString()),
             tile(R.string.apex7_activity, activityState,
-                R.string.apex7_shadow to rh.gs(R.string.apex7_shadow), R.string.apex7_access to rh.gs(R.string.apex7_sdk_missing),
+                R.string.apex7_shadow to rh.gs(R.string.apex7_shadow), R.string.apex7_access to rh.gs(when (activity.access) {
+                    ActivityAccess.SDK_NOT_CONFIGURED -> R.string.apex7_sdk_missing
+                    ActivityAccess.AVAILABLE -> R.string.apex7_access_available
+                    ActivityAccess.UNAVAILABLE -> R.string.apex7_access_unavailable
+                    ActivityAccess.PERMISSION_DENIED -> R.string.apex7_access_denied
+                    ActivityAccess.ERROR -> R.string.apex7_access_error
+                }),
+                R.string.apex7_last_read to time(activity.lastSuccessfulRead),
+                R.string.apex7_reachable to activity.watchReachable?.let { bool(it) },
+                R.string.apex7_clock_skew to bool(activity.clockSkew),
                 R.string.apex7_source to event?.source?.name, R.string.apex7_category to event?.let { "${it.category.name} / ${it.rawType}" },
                 R.string.apex7_device to event?.sourceDevice, R.string.apex7_start to time(event?.startTime), R.string.apex7_end to time(event?.endTime),
                 R.string.apex7_received to time(event?.receivedAt), R.string.apex7_updated to time(event?.lastUpdatedAt),
-                R.string.apex7_age to age(event?.lastUpdatedAt, now), R.string.apex7_latency to event?.detectionLatencyMs?.toString(),
+                R.string.apex7_age to age(event?.lastUpdatedAt, now), R.string.apex7_latency to milliseconds(event?.detectionLatencyMs),
+                R.string.apex7_duration to event?.let { milliseconds((it.endTime ?: now) - it.startTime) },
                 R.string.apex7_steps to event?.steps?.toString(), R.string.apex7_hr to number(event?.heartRate)),
             tile(R.string.apex7_iob, number(request?.iob?.iob)?.takeIf { recent(request?.date) }?.let { rh.gs(R.string.apex7_insulin_units, it) },
                 R.string.apex7_total to number(request?.iob?.iob), R.string.apex7_basal to number(request?.iob?.basaliob),
                 R.string.apex7_bolus to null, R.string.apex7_time to time(request?.date),
                 R.string.apex7_insulin to profile?.iCfg?.insulinLabel, R.string.apex7_peak to profile?.iCfg?.peak?.toString(), R.string.apex7_dia to number(profile?.iCfg?.dia)),
-            tile(R.string.apex7_isfcr, effectiveIsf,
+            tile(R.string.apex7_isfcr, effectiveIsf.takeIf { recent(request?.date) },
                 R.string.apex7_base_isf to baseIsf, R.string.apex7_effective_isf to effectiveIsf,
                 R.string.apex7_base_cr to number(profile?.getIc()), R.string.apex7_effective_cr to effectiveCr,
                 R.string.apex7_profile to profile?.percentage?.toString(), R.string.apex7_time to time(request?.date)),
@@ -168,7 +180,7 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_enact to time(snapshot.lastEnactTimestamp), R.string.apex7_ads to time(snapshot.autosensLastDataTimestamp),
                 R.string.apex7_table to snapshot.autosensDataTableSize.toString(), R.string.apex7_missing to snapshot.firstMissingIndex?.toString(),
                 R.string.apex7_generation to snapshot.activeWorkflowGeneration?.toString(), R.string.apex7_job to snapshot.currentWorkflowJob,
-                R.string.apex7_duration to snapshot.lastCalculationDurationMs?.toString(), R.string.apex7_anchor to time(snapshot.referenceTime),
+                R.string.apex7_duration to milliseconds(snapshot.calculationDuration(now)), R.string.apex7_anchor to time(snapshot.referenceTime),
                 R.string.apex7_phase to snapshot.currentSensorPhaseOffsetMs?.toString(), R.string.apex7_skipped to snapshot.supersededAdsPublishSkipCount.toString(),
                 R.string.apex7_metadata to snapshot.duplicateGlucoseMetadataEventCount.toString(), R.string.apex7_changes to snapshot.therapyRelevantGlucoseUpdateCount.toString())
         ), now)

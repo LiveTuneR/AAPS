@@ -7,6 +7,13 @@ class LoopHealthTest {
     private val now = 1_780_000_000_000L
     private val fresh = LoopHealthState(newestRawBgTimestamp = now - 60_000, lastBgTriggeredRun = now - 60_000,
         autosensLastDataTimestamp = now - 60_000, lastCalculationSuccessTimestamp = now - 30_000)
+    @Test fun `duration follows current calculation and rejects a future start`() {
+        val running = fresh.copy(calculationRunning = true, currentCalculationStartedAt = now - 150_000, lastCalculationDurationMs = 10)
+        assertEquals(150_000L, running.calculationDuration(now))
+        assertEquals(210_000L, running.calculationDuration(now + 60_000))
+        assertNull(running.copy(currentCalculationStartedAt = now + 1).calculationDuration(now))
+        assertEquals(10L, running.copy(calculationRunning = false).calculationDuration(now))
+    }
     @Test fun `fresh unknown stale and divergent inputs are distinguished`() {
         assertEquals(LoopHealthStatus.UNKNOWN, LoopHealthState().status(now))
         assertEquals(LoopHealthStatus.HEALTHY, fresh.status(now))

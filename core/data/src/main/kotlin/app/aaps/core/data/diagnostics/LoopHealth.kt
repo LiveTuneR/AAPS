@@ -23,6 +23,8 @@ data class LoopHealthState(
     val lastEnactTimestamp: Long? = null
 ) {
     fun age(timestamp: Long?, now: Long): Long? = timestamp?.takeIf { it > 0 && it <= now }?.let { now - it }
+    fun calculationDuration(now: Long): Long? =
+        if (calculationRunning) age(currentCalculationStartedAt, now) else lastCalculationDurationMs
     fun status(now: Long): LoopHealthStatus {
         val rawAge = age(newestRawBgTimestamp, now) ?: return LoopHealthStatus.UNKNOWN
         if (rawAge > 9 * 60_000) return LoopHealthStatus.STALE
