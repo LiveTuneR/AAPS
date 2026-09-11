@@ -33,6 +33,8 @@ jobs:
           java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Prepare Gradle
         run: chmod +x gradlew
@@ -61,6 +63,7 @@ jobs:
             pump/apex/build/test-results/**/*.xml
             ui/build/test-results/**/*.xml
             ui/build/reports/apex7-screenshots/*.png
+            ui/build/reports/tests/**
           retention-days: 14
 
       - name: Decode signing key

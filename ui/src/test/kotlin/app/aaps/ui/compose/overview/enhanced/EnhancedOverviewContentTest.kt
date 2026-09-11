@@ -5,7 +5,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import app.aaps.ui.R
@@ -37,9 +36,16 @@ class EnhancedOverviewContentTest {
     private fun capture(name: String) {
         if (System.getenv("APEX7_CAPTURE_SCREENSHOTS") != "true") return
         compose.waitForIdle()
-        val bitmap = compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap()
+        // Robolectric does not complete Compose's hardware forceRedraw handshake.
+        // Render the actual topmost test window, including a modal when present.
+        val bitmap = compose.runOnIdle {
+            val view = android.view.inspector.WindowInspector.getGlobalWindowViews().last { it.width > 0 && it.height > 0 }
+            android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888).also {
+                view.draw(android.graphics.Canvas(it))
+            }
+        }
         val output = File("build/reports/apex7-screenshots/$name.png")
-        output.parentFile.mkdirs()
+        requireNotNull(output.parentFile).mkdirs()
         output.outputStream().use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
     }
 

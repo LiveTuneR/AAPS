@@ -42,3 +42,25 @@ build success must not be read as completion of these unresolved requirements.
 
 Build/test outcome and artifact identity are reported separately after the run.
 No APK from an earlier commit should be described as the result of a later one.
+
+## Screenshot follow-up
+
+Run 34615183509 failed with two `WindowCapture.forceRedraw` timeouts, on Linux
+as well as the earlier Windows attempt. Its JUnit evidence contains 1051 tests,
+2 failures, no errors or skips. The failed run did not sign or produce an APK.
+
+The capture implementation now draws the actual Robolectric test-window View
+into a bitmap on the UI thread, avoiding the unavailable hardware redraw
+handshake. A clean local rerun completed successfully with capture enabled:
+12 PNGs (overview, ten detail sheets, Russian landscape Loop sheet). Overview,
+Activity and Russian Loop images were visually inspected and are nonblank.
+
+These are minimal synthetic component fixtures, with unknown summaries and a
+sample generation field, NOT production-data screenshots or full ViewModel /
+clinical / complete-dashboard acceptance. Transparent areas outside a modal
+are expected in a topmost-window capture. CI uploads the PNGs and test reports.
+
+```powershell
+$env:APEX7_CAPTURE_SCREENSHOTS='true'
+.\gradlew.bat :ui:testFullDebugUnitTest --tests '*EnhancedOverviewContentTest' --tests '*ActivityEventCodecTest' --rerun-tasks --no-daemon --max-workers=2 '-Pkotlin.compiler.execution.strategy=in-process' -I doc/apex7-validation.init.gradle --console=plain
+```
