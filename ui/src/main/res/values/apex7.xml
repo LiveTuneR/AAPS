@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_current_dynamic_isf">Current dynamic ISF</string>
+    <string name="apex7_dosing_isf">ISF used for insulin requirement</string>
+    <string name="apex7_future_isf">Future-state ISF</string>
+    <string name="apex7_isf_basis">Future ISF basis</string>
+    <string name="apex7_condition_eligible">Algorithm condition satisfied</string>
+    <string name="apex7_condition_reason">Eligibility reason code</string>
+    <string name="apex7_block_reason">Blocking reason code</string>
+    <string name="apex7_interval_waiting">Waiting for SMB interval</string>
+    <string name="apex7_smb_cap">Algorithm SMB cap (U)</string>
+    <string name="apex7_smb_requested">Requested SMB (U)</string>
+    <string name="apex7_smb_constrained">Constrained SMB (U)</string>
+    <string name="apex7_smb_reported_delivered">Driver-reported delivery (U)</string>
     <string name="apex7_milliseconds">%1$d ms</string>
     <string name="apex7_access_available">Read access available</string>
     <string name="apex7_access_unavailable">Source unavailable</string>

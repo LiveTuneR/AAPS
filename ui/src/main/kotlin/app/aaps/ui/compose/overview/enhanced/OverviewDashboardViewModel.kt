@@ -7,6 +7,7 @@ import app.aaps.core.data.activity.ActivityAccess
 import app.aaps.core.data.diagnostics.LoopHealthStatus
 import app.aaps.core.data.model.TE
 import app.aaps.core.interfaces.aps.Loop
+import app.aaps.core.interfaces.aps.RT
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.iob.loopHealthSnapshot
@@ -84,6 +85,7 @@ class OverviewDashboardViewModel @Inject constructor(
         val profile = profileFunction.getProfile()
         val lastRun = loop.lastRun
         val request = lastRun?.request
+        val decision = (request?.rawData() as? RT)?.decision
         val result = lastRun?.constraintsProcessed
         val snapshot = calculator.loopHealthSnapshot(loop)
         val health = snapshot.status(now)
@@ -115,7 +117,8 @@ class OverviewDashboardViewModel @Inject constructor(
         fun recent(timestamp: Long?) = timestamp != null && now - timestamp in 0..660_000L
         fun tile(title: Int, summary: String?, vararg fields: Pair<Int, String?>) = DashboardTile(title, summary, fields.map { DashboardField(it.first, it.second) })
         val baseIsf = isf(profile?.getProfileIsfMgdl())
-        val effectiveIsf = isf(request?.variableSens)
+        val currentDynamicIsf = isf(decision?.currentDynamicIsfMgdl)
+        val dosingIsf = isf(decision?.insulinReqIsfMgdl)
         val effectiveCr = number(request?.oapsProfile?.carb_ratio ?: request?.oapsProfileAutoIsf?.carb_ratio)
         val healthText = rh.gs(when (health) {
             LoopHealthStatus.UNKNOWN -> R.string.apex7_status_unknown
@@ -126,7 +129,8 @@ class OverviewDashboardViewModel @Inject constructor(
         })
         mutableState.value = OverviewDashboardState(listOf(
             tile(R.string.apex7_autoisf, request?.algorithm?.name,
-                R.string.apex7_factor to null, R.string.apex7_base_isf to baseIsf, R.string.apex7_effective_isf to effectiveIsf,
+                R.string.apex7_factor to null, R.string.apex7_base_isf to baseIsf,
+                R.string.apex7_current_dynamic_isf to currentDynamicIsf, R.string.apex7_dosing_isf to dosingIsf,
                 R.string.apex7_time to time(request?.date), R.string.apex7_age to age(request?.date, now),
                 R.string.apex7_trace to activePlugin.activeAPS?.getSensitivityOverviewString()),
             tile(R.string.apex7_activity, activityState,
@@ -150,15 +154,25 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_total to number(request?.iob?.iob), R.string.apex7_basal to number(request?.iob?.basaliob),
                 R.string.apex7_bolus to null, R.string.apex7_time to time(request?.date),
                 R.string.apex7_insulin to profile?.iCfg?.insulinLabel, R.string.apex7_peak to profile?.iCfg?.peak?.toString(), R.string.apex7_dia to number(profile?.iCfg?.dia)),
-            tile(R.string.apex7_isfcr, effectiveIsf.takeIf { recent(request?.date) },
-                R.string.apex7_base_isf to baseIsf, R.string.apex7_effective_isf to effectiveIsf,
+            tile(R.string.apex7_isfcr, dosingIsf.takeIf { recent(request?.date) },
+                R.string.apex7_base_isf to baseIsf, R.string.apex7_current_dynamic_isf to currentDynamicIsf,
+                R.string.apex7_dosing_isf to dosingIsf, R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
+                R.string.apex7_isf_basis to decision?.futureIsfBasis?.name,
                 R.string.apex7_base_cr to number(profile?.getIc()), R.string.apex7_effective_cr to effectiveCr,
                 R.string.apex7_profile to profile?.percentage?.toString(), R.string.apex7_time to time(request?.date)),
             tile(R.string.apex7_cob, number(cob?.second)?.takeIf { recent(cob?.first) }?.let { rh.gs(R.string.apex7_carb_units, it) },
                 R.string.apex7_total to number(cob?.second), R.string.apex7_time to time(cob?.first), R.string.apex7_age to age(cob?.first, now),
                 R.string.apex7_carbs_future to number(futureCarbs), R.string.apex7_carbs_last to time(lastCarb?.timestamp)),
             tile(R.string.apex7_smb, age(lastRun?.lastSMBEnact, now),
-                R.string.apex7_enabled to bool(preferences.get(BooleanKey.ApsUseSmb)), R.string.apex7_permitted to null,
+                R.string.apex7_enabled to bool(preferences.get(BooleanKey.ApsUseSmb)),
+                R.string.apex7_condition_eligible to decision?.conditionEligible?.let { bool(it) },
+                R.string.apex7_condition_reason to decision?.conditionReason?.name,
+                R.string.apex7_block_reason to decision?.blockReason?.name,
+                R.string.apex7_interval_waiting to decision?.intervalWaiting?.let { bool(it) },
+                R.string.apex7_smb_cap to number(decision?.maxBolusU),
+                R.string.apex7_smb_requested to number(request?.smb),
+                R.string.apex7_smb_constrained to number(result?.smb),
+                R.string.apex7_smb_reported_delivered to lastRun?.smbSetByPump?.takeIf { !it.queued }?.let { number(it.bolusDelivered) },
                 R.string.apex7_last_smb to time(lastRun?.lastSMBEnact), R.string.apex7_time to time(result?.date),
                 R.string.apex7_reason to listOfNotNull(result?.reason, result?.smbConstraint?.getReasons()).joinToString("\n").ifBlank { null }),
             tile(R.string.apex7_pump, pump.model().name,

@@ -565,6 +565,7 @@ class LoopPlugin @Inject constructor(
                 resultAfterConstraints.smb = 0.0
             }
             prevCarbsreq = lastRun?.constraintsProcessed?.carbsReq ?: prevCarbsreq
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=CONSTRAINED calculation=${apsResult.date} at=${dateUtil.now()} smbRequestedU=${apsResult.smb} smbConstrainedU=${resultAfterConstraints.smb} tbrRequestedUph=${apsResult.rate} tbrConstrainedUph=${resultAfterConstraints.rate} durationMinutes=${resultAfterConstraints.duration}")
             if (lastRun == null) lastRun = LastRun()
             lastRun?.let { lastRun ->
                 lastRun.request = apsResult
@@ -671,7 +672,9 @@ class LoopPlugin @Inject constructor(
                         fabricPrivacy.logCustom("APSRequest")
                         // TBR request must be applied first to prevent situation where
                         // SMB was executed and zero TBR afterward failed
+                        aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_ENTER calculation=${resultAfterConstraints.date} at=${dateUtil.now()}")
                         val tbrResult = applyTBRRequest(resultAfterConstraints, profile)
+                        aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_RESULT calculation=${resultAfterConstraints.date} at=${dateUtil.now()} success=${tbrResult.success} enacted=${tbrResult.enacted} queued=${tbrResult.queued} absoluteUph=${tbrResult.absolute} percent=${tbrResult.percent} isPercent=${tbrResult.isPercent} durationMinutes=${tbrResult.duration}")
                         lastRun.tbrSetByPump = tbrResult
                         lastRun.lastTBRRequest = lastRun.lastAPSRun
                         if (tbrResult.enacted || tbrResult.success) {
@@ -681,7 +684,9 @@ class LoopPlugin @Inject constructor(
                             resultAfterConstraints.deliverAt = lastRun.lastTBREnact
                             rxBus.send(EventLoopUpdateGui())
                             if (resultAfterConstraints.isBolusRequested) {
+                                aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_ENTER calculation=${resultAfterConstraints.date} at=${dateUtil.now()} requestedU=${resultAfterConstraints.smb}")
                                 val smbResult = applySMBRequest(resultAfterConstraints)
+                                aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_RESULT calculation=${resultAfterConstraints.date} at=${dateUtil.now()} success=${smbResult.success} enacted=${smbResult.enacted} queued=${smbResult.queued} reportedDeliveredU=${smbResult.bolusDelivered}")
                                 if (smbResult.enacted || smbResult.success) {
                                     lastRun.smbSetByPump = smbResult
                                     lastRun.lastSMBRequest = lastRun.lastAPSRun

@@ -11,6 +11,7 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.overview.OverviewData
 import app.aaps.core.interfaces.overview.graph.BgDataPoint
@@ -99,7 +100,15 @@ class PostCalculationWorker @AssistedInject constructor(
                 ) == null || glucoseValue.timestamp <= loop.lastBgTriggeredRun) return
             loop.lastBgTriggeredRun = glucoseValue.timestamp
         }
-        loop.invoke("Calculation for $glucoseValue", true)
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        aapsLogger.info(LTag.APS, "WorkflowDecision stage=BG_CLAIMED generation=$generation bgTimestamp=${glucoseValue.timestamp} at=${System.currentTimeMillis()}")
+        try {
+            loop.invoke("Calculation for $glucoseValue", true)
+            aapsLogger.info(LTag.APS, "WorkflowDecision stage=INVOKE_RETURNED generation=$generation bgTimestamp=${glucoseValue.timestamp} resultTimestamp=${loop.lastRun?.request?.date} at=${System.currentTimeMillis()}")
+        } catch (error: Exception) {
+            aapsLogger.info(LTag.APS, "WorkflowDecision stage=INVOKE_INTERRUPTED generation=$generation bgTimestamp=${glucoseValue.timestamp} type=${error.javaClass.simpleName} at=${System.currentTimeMillis()}")
+            throw error
+        }
     }
 
     private fun preparePredictions(data: PostCalculationData) {

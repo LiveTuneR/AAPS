@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_current_dynamic_isf">Текущий динамический ISF</string>
+    <string name="apex7_dosing_isf">ISF расчёта потребности в инсулине</string>
+    <string name="apex7_future_isf">ISF будущего состояния</string>
+    <string name="apex7_isf_basis">Основание будущего ISF</string>
+    <string name="apex7_condition_eligible">Условие алгоритма выполнено</string>
+    <string name="apex7_condition_reason">Код условия SMB</string>
+    <string name="apex7_block_reason">Код блокировки SMB</string>
+    <string name="apex7_interval_waiting">Ожидание интервала SMB</string>
+    <string name="apex7_smb_cap">Лимит SMB алгоритма (ед.)</string>
+    <string name="apex7_smb_requested">Запрошено SMB (ед.)</string>
+    <string name="apex7_smb_constrained">SMB после ограничений (ед.)</string>
+    <string name="apex7_smb_reported_delivered">Доставка по ответу драйвера (ед.)</string>
     <string name="apex7_milliseconds">%1$d мс</string>
     <string name="apex7_access_available">Чтение разрешено</string>
     <string name="apex7_access_unavailable">Источник недоступен</string>

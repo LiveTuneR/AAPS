@@ -99,6 +99,19 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     private val autosensDataProvider: Provider<AutosensData>
 ) : LoggingWorker(context, params, Dispatchers.Default, aapsLogger, fabricPrivacy) {
 
+    private data class Timing(var calls: Long = 0, var nanos: Long = 0)
+    private val timings = linkedMapOf<String, Timing>()
+    private var adsCacheHits = 0L
+    private var adsCacheMisses = 0L
+
+    private inline fun <T> measured(section: String, block: () -> T): T {
+        val start = System.nanoTime()
+        try { return block() }
+        finally {
+            timings.getOrPut(section) { Timing() }.also { it.calls++; it.nanos += System.nanoTime() - start }
+        }
+    }
+
     class PrepareGraphData(
         val iobCobCalculator: IobCobCalculator, // cannot be injected : HistoryBrowser uses different instance
         val overviewData: OverviewData,
@@ -113,6 +126,15 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     )
 
     override suspend fun doWorkAndLog(): Result {
+        val started = System.nanoTime()
+        try { return executeWork() }
+        finally {
+            val sections = timings.entries.joinToString(" ") { "${it.key}Calls=${it.value.calls} ${it.key}Ms=${it.value.nanos / 1_000_000}" }
+            aapsLogger.info(LTag.WORKER, "CalculationTiming job=${inputData.getString(WorkflowChainData.JOB_KEY)} generation=${inputData.getLong(WorkflowChainData.GEN_KEY, -1L)} stopped=$isStopped totalMs=${(System.nanoTime() - started) / 1_000_000} adsCacheHits=$adsCacheHits adsCacheMisses=$adsCacheMisses $sections")
+        }
+    }
+
+    private suspend fun executeWork(): Result {
         val data = workflowChainData.prepareFor(
             inputData.getString(WorkflowChainData.JOB_KEY),
             inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
@@ -120,27 +142,27 @@ class PrepareGraphDataWorker @AssistedInject constructor(
 
         // ===== Phase 1: Load BG into ads + smooth (was LoadBgDataWorker) =====
         if (data.bgDataReload) {
-            data.iobCobCalculator.ads.loadBgData(data.end)
-            data.iobCobCalculator.ads.smoothData()
+            measured("load") { data.iobCobCalculator.ads.loadBgData(data.end) }
+            measured("smoothing") { data.iobCobCalculator.ads.smoothData() }
             rxBus.send(EventBucketedDataCreated())
             data.iobCobCalculator.clearCache()
         }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         // ===== Phase 2: Bucketed data → cache (was PrepareBucketedDataWorker) =====
-        prepareBucketedData(data)
+        measured("bucketGraph") { prepareBucketedData(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         // ===== Phase 3: BG readings → cache (was PrepareBgDataWorker) =====
-        prepareBgData(data)
+        measured("bgGraph") { prepareBgData(data) }
 
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_BG, 100)
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         // ===== Phases 4 & 5: IOB/COB autosens + graph data prep (was IobCobOref* + PrepareIobAutosens) =====
-        if (activePlugin.activeSensitivity.isOref1) runIobCobOref1(data) else runIobCobOref(data)
+        measured("autosensTotal") { if (activePlugin.activeSensitivity.isOref1) runIobCobOref1(data) else runIobCobOref(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
-        prepareIobAutosensGraphData(data)
+        measured("iobGraph") { prepareIobAutosensGraphData(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_IOB, 100)
 
@@ -284,10 +306,12 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 if (bgTime > ads.roundUpTime(dateUtil.now())) continue
                 var existing: AutosensData?
                 if (autosensDataTable[bgTime].also { existing = it } != null) {
+                    adsCacheHits++
                     previous = existing
                     continue
                 }
-                val profile = profileFunction.getProfile(bgTime)
+                adsCacheMisses++
+                val profile = measured("profile") { profileFunction.getProfile(bgTime) }
                 if (profile == null) {
                     aapsLogger.debug(LTag.AUTOSENS, "Aborting calculation thread (no profile): ${data.reason}")
                     continue
@@ -308,7 +332,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 delta = bg - bucketedData[i + 1].recalculated
                 avgDelta = (bg - bucketedData[i + 3].recalculated) / 3
                 val sens = profile.getIsfMgdlForCarbs(bgTime, "iobCobOref1Worker", config, processedDeviceStatusData)
-                val iob = data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile)
+                val iob = measured("treatmentsIob") { data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile) }
                 val bgi = -iob.activity * sens * 5
                 val deviation = delta - bgi
                 val avgDeviation = ((avgDelta - bgi) * 1000).roundToLong() / 1000.0
@@ -346,7 +370,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 }
                 // Use exclusive start (+1ms) to avoid double-counting carbs at window boundaries
                 // when consecutive 5-min windows share a boundary timestamp (issue #4596)
-                val recentCarbTreatments = persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true)
+                val recentCarbTreatments = measured("carbs") { persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true) }
                 for (recentCarbTreatment in recentCarbTreatments) {
                     autosensData.carbsFromBolus += recentCarbTreatment.amount
                     val isAAPSOrWeighted = activePlugin.activeSensitivity.isMinCarbsAbsorptionDynamic
@@ -451,7 +475,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 aapsLogger.debug(LTag.AUTOSENS) {
                     "Running detectSensitivity from: " + dateUtil.dateAndTimeString(oldestTimeWithData) + " to: " + dateUtil.dateAndTimeString(bgTime) + " lastDataTime:" + ads.lastDataTime(dateUtil)
                 }
-                val sensitivity = activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches)
+                val sensitivity = measured("sensitivity") { activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches) }
                 aapsLogger.debug(LTag.AUTOSENS, "Sensitivity result: $sensitivity")
                 autosensData.autosensResult = sensitivity
                 aapsLogger.debug(LTag.AUTOSENS) { autosensData.toString() }
@@ -508,10 +532,12 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 if (bgTime > ads.roundUpTime(dateUtil.now())) continue
                 var existing: AutosensData?
                 if (autosensDataTable[bgTime].also { existing = it } != null) {
+                    adsCacheHits++
                     previous = existing
                     continue
                 }
-                val profile = profileFunction.getProfile(bgTime)
+                adsCacheMisses++
+                val profile = measured("profile") { profileFunction.getProfile(bgTime) }
                 if (profile == null) {
                     aapsLogger.debug(LTag.AUTOSENS) { "Aborting calculation thread (no profile): ${data.reason}" }
                     continue
@@ -532,7 +558,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 delta = bg - bucketedData[i + 1].recalculated
                 avgDelta = (bg - bucketedData[i + 3].recalculated) / 3
                 val sens = profile.getIsfMgdlForCarbs(bgTime, "IobCobOrefWorker", config, processedDeviceStatusData)
-                val iob = data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile)
+                val iob = measured("treatmentsIob") { data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile) }
                 val bgi = -iob.activity * sens * 5
                 val deviation = delta - bgi
                 val avgDeviation = ((avgDelta - bgi) * 1000).roundToLong() / 1000.0
@@ -568,7 +594,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                     }
                 }
                 // Use exclusive start (+1ms) to avoid double-counting carbs at window boundaries (issue #4596)
-                val recentCarbTreatments = persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true)
+                val recentCarbTreatments = measured("carbs") { persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true) }
                 for (recentCarbTreatment in recentCarbTreatments) {
                     autosensData.carbsFromBolus += recentCarbTreatment.amount
                     val isAAPSOrWeighted = activePlugin.activeSensitivity.isMinCarbsAbsorptionDynamic
@@ -635,7 +661,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 aapsLogger.debug(LTag.AUTOSENS) {
                     "Running detectSensitivity from: ${dateUtil.dateAndTimeString(oldestTimeWithData)} to: ${dateUtil.dateAndTimeString(bgTime)} lastDataTime:${ads.lastDataTime(dateUtil)}"
                 }
-                val sensitivity = activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches)
+                val sensitivity = measured("sensitivity") { activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches) }
                 aapsLogger.debug(LTag.AUTOSENS) { "Sensitivity result: $sensitivity" }
                 autosensData.autosensResult = sensitivity
                 aapsLogger.debug(LTag.AUTOSENS, autosensData.toString())
