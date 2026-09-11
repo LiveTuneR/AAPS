@@ -1,0 +1,7 @@
+// Opt-in local validation limits; production build defaults are unchanged.
+allprojects {
+    tasks.withType(Test).configureEach {
+        maxParallelForks = 1
+        maxHeapSize = '1536m'
+    }
+}
