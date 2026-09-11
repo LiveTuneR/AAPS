@@ -46,6 +46,10 @@ jobs:
           ./gradlew :workflow:testFullDebugUnitTest :plugins:main:testFullDebugUnitTest \
             :plugins:sensitivity:testFullDebugUnitTest :core:interfaces:testFullDebugUnitTest \
             :plugins:sync:testFullDebugUnitTest :pump:apex:testFullDebugUnitTest :core:data:test \
+            :pump:medtrum:testFullDebugUnitTest :plugins:aps:testFullDebugUnitTest \
+            :plugins:smoothing:testFullDebugUnitTest \
+            :implementation:testFullDebugUnitTest --tests '*LogArchiveTest' --tests '*MaintenanceImplTest' \
+            :shared:impl:testFullDebugUnitTest --tests '*RxBusLoggingTest' \
             :ui:testFullDebugUnitTest --tests '*EnhancedOverviewContentTest' --tests '*ActivityEventCodecTest' \
             --no-daemon --max-workers=2 --console=plain -I doc/apex7-validation.init.gradle \
             -Pkotlin.compiler.execution.strategy=in-process \
@@ -61,6 +65,9 @@ jobs:
             plugins/*/build/test-results/**/*.xml
             core/*/build/test-results/**/*.xml
             pump/apex/build/test-results/**/*.xml
+            pump/medtrum/build/test-results/**/*.xml
+            implementation/build/test-results/**/*.xml
+            shared/impl/build/test-results/**/*.xml
             ui/build/test-results/**/*.xml
             ui/build/reports/apex7-screenshots/*.png
             ui/build/reports/tests/**
@@ -118,9 +125,12 @@ jobs:
           apk=$(find app/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
           [[ -n "$apk" ]] || { echo "APK was not produced"; exit 1; }
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
-          "$apksigner" verify --verbose --print-certs "$apk"
           short_sha=${GITHUB_SHA:0:7}
           output="aaps-4.0-apex-$short_sha.apk"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$output.signature.txt"
+          expected_cert=1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084
+          actual_cert=$(awk '/certificate SHA-256 digest:/ { print $NF }' "$output.signature.txt" | sort -u)
+          [[ "$actual_cert" = "$expected_cert" ]] || { echo "Signing certificate does not match the supplied normal 3.4.2.3 APK"; exit 1; }
           cp "$apk" "$output"
           sha256sum "$output" > "$output.sha256"
           printf 'commit=%s\nrun=%s\nstatus=EXPERIMENTAL_NOT_DEVICE_VALIDATED\n' \
@@ -134,6 +144,7 @@ jobs:
             ${{ env.APK_OUTPUT }}
             ${{ env.APK_OUTPUT }}.sha256
             ${{ env.APK_OUTPUT }}.provenance.txt
+            ${{ env.APK_OUTPUT }}.signature.txt
           if-no-files-found: error
           retention-days: 14
 

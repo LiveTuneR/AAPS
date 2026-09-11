@@ -3,5 +3,8 @@ allprojects {
     tasks.withType(Test).configureEach {
         maxParallelForks = 1
         maxHeapSize = '1536m'
+        // Evidence must come from this validation run, not cached JUnit results.
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
     }
 }
