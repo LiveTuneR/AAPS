@@ -151,6 +151,17 @@ class ApexPumpPlugin @Inject constructor(
 
     override fun manufacturer() = ManufacturerType.Apex
     override fun model() = PumpType.APEX_TRUCARE_III
+    override fun readOnlyDiagnostics(): app.aaps.core.data.diagnostics.PumpDiagnosticState {
+        val snapshot = commDirector.diagnosticSnapshot()
+        val version = pump.firmwareVersion
+        return app.aaps.core.data.diagnostics.PumpDiagnosticState(
+            snapshot.state, snapshot.generation, snapshot.queuedCommands, snapshot.pendingCommand,
+            snapshot.pendingAgeMs, snapshot.progressAgeMs,
+            version?.let { "${it.firmwareMajor}.${it.firmwareMinor}" },
+            version?.let { "${it.protocolMajor}.${it.protocolMinor}" },
+            serialNumber().takeIf { it.isNotBlank() }?.let { "***${it.takeLast(3)}" }
+        )
+    }
     override fun serialNumber() = preferences.get(ApexStringKey.LastConnectedSerialNumber)
 
     override val baseBasalRate: PumpRate

@@ -16,6 +16,7 @@ import app.aaps.pump.apex.interfaces.ApexDeviceInfo
 import app.aaps.shared.tests.TestBase
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -242,12 +243,66 @@ class ApexCommDirectorTest : TestBase() {
         }
     }
 
-    private fun kotlinx.coroutines.test.TestScope.fixture(autoRespondToWrites: Boolean = false): Fixture {
+    @Test
+    fun `Ready is not exposed before asynchronous handshake reconciliation finishes`() = runTest {
+        val reconciled = CompletableDeferred<Unit>()
+        val fixture = fixture(handshake = { reconciled.await(); ApexCommDirector.HandshakeResult.READY })
+        try {
+            fixture.director.connect()
+            runCurrent()
+            fixture.transport.connected(1)
+            runCurrent()
+            assertThat(fixture.director.linkState.value).isInstanceOf(ApexCommDirector.LinkState.Handshaking::class.java)
+            reconciled.complete(Unit)
+            runCurrent()
+            assertThat(fixture.director.linkState.value).isInstanceOf(ApexCommDirector.LinkState.Ready::class.java)
+        } finally {
+            fixture.director.shutdown()
+            runCurrent()
+        }
+    }
+
+    @Test
+    fun `response from disconnected generation cannot complete current command`() = runTest {
+        val fixture = fixture()
+        try {
+            fixture.director.connect()
+            runCurrent()
+            fixture.transport.connected(1)
+            runCurrent()
+            fixture.transport.disconnected(1)
+            runCurrent()
+            advanceTimeBy(120_000)
+            runCurrent()
+            val generation = fixture.transport.connectGenerations.last()
+            assertThat(generation).isGreaterThan(1)
+            fixture.transport.connected(generation)
+            runCurrent()
+            val command = async { fixture.director.execute(UpdateSystemState(fixture.info, false)) }
+            runCurrent()
+            advanceTimeBy(Configuration.COMMAND_GAP_MS + 1)
+            runCurrent()
+            fixture.transport.response(1)
+            runCurrent()
+            assertThat(command.isCompleted).isFalse()
+            fixture.transport.response(generation)
+            runCurrent()
+            assertThat(command.await()).isNotNull()
+        } finally {
+            fixture.director.shutdown()
+            runCurrent()
+        }
+    }
+
+    private fun kotlinx.coroutines.test.TestScope.fixture(
+        autoRespondToWrites: Boolean = false,
+        handshake: suspend () -> ApexCommDirector.HandshakeResult = { ApexCommDirector.HandshakeResult.READY }
+    ): Fixture {
         val transport = FakeTransport(autoRespondToWrites)
         val info = FakeDeviceInfo()
         val director = ApexCommDirector(transport, aapsLogger, info, mock<ApexTrace>())
         director.setCallback(object : ApexCommDirector.Callback {
-            override suspend fun onHandshake() = ApexCommDirector.HandshakeResult.READY
+            override suspend fun onHandshake() = handshake()
             override fun onDisconnected(reason: String) = Unit
             override suspend fun onPumpData(value: PumpObjectModel) = Unit
         })
