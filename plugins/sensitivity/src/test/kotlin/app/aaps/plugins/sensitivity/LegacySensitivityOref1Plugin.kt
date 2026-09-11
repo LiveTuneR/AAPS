@@ -1,3 +1,5 @@
+// Frozen pre-optimization oracle from a800bc11003d4dfeb327724380e00a22bb3dcac4.
+// Keep calculation logic independent of the optimized implementation.
 package app.aaps.plugins.sensitivity
 
 import app.aaps.core.data.model.PS
@@ -27,7 +29,7 @@ import javax.inject.Singleton
 import kotlin.math.roundToInt
 
 @Singleton
-class SensitivityOref1Plugin @Inject constructor(
+internal class LegacySensitivityOref1Plugin @Inject constructor(
     aapsLogger: AAPSLogger,
     rh: ResourceHelper,
     preferences: Preferences,
@@ -77,11 +79,7 @@ class SensitivityOref1Plugin @Inject constructor(
         val deviationCategory = listOf(96.0, 288.0)
         val ratioLimitArray = mutableListOf("", "")
         val hoursDetection = listOf(8.0, 24.0)
-        val scanStart = System.nanoTime()
-        val tableSize = ads.autosensDataTable.size()
-        val firstRelevantIndex = autosensLowerBound(tableSize, fromTime) { ads.autosensDataTable.keyAt(it) }
-        var index = firstRelevantIndex
-        var rowsProcessed = 0
+        var index = 0
         while (index < ads.autosensDataTable.size()) {
             val autosensData = ads.autosensDataTable.valueAt(index)
             if (autosensData.time < fromTime) {
@@ -89,9 +87,9 @@ class SensitivityOref1Plugin @Inject constructor(
                 continue
             }
             if (autosensData.time > toTime) {
-                break
+                index++
+                continue
             }
-            rowsProcessed++
             var hourSegment = 0
             //hourSegment = 0 = 8 hour
             //hourSegment = 1 = 24 hour
@@ -132,7 +130,6 @@ class SensitivityOref1Plugin @Inject constructor(
             index++
         }
 
-        aapsLogger.debug(LTag.AUTOSENS, "Oref1 range autosensTableSize=$tableSize firstRelevantIndex=$firstRelevantIndex rowsProcessed=$rowsProcessed durationMs=${(System.nanoTime() - scanStart) / 1_000_000}")
         // when we have less than 8h/24 worth of deviation data, add up to 90m of zero deviations
         // this dampens any large sensitivity changes detected based on too little data, without ignoring them completely
         for (i in deviationsHour.indices) {
