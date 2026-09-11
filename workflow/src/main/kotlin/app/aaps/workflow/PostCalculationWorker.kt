@@ -71,7 +71,7 @@ class PostCalculationWorker @AssistedInject constructor(
         ) ?: return Result.failure(workDataOf("Error" to "missing or stale input data"))
 
         if (data.runLoopAndWidgetPhase) {
-            invokeLoop(data)
+            invokeLoop()
             if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
             widgetUpdater.update("WorkFlow")
             if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
@@ -80,19 +80,25 @@ class PostCalculationWorker @AssistedInject constructor(
         preparePredictions(data)
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
+        if (data.runLoopAndWidgetPhase) iobCobCalculator.loopHealth?.completed(inputData.getLong(WorkflowChainData.GEN_KEY, -1L), System.currentTimeMillis())
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
         return Result.success()
     }
 
     /*
      * Triggered once autosens calculation has completed so the Loop has current data to work with.
-     * Autosens can be triggered by multiple sources but currently only a new BG should trigger a loop run.
+     * A replacement DB chain can finish work started by NewBG; claim the BG, not its trigger flag.
      */
-    private suspend fun invokeLoop(data: PostCalculationData) {
-        if (!data.triggeredByNewBG) return
+    private suspend fun invokeLoop() {
+        if (isStopped) return
         val glucoseValue = iobCobCalculator.ads.actualBg() ?: return
-        if (glucoseValue.timestamp <= loop.lastBgTriggeredRun) return
-        loop.lastBgTriggeredRun = glucoseValue.timestamp
+        synchronized(loop) {
+            if (isStopped || workflowChainData.postFor(
+                    inputData.getString(WorkflowChainData.JOB_KEY),
+                    inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+                ) == null || glucoseValue.timestamp <= loop.lastBgTriggeredRun) return
+            loop.lastBgTriggeredRun = glucoseValue.timestamp
+        }
         loop.invoke("Calculation for $glucoseValue", true)
     }
 

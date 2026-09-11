@@ -146,6 +146,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
 
         // ===== Phase 6: Final progress emit (terminal worker only) =====
         if (data.emitFinalProgress) {
+            data.iobCobCalculator.loopHealth?.completed(inputData.getLong(WorkflowChainData.GEN_KEY, -1L), dateUtil.now())
             data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
         }
 
@@ -455,7 +456,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 autosensData.autosensResult = sensitivity
                 aapsLogger.debug(LTag.AUTOSENS) { autosensData.toString() }
             }
-            data.iobCobCalculator.ads = ads
+            publishAds(data, ads, start)
             Thread {
                 SystemClock.sleep(1000)
                 rxBus.send(EventAutosensCalculationFinished(data.triggeredByNewBG))
@@ -639,7 +640,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 autosensData.autosensResult = sensitivity
                 aapsLogger.debug(LTag.AUTOSENS, autosensData.toString())
             }
-            data.iobCobCalculator.ads = ads
+            publishAds(data, ads, start)
             Thread {
                 SystemClock.sleep(1000)
                 rxBus.send(EventAutosensCalculationFinished(data.triggeredByNewBG))
@@ -648,6 +649,15 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             data.signals.emitProgress(CalculationWorkflow.ProgressData.IOB_COB_OREF, 100)
             aapsLogger.debug(LTag.AUTOSENS) { "AUTOSENSDATA thread ended: ${data.reason}" }
             profiler.log(LTag.AUTOSENS, "IobCobThread", start)
+        }
+    }
+
+    private fun publishAds(data: PrepareGraphData, ads: AutosensDataStore, startedAt: Long) {
+        val job = inputData.getString(WorkflowChainData.JOB_KEY)
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        if (!workflowChainData.publishIfCurrent(job, generation, { isStopped }) { data.iobCobCalculator.ads = ads }) {
+            data.iobCobCalculator.loopHealth?.publishSkipped()
+            aapsLogger.debug(LTag.AUTOSENS, "Skipping ADS publish: superseded workerGeneration=$generation activeGeneration=${workflowChainData.activeGeneration(job)} job=$job ageMs=${dateUtil.now() - startedAt}")
         }
     }
 

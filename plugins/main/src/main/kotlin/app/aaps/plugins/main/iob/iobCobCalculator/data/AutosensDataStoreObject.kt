@@ -31,6 +31,7 @@ class AutosensDataStoreObject : AutosensDataStore {
     // we need to make sure that bucketed_data will always have the same timestamp for correct use of cached values
     // once referenceTime != null all bucketed data should be (x * 5min) from referenceTime
     var referenceTime: Long = -1
+    override val bucketReferenceTime: Long? get() = referenceTime.takeIf { it >= 0 }
 
     override var bgReadings: List<GV> = listOf() // newest at index 0
         @Synchronized set

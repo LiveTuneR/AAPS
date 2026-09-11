@@ -52,6 +52,7 @@ class CalculationWorkflowImpl @Inject constructor(
     }
 
     override fun stopCalculation(job: String, from: String) {
+        synchronized(enqueueLock) { workflowChainData.invalidate(job) }
         aapsLogger.debug(LTag.WORKER, "Stopping calculation thread: $from")
         val workManager = WorkManager.getInstance(context)
         workManager.cancelUniqueWork(job)

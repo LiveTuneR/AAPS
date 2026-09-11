@@ -36,6 +36,7 @@ fun <T> Flow<T>.collectResilient(
     aapsLogger: AAPSLogger,
     tag: LTag,
     restartDelayMs: Long = 1000L,
+    streamName: String = "unspecified",
     block: suspend (T) -> Unit
 ): Job =
     onEach { item ->
@@ -44,14 +45,14 @@ fun <T> Flow<T>.collectResilient(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            aapsLogger.error(tag, "Resilient collector: item processing failed, continuing", e)
+            aapsLogger.error(tag, "Resilient collector stream=$streamName exception=${e.javaClass.simpleName} timestamp=${System.currentTimeMillis()}: item processing failed, continuing", e)
         }
     }
         .retryWhen { cause, attempt ->
             if (cause is CancellationException) {
                 false // honor structured-concurrency cancellation (e.g. scope shutdown)
             } else {
-                aapsLogger.error(tag, "Resilient collector failed (attempt ${attempt + 1}), restarting", cause)
+                aapsLogger.error(tag, "Resilient collector stream=$streamName exception=${cause.javaClass.simpleName} timestamp=${System.currentTimeMillis()} failed (attempt ${attempt + 1}), restarting", cause)
                 delay(restartDelayMs)
                 true
             }

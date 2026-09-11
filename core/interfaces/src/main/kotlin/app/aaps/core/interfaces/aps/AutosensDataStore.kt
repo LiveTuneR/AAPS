@@ -7,6 +7,7 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.utils.DateUtil
 
 interface AutosensDataStore {
+    val bucketReferenceTime: Long? get() = null
 
     val dataLock: Any
 

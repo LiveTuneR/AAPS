@@ -63,6 +63,31 @@ class WorkflowChainData @Inject constructor(
     @Volatile private var predictionsChain: PredictionsChain? = null
     private val generator = AtomicLong()
 
+    @Synchronized
+    fun invalidate(job: String) {
+        when (job) {
+            MAIN_CALCULATION -> { mainChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); mainChain = null }
+            HISTORY_CALCULATION -> { historyChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); historyChain = null }
+            UPDATE_PREDICTIONS -> predictionsChain = null
+        }
+    }
+
+    fun activeGeneration(job: String?): Long? = when (job) {
+        MAIN_CALCULATION -> mainChain?.generation
+        HISTORY_CALCULATION -> historyChain?.generation
+        UPDATE_PREDICTIONS -> predictionsChain?.generation
+        else -> null
+    }
+
+    // Shares the slot replacement/invalidation monitor; validation and publication
+    // must be one operation, not a check followed by an unprotected ADS assignment.
+    @Synchronized
+    fun publishIfCurrent(job: String?, generation: Long, stopped: () -> Boolean, publish: () -> Unit): Boolean {
+        if (stopped() || activeGeneration(job) != generation) return false
+        publish()
+        return true
+    }
+
     // @Synchronized: `incrementAndGet` + slot write must be atomic together. Otherwise two
     // concurrent callers can interleave so the slot ends up holding the older generation
     // while WorkManager runs work tagged with the newer one, causing the worker's gen check
@@ -75,6 +100,7 @@ class WorkflowChainData @Inject constructor(
     ): Long {
         val gen = generator.incrementAndGet()
         mainChain = MainChain(gen, prepare, post)
+        prepare.iobCobCalculator.loopHealth?.started(MAIN_CALCULATION, gen, System.currentTimeMillis())
         return gen
     }
 
@@ -82,6 +108,7 @@ class WorkflowChainData @Inject constructor(
     fun startHistory(prepare: PrepareGraphDataWorker.PrepareGraphData): Long {
         val gen = generator.incrementAndGet()
         historyChain = HistoryChain(gen, prepare)
+        prepare.iobCobCalculator.loopHealth?.started(HISTORY_CALCULATION, gen, System.currentTimeMillis())
         return gen
     }
 

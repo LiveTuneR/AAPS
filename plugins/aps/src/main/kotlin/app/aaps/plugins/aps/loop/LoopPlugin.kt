@@ -86,6 +86,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CancellationException
+import app.aaps.core.interfaces.iob.loopHealthSnapshot
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -148,13 +152,14 @@ class LoopPlugin @Inject constructor(
 ), Loop, PluginConstraints {
 
     private val disposable = CompositeDisposable()
-    override var lastBgTriggeredRun: Long = 0
+    @Volatile override var lastBgTriggeredRun: Long = 0
     private var carbsSuggestionsSuspendedUntil: Long = 0
     private var prevCarbsreq = 0
     override var lastRun: LastRun? = null
     override var closedLoopEnabled: Constraint<Boolean>? = null
 
     private var handler: Handler? = null
+    private var healthObserver: Job? = null
 
     // Serializes loop runs. Master's invoke() was @Synchronized; the suspend migration dropped that
     // (and @Synchronized cannot span suspension points). invoke() is reachable concurrently — the
@@ -169,6 +174,23 @@ class LoopPlugin @Inject constructor(
         createNotificationChannel()
         super.onStart()
         handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
+        healthObserver?.cancel()
+        healthObserver = appScope.launch(Dispatchers.Default) {
+            var previous: app.aaps.core.data.diagnostics.LoopHealthStatus? = null
+            while (isActive) {
+                try {
+                    val now = dateUtil.now()
+                    val health = activePlugin.activeIobCobCalculator.loopHealthSnapshot(this@LoopPlugin)
+                    val state = health.status(now)
+                    if (state != previous) {
+                        aapsLogger.debug(LTag.AUTOSENS, "Passive LoopHealth state=$state rawAgeMs=${health.age(health.newestRawBgTimestamp, now)} bucketAgeMs=${health.age(health.newestBucketedBgTimestamp, now)} loopAgeMs=${health.age(health.lastBgTriggeredRun, now)} autosensAgeMs=${health.age(health.autosensLastDataTimestamp, now)} generation=${health.activeWorkflowGeneration} skipped=${health.supersededAdsPublishSkipCount}")
+                        previous = state
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { aapsLogger.error(LTag.AUTOSENS, "Passive LoopHealth observation failed: ${error.javaClass.simpleName}") }
+                delay(60_000)
+            }
+        }
         // TempTarget changes
         persistenceLayer.observeChanges(TT::class.java)
             // Skip db change of ending previous TT
@@ -212,6 +234,8 @@ class LoopPlugin @Inject constructor(
     }
 
     override suspend fun onStop() {
+        healthObserver?.cancel()
+        healthObserver = null
         disposable.clear()
         handler?.removeCallbacksAndMessages(null)
         handler?.looper?.quit()
