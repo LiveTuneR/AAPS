@@ -48,14 +48,17 @@ class AutosensDataStoreObject : AutosensDataStore {
     override fun clone(): AutosensDataStore =
         AutosensDataStoreObject().also {
             synchronized(dataLock) {
-                it.bgReadings = this.bgReadings.toMutableList()
-                it.autosensDataTable = LongSparseArray<AutosensData>(this.autosensDataTable.size).apply { putAll(this@AutosensDataStoreObject.autosensDataTable) }
-                it.bucketedData = this.bucketedData?.toMutableList()
+                it.bgReadings = this.bgReadings.map { row -> row.copy(ids = row.ids.copy()) }
+                it.autosensDataTable = LongSparseArray<AutosensData>(this.autosensDataTable.size).apply {
+                    val source = this@AutosensDataStoreObject.autosensDataTable
+                    for (index in 0 until source.size()) put(source.keyAt(index), source.valueAt(index).deepCopy())
+                }
+                it.bucketedData = this.bucketedData?.map { row -> row.copy() }?.toMutableList()
             }
         }
 
-    override fun getBucketedDataTableCopy(): MutableList<InMemoryGlucoseValue>? = synchronized(dataLock) { bucketedData?.toMutableList() }
-    override fun getBgReadingsDataTableCopy(): List<GV> = synchronized(dataLock) { bgReadings.toMutableList() }
+    override fun getBucketedDataTableCopy(): MutableList<InMemoryGlucoseValue>? = synchronized(dataLock) { bucketedData?.map { it.copy() }?.toMutableList() }
+    override fun getBgReadingsDataTableCopy(): List<GV> = synchronized(dataLock) { bgReadings.map { it.copy(ids = it.ids.copy()) } }
 
     override fun reset() {
         synchronized(autosensDataTable) { autosensDataTable = LongSparseArray() }

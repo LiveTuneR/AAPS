@@ -44,9 +44,41 @@ interface AutosensData {
 
     fun cloneCarbsList(): MutableList<CarbsInPast>
 
+    /** A separate owner for every mutable row, nested carb entry and sensitivity result. */
+    fun deepCopy(): AutosensData
+
     /**
      * Deduct this 5 min absorption from the active carbs list from oldest to newest.
      */
     fun deductAbsorbedCarbs()
     fun removeOldCarbs(toTime: Long, isAAPSOrWeighted: Boolean)
+}
+
+/** Copies values only; the target retains its own behavior/dependencies. */
+fun AutosensData.copyStateTo(target: AutosensData): AutosensData = target.also {
+    it.time = time
+    it.bg = bg
+    it.sens = sens
+    it.pastSensitivity = pastSensitivity
+    it.deviation = deviation
+    it.validDeviation = validDeviation
+    it.activeCarbsList = activeCarbsList.map { carb -> carb.copy() }.toMutableList()
+    it.this5MinAbsorption = this5MinAbsorption
+    it.carbsFromBolus = carbsFromBolus
+    it.cob = cob
+    it.bgi = bgi
+    it.delta = delta
+    it.avgDelta = avgDelta
+    it.slopeFromMaxDeviation = slopeFromMaxDeviation
+    it.slopeFromMinDeviation = slopeFromMinDeviation
+    it.usedMinCarbsImpact = usedMinCarbsImpact
+    it.failOverToMinAbsorptionRate = failOverToMinAbsorptionRate
+    it.avgDeviation = avgDeviation
+    it.absorbing = absorbing
+    it.mealCarbs = mealCarbs
+    it.mealStartCounter = mealStartCounter
+    it.type = type
+    it.uam = uam
+    it.extraDeviation = extraDeviation.toMutableList()
+    it.autosensResult = autosensResult.copy()
 }

@@ -1542,4 +1542,38 @@ class AutosensDataStoreTest : TestBaseWithProfile() {
         ads.autosensDataTable = LongSparseArray<AutosensData>()
         assertThat(ads.getLastAutosensData("test", aapsLogger, dateUtil)).isNull()
     }
+
+    @Test
+    fun `published copy owns rows nested carb entries and glucose metadata`() {
+        val source = AutosensDataStoreObject()
+        val row = AutosensDataObject(aapsLogger, preferences, dateUtil).apply {
+            time = now
+            cob = 21.0
+            activeCarbsList.add(AutosensData.CarbsInPast(now, 30.0, 2.0, 21.0))
+            extraDeviation.add(3.0)
+            autosensResult.ratio = 1.1
+        }
+        source.autosensDataTable.put(now, row)
+        source.bgReadings = listOf(GV(timestamp = now, value = 123.0, raw = null, noise = null, trendArrow = TrendArrow.FLAT, sourceSensor = SourceSensor.UNKNOWN))
+        source.bucketedData = mutableListOf(app.aaps.core.data.iob.InMemoryGlucoseValue(timestamp = now, value = 123.0, smoothed = 122.0))
+        val published = source.clone()
+        row.cob = 0.0
+        row.activeCarbsList[0].remaining = 0.0
+        row.extraDeviation[0] = 99.0
+        row.autosensResult.ratio = 0.5
+        source.bgReadings[0].ids.nightscoutId = "late-writeback"
+        source.bgReadings[0].value = 999.0
+        source.bucketedData!![0].smoothed = 888.0
+        assertThat(published.autosensDataTable[now]!!.cob).isEqualTo(21.0)
+        assertThat(published.autosensDataTable[now]!!.activeCarbsList[0].remaining).isEqualTo(21.0)
+        assertThat(published.autosensDataTable[now]!!.extraDeviation).containsExactly(3.0)
+        assertThat(published.autosensDataTable[now]!!.autosensResult.ratio).isEqualTo(1.1)
+        assertThat(published.bgReadings[0].ids.nightscoutId).isNull()
+        assertThat(published.bgReadings[0].value).isEqualTo(123.0)
+        assertThat(published.bucketedData!![0].smoothed).isEqualTo(122.0)
+        published.getBucketedDataTableCopy()!![0].smoothed = 456.0
+        published.getBgReadingsDataTableCopy()[0].ids.nightscoutId = "external-write"
+        assertThat(published.bucketedData!![0].smoothed).isEqualTo(122.0)
+        assertThat(published.bgReadings[0].ids.nightscoutId).isNull()
+    }
 }
