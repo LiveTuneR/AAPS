@@ -3,6 +3,8 @@
 Status: PARTIAL, not a clinically validated release. Do not install this branch for
 therapy on the strength of compilation or desktop tests alone.
 
+Latest signed build and CI evidence: [build receipt](APEX7_BUILD_RECEIPT.md).
+
 Start: `a800bc11003d4dfeb327724380e00a22bb3dcac4`.
 Branch: `codex/apex7-reliability-overview` in `LiveTuneR/AAPS`.
 Preflight and upstream comparison: [audit](APEX7_RELIABILITY_AUDIT.md).
@@ -82,10 +84,10 @@ Last calculation values are accompanied by their timestamps, not presented as a
 freshly recomputed therapy result. Site/sensor starts are recorded therapy events,
 not inferred from the first glucose row. Pump reservoir is labeled in pump units.
 
-No screenshots are delivered: Robolectric window capture timed out. The remaining
-Compose tests use synthetic fixtures, not a phone with an active pump. Real-device
-layout, background SDK sync and clinical acceptance remain pending. There is no
-Android emulator installation in the current SDK.
+The follow-up build delivers 12 minimal synthetic component screenshots using
+direct View rendering; the original hardware capture timed out. This is not a
+phone with an active pump. Real-device layout, background SDK sync and clinical
+acceptance remain pending. See the build receipt for the exact verified scope.
 
 ### Apex and optional changes
 
