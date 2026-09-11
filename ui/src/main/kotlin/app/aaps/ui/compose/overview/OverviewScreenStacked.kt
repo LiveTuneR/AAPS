@@ -139,6 +139,8 @@ fun OverviewScreenStacked(
             )
         }
 
+        app.aaps.ui.compose.overview.enhanced.EnhancedOverviewSection()
+
         OverviewStatusSection(
             sensorStatus = statusState.sensorStatus,
             insulinStatus = statusState.insulinStatus,
