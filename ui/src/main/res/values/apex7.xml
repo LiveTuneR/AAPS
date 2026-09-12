@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_target_short">Target</string>
+    <string name="apex7_profile_short">Profile</string>
+    <string name="apex7_age_warning">Age warning</string>
+    <string name="apex7_isf_short">ISF</string>
+    <string name="apex7_cr_short">CR</string>
+    <string name="apex7_loop_short">Loop</string>
+    <string name="apex7_site_short">Cannula</string>
+    <string name="apex7_sync_short">Pump sync</string>
+    <string name="apex7_connected">Connected</string>
+    <string name="apex7_disconnected">Disconnected</string>
+    <string name="apex7_unavailable_short">Unavailable</string>
+    <string name="apex7_days_hours">%1$d d %2$d h</string>
+    <string name="apex7_hours_minutes">%1$d h %2$d min</string>
+    <string name="apex7_bg_graph">Glucose</string>
     <string name="apex7_current_dynamic_isf">Current dynamic ISF</string>
     <string name="apex7_dosing_isf">ISF used for insulin requirement</string>
     <string name="apex7_future_isf">Future-state ISF</string>

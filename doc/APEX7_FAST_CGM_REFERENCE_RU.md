@@ -1,7 +1,7 @@
 # Fast CGM и экран по референсу
 
 База: `ec8f4f571ec940e89f50a5877a2d33b0307360e7`.
-Дата: 2026-09-12. Статус: PARTIAL до окончания UI/CI приёмки.
+Дата: 2026-09-12. Статус: PARTIAL; ограничения планировщика и device validation остаются.
 Любой APK: **EXPERIMENTAL_NOT_DEVICE_VALIDATED**.
 
 ## A. Причина и изменение
@@ -100,8 +100,62 @@ Pending-latest должен явно учитывать пропуски про�
 
 ## B. UI
 
-Реализация и визуальная приёмка в отдельном коммите. Сохранён переключатель
+Реализация UI в отдельном коммите. Сохранён переключатель
 Enhanced Overview; обычный экран и NSClient остаются отдельным путём.
 Activity read-only. Финальный AutoISF factor не выдумывается: нет отдельного
 структурированного поля, поэтому показывается --, trace доступен в деталях.
-Дальнейшие скриншоты, JUnit и provenance записываются после завершения проверки.
+
+Экран: крупный BG слева; Target/IOB/COB/ISF/CR/AutoISF справа; затем Activity,
+Pump/Cannula/Sensor; SMB/Loop/Pump sync/Profile; настоящие Vico BG/IOB/COB.
+В ландшафте операционные данные слева, графики справа. Статус отличного от
+обычного CLOSED_LOOP режима выведен дополнительно, чтобы не скрыть приостановку.
+Нет нового command callback или доступа UI к доставке инсулина. Старые 10
+диагностических sheets сохранены; target/profile имеют read-only детали.
+Существующие внешние меню/управление не заменены нарисованными кнопками.
+
+Пять обязательных состояний и missing-data fixture отрисованы настоящими
+EnhancedOverviewContent + GraphsSection в Robolectric/native graphics. Геометрия
+BG/metrics/activity/devices/graph проверяется отдельно от наличия текста.
+Все 10 прежних sheets открываются в тесте, неизвестное значение не становится 0.
+Графики получают детерминированные StateFlow, не скриншот-заглушку.
+Это снимки content-компонента, НЕ всего приложения с системной/нижней навигацией,
+и НЕ доказательство поведения на телефоне. Тестовые графики/активность синтетические.
+
+Визуальная проверка выполнена по референсу, включая предупреждения и landscape.
+Сохранены иерархия/расположение; это не пиксельная копия: нет отдельного итогового
+AutoISF, графики используют прежний Vico, а не стилизованные бары макета; отдельный
+переключатель 3/6/12/24 часа из изображения не добавлен. Существующие жесты/редактор
+графиков сохранены. Полная визуальная приёмка на реальном устройстве остаётся открытой.
+
+Релизный каталог: `X:/Projects/lumiflex/releases/apex7-reference-followup-20260912/`.
+`visual-comparison-standalone.html` содержит все 7 PNG внутри файла. Проверен
+headless Edge/Playwright: 7/7 complete с ненулевыми naturalWidth/naturalHeight.
+`comparison-desktop.png` показывает страницу сравнения целиком.
+Первоначальный HTML временно ссылался на ещё не скопированные PNG; комплект
+исправлен, отдельный standalone больше не зависит от соседних файлов.
+
+## Локальный полный релевантный host-прогон
+
+`build/apex7-reference-full.log`: BUILD SUCCESSFUL, 3m16s. Test tasks выполнялись
+заново (init script запрещает их up-to-date/cache); compile cache разрешён.
+1518 JUnit тестов, 0 failures, 0 errors, 0 skipped. Ниже не число assert/cases.
+Frozen SMB matrix содержит 768 сценариев внутри одного JUnit test; digest сохранён.
+
+| Модуль | Tests | Failures | Errors | Skipped |
+|---|---:|---:|---:|---:|
+| workflow | 17 | 0 | 0 | 0 |
+| plugins/main | 35 | 0 | 0 | 0 |
+| plugins/sensitivity | 58 | 0 | 0 | 0 |
+| core/interfaces | 51 | 0 | 0 | 0 |
+| plugins/sync | 843 | 0 | 0 | 0 |
+| pump/apex | 25 | 0 | 0 | 0 |
+| core/data | 32 | 0 | 0 | 0 |
+| pump/medtrum | 144 | 0 | 0 | 0 |
+| plugins/aps | 288 | 0 | 0 | 0 |
+| plugins/smoothing | 8 | 0 | 0 | 0 |
+| implementation (LogArchive/Maintenance) | 9 | 0 | 0 | 0 |
+| shared/impl (RxBus logging) | 1 | 0 | 0 | 0 |
+| ui (Overview/Activity codec) | 7 | 0 | 0 | 0 |
+
+Остальные host-модули не объявляются прогнанными. Release provenance/CI identity
+записывается отдельной квитанцией после скачивания и проверки нового APK.

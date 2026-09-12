@@ -1,10 +1,18 @@
 package app.aaps.ui.compose.overview.enhanced
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Modifier
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
+import app.aaps.core.ui.compose.AapsTheme
+import app.aaps.core.ui.compose.LocalPreferences
+import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.StringKey
+import app.aaps.core.data.model.TrendArrow
+import app.aaps.core.interfaces.overview.graph.*
+import app.aaps.ui.compose.overview.graphs.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.whenever
+import org.junit.Assert.assertTrue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import app.aaps.ui.R
@@ -19,18 +27,50 @@ import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = "en-w400dp-h900dp")
+@Config(sdk = [35], qualifiers = "ru-w400dp-h850dp")
 class EnhancedOverviewContentTest {
     @get:Rule val compose = createComposeRule()
     private val titles = listOf(R.string.apex7_autoisf, R.string.apex7_activity, R.string.apex7_iob,
         R.string.apex7_isfcr, R.string.apex7_cob, R.string.apex7_smb, R.string.apex7_pump,
         R.string.apex7_site, R.string.apex7_sensor, R.string.apex7_loop)
 
-    private fun render() {
+    private val now = 1_789_200_000_000L
+    private fun render(warning: Boolean = false, missingActivity: Boolean = false, disconnected: Boolean = false, missingAll: Boolean = false) {
         val state = OverviewDashboardState(titles.map { title ->
             DashboardTile(title, null, listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null)))
-        })
-        compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) { EnhancedOverviewContent(state) } } }
+        }.map { tile -> tile.copy(summary = if (missingAll) null else when (tile.title) { R.string.apex7_iob -> "1,6 Е"; R.string.apex7_cob -> "22 г"; else -> null }) }, now,
+            if (missingAll) OverviewVitals() else OverviewVitals(
+                units = "ммоль/л", isf = "2,4", cr = "6,4", autoIsf = null,
+                activity = if (missingActivity) null else "лёгкая", activityDetail = if (missingActivity) null else "Ходьба · 24 мин",
+                pumpConnected = !disconnected, reservoir = "142 Е", battery = "87%", siteAge = "2 д 10 ч", siteWarning = warning,
+                sensorAge = "5 д 16 ч", bgAge = if (warning) "14 мин" else "42 с", loopAge = "38 с", syncAge = "23 с", profile = "100%"))
+        val bg = BgInfoUiState(if (missingAll) null else BgInfoData(5.6, "5,6", BgRange.IN_RANGE, warning, now - 120_000,
+            TrendArrow.FLAT, "Ровно", 0.0, "0,0", null, null, null, null), if (warning) "14 мин назад" else "2 мин назад")
+        val vm = mock<GraphViewModel>()
+        val points = (0..72).map { index -> BgDataPoint(now - (72 - index) * 300_000L, 6.0 + kotlin.math.sin(index / 8.0), BgRange.IN_RANGE, BgType.BUCKETED) }
+        whenever(vm.graphConfigFlow).thenReturn(MutableStateFlow(GraphConfig(bgOverlays = listOf(SeriesType.PREDICTIONS), iobOverlays = emptyList())))
+        whenever(vm.nowTimestamp).thenReturn(MutableStateFlow(now))
+        whenever(vm.derivedTimeRange).thenReturn(MutableStateFlow((now - 21_600_000L) to (now + 3_600_000L)))
+        whenever(vm.bgInfoState).thenReturn(MutableStateFlow(bg))
+        whenever(vm.bgReadingsFlow).thenReturn(MutableStateFlow(emptyList()))
+        whenever(vm.bucketedDataFlow).thenReturn(MutableStateFlow(points))
+        whenever(vm.predictionsFlow).thenReturn(MutableStateFlow((1..12).map { BgDataPoint(now + it * 300_000L, 5.6 - it * 0.05, BgRange.IN_RANGE, BgType.IOB_PREDICTION) }))
+        whenever(vm.chartConfigFlow).thenReturn(MutableStateFlow(ChartConfig(10.0, 3.9)))
+        whenever(vm.basalGraphFlow).thenReturn(MutableStateFlow(BasalGraphData(points.map { GraphDataPoint(it.timestamp, 1.1) }, points.map { GraphDataPoint(it.timestamp, 1.1) }, 1.1)))
+        whenever(vm.targetLineFlow).thenReturn(MutableStateFlow(TargetLineData(points.map { GraphDataPoint(it.timestamp, 5.9) })))
+        whenever(vm.epsGraphFlow).thenReturn(MutableStateFlow(emptyList()))
+        whenever(vm.activityGraphFlow).thenReturn(MutableStateFlow(ActivityGraphData(emptyList(), emptyList())))
+        whenever(vm.treatmentGraphFlow).thenReturn(MutableStateFlow(TreatmentGraphData(emptyList(), emptyList(), emptyList(), emptyList())))
+        whenever(vm.runningModeGraphFlow).thenReturn(MutableStateFlow(RunningModeGraphData(emptyList())))
+        whenever(vm.iobGraphFlow).thenReturn(MutableStateFlow(IobGraphData(points.map { GraphDataPoint(it.timestamp, 1.6 + kotlin.math.sin(it.timestamp / 3_000_000.0)) }, emptyList())))
+        whenever(vm.cobGraphFlow).thenReturn(MutableStateFlow(CobGraphData(points.mapIndexed { i, p -> GraphDataPoint(p.timestamp, 22.0 * i / 72) }, emptyList())))
+        val preferences = mock<Preferences>()
+        whenever(preferences.observe(StringKey.GeneralDarkMode)).thenReturn(MutableStateFlow("dark"))
+        compose.setContent { CompositionLocalProvider(LocalPreferences provides preferences) { AapsTheme { Surface {
+            EnhancedOverviewContent(state, bg, if (missingAll) null else "5,5 - 6,3", smbEnabled = !warning,
+                modeNotice = if (warning) "Цикл приостановлен" else null,
+                graphs = { GraphsSection(vm, false, minimumBgHeight = 180) })
+        } } } }
     }
 
     private fun capture(name: String) {
@@ -50,26 +90,46 @@ class EnhancedOverviewContentTest {
     }
 
     @Test fun unknownFieldsAreNotReplacedWithZeroAndAllDetailsOpen() {
-        render()
-        capture("overview-en-portrait-synthetic")
+        render(missingAll = true)
+        capture("overview-missing-data-fixture")
         val context = RuntimeEnvironment.getApplication()
         for (title in titles) {
-            compose.onNodeWithText(context.getString(title)).performScrollTo().performClick()
+            compose.onNodeWithTag("detail-$title").performScrollTo().performClick()
             capture("detail-${context.resources.getResourceEntryName(title)}-en-synthetic")
             compose.onNodeWithContentDescription(context.getString(R.string.apex7_close)).assertIsDisplayed().performClick()
             compose.waitForIdle()
         }
-        compose.onAllNodesWithText(context.getString(R.string.apex7_unknown)).assertCountEquals(10)
+        compose.onNodeWithTag("detail-${R.string.apex7_autoisf}").performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.apex7_unknown)).assertExists()
     }
 
     @Test @Config(qualifiers = "ru-w800dp-h480dp")
     fun russianLandscapeKeepsDetailsReachable() {
         render()
         val context = RuntimeEnvironment.getApplication()
-        compose.onNodeWithText(context.getString(R.string.apex7_loop)).performScrollTo().performClick()
+        capture("overview-landscape-fixture")
+        compose.onNodeWithTag("detail-${R.string.apex7_loop}").performScrollTo().performClick()
         compose.onNodeWithText("12").assertExists()
         compose.onNodeWithContentDescription(context.getString(R.string.apex7_close)).assertIsDisplayed()
         capture("loop-ru-landscape-synthetic")
     }
+
+    @Test fun portraitNormalMatchesReferenceHierarchy() {
+        render()
+        val bg = compose.onNodeWithTag("overview-bg").fetchSemanticsNode().boundsInRoot
+        val target = compose.onNodeWithTag("detail-${R.string.apex7_target_short}").fetchSemanticsNode().boundsInRoot
+        val activity = compose.onNodeWithTag("detail-${R.string.apex7_activity}").fetchSemanticsNode().boundsInRoot
+        val pump = compose.onNodeWithTag("detail-${R.string.apex7_pump}").fetchSemanticsNode().boundsInRoot
+        val graph = compose.onNodeWithTag("overview-graphs").fetchSemanticsNode().boundsInRoot
+        assertTrue(bg.right <= target.left)
+        assertTrue(activity.top >= bg.bottom)
+        assertTrue(pump.top >= activity.bottom)
+        assertTrue(graph.top > pump.bottom)
+        assertTrue(graph.top < 550 * RuntimeEnvironment.getApplication().resources.displayMetrics.density)
+        capture("overview-portrait-normal-fixture")
+    }
+    @Test fun portraitWarnings() { render(warning = true); capture("overview-portrait-warnings-fixture") }
+    @Test fun portraitMissingActivity() { render(missingActivity = true); capture("overview-portrait-no-activity-fixture") }
+    @Test fun portraitDisconnectedPump() { render(disconnected = true); capture("overview-portrait-disconnected-fixture") }
 
 }

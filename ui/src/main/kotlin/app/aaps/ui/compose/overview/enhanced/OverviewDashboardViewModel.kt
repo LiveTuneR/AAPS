@@ -37,7 +37,26 @@ import java.util.Locale
 
 data class DashboardField(val label: Int, val value: String?)
 data class DashboardTile(val title: Int, val summary: String?, val fields: List<DashboardField>)
-data class OverviewDashboardState(val tiles: List<DashboardTile> = emptyList(), val capturedAt: Long? = null)
+data class OverviewVitals(
+    val units: String? = null,
+    val isf: String? = null,
+    val cr: String? = null,
+    val autoIsf: String? = null,
+    val activity: String? = null,
+    val activityDetail: String? = null,
+    val pumpConnected: Boolean? = null,
+    val reservoir: String? = null,
+    val battery: String? = null,
+    val siteAge: String? = null,
+    val siteWarning: Boolean = false,
+    val sensorAge: String? = null,
+    val bgAge: String? = null,
+    val loopAge: String? = null,
+    val syncAge: String? = null,
+    val profile: String? = null
+)
+
+data class OverviewDashboardState(val tiles: List<DashboardTile> = emptyList(), val capturedAt: Long? = null, val vitals: OverviewVitals = OverviewVitals())
 
 @HiltViewModel
 class OverviewDashboardViewModel @Inject constructor(
@@ -79,6 +98,14 @@ class OverviewDashboardViewModel @Inject constructor(
     private fun age(value: Long?, now: Long): String? = value?.takeIf { it > 0 && it <= now }?.let { rh.gs(R.string.apex7_minutes, (now - it) / 60_000) }
     private fun bool(value: Boolean) = rh.gs(if (value) R.string.apex7_yes else R.string.apex7_no)
     private fun milliseconds(value: Long?) = value?.takeIf { it >= 0 }?.let { rh.gs(R.string.apex7_milliseconds, it) }
+    private fun compactAge(value: Long?, now: Long): String? = value?.takeIf { it > 0 && it <= now }?.let {
+        val minutes = (now - it) / 60_000
+        when {
+            minutes >= 1440 -> rh.gs(R.string.apex7_days_hours, minutes / 1440, minutes % 1440 / 60)
+            minutes >= 60 -> rh.gs(R.string.apex7_hours_minutes, minutes / 60, minutes % 60)
+            else -> rh.gs(R.string.apex7_minutes, minutes)
+        }
+    }
 
     private suspend fun refresh() {
         val now = System.currentTimeMillis()
@@ -197,6 +224,24 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_duration to milliseconds(snapshot.calculationDuration(now)), R.string.apex7_anchor to time(snapshot.referenceTime),
                 R.string.apex7_phase to snapshot.currentSensorPhaseOffsetMs?.toString(), R.string.apex7_skipped to snapshot.supersededAdsPublishSkipCount.toString(),
                 R.string.apex7_metadata to snapshot.duplicateGlucoseMetadataEventCount.toString(), R.string.apex7_changes to snapshot.therapyRelevantGlucoseUpdateCount.toString())
-        ), now)
+        ), now, OverviewVitals(
+            units = units.asText,
+            isf = decision?.currentDynamicIsfMgdl?.takeIf { it > 0 && recent(request?.date) }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
+            cr = effectiveCr.takeIf { recent(request?.date) },
+            // No structured final AutoISF factor exists yet. Never substitute an autosens ratio.
+            autoIsf = null,
+            activity = activityState.takeIf { activity.access == ActivityAccess.AVAILABLE },
+            activityDetail = event?.let { listOfNotNull(it.category.name, compactAge(it.startTime, it.endTime ?: now)).joinToString(" / ") },
+            pumpConnected = pump.isConnected().takeIf { pumpKnown },
+            reservoir = if (pumpKnown) number(pump.reservoirLevel.value.cU)?.let { rh.gs(R.string.apex7_insulin_units, it) } else null,
+            battery = if (pumpKnown) pump.batteryLevel.value?.let { "$it%" } else null,
+            siteAge = compactAge(site?.timestamp, now),
+            siteWarning = site?.timestamp?.let { now - it >= preferences.get(IntKey.OverviewCageWarning) * 3_600_000L } ?: false,
+            sensorAge = compactAge(sensor?.timestamp, now),
+            bgAge = compactAge(snapshot.newestRawBgTimestamp, now),
+            loopAge = compactAge(snapshot.lastBgTriggeredRun, now),
+            syncAge = compactAge(pump.lastDataTime.value, now),
+            profile = profile?.percentage?.let { "$it%" }
+        ))
     }
 }

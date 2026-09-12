@@ -96,11 +96,13 @@ private val CONFIGURABLE_SERIES = SeriesType.entries.filter {
 fun GraphsSection(
     graphViewModel: GraphViewModel,
     isSimpleMode: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    minimumBgHeight: Int = GraphConfig.DEFAULT_GRAPH_HEIGHT_DP
 ) {
     val savedGraphConfig by graphViewModel.graphConfigFlow.collectAsStateWithLifecycle()
     // In simple mode: fixed layout (BG, IOB+BAS, COB — no overlays, no editing)
-    val graphConfig = if (isSimpleMode) SIMPLE_MODE_CONFIG else savedGraphConfig
+    val selectedConfig = if (isSimpleMode) SIMPLE_MODE_CONFIG else savedGraphConfig
+    val graphConfig = selectedConfig.copy(bgHeight = maxOf(selectedConfig.bgHeight, minimumBgHeight))
 
     // Zoom.x(...) allocates a fresh (non-equal, unmemoized) lambda instance on every call.
     // rememberVicoZoomState's underlying rememberSaveable is keyed on initialZoom/minZoom/maxZoom

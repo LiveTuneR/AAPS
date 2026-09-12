@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_target_short">Цель</string>
+    <string name="apex7_profile_short">Профиль</string>
+    <string name="apex7_age_warning">Превышен порог</string>
+    <string name="apex7_isf_short">ISF</string>
+    <string name="apex7_cr_short">CR</string>
+    <string name="apex7_loop_short">Loop</string>
+    <string name="apex7_site_short">Канюля</string>
+    <string name="apex7_sync_short">Синхр.</string>
+    <string name="apex7_connected">Подключена</string>
+    <string name="apex7_disconnected">Нет связи</string>
+    <string name="apex7_unavailable_short">Нет данных</string>
+    <string name="apex7_days_hours">%1$d д %2$d ч</string>
+    <string name="apex7_hours_minutes">%1$d ч %2$d мин</string>
+    <string name="apex7_bg_graph">Глюкоза</string>
     <string name="apex7_current_dynamic_isf">Текущий динамический ISF</string>
     <string name="apex7_dosing_isf">ISF расчёта потребности в инсулине</string>
     <string name="apex7_future_isf">ISF будущего состояния</string>
