@@ -91,16 +91,24 @@ class PostCalculationWorker @AssistedInject constructor(
      * A replacement DB chain can finish work started by NewBG; claim the BG, not its trigger flag.
      */
     private suspend fun invokeLoop() {
-        if (isStopped) return
-        val glucoseValue = iobCobCalculator.ads.actualBg() ?: return
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        val store = iobCobCalculator.ads
+        val raw = store.bgReadings.firstOrNull()?.timestamp
+        val bucket = store.lastBg()?.timestamp
+        val pass = store.lastBucketPass
+        fun evidence(invoked: Boolean, reason: String) = aapsLogger.info(LTag.APS,
+            "CgmDecision stage=LOOP_GATE generation=$generation rawBgTimestamp=$raw bucketBgTimestamp=$bucket referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${store.bucketReferenceTime} loopInvoked=$invoked reason=$reason lastClaimedBg=${loop.lastBgTriggeredRun} at=${System.currentTimeMillis()}")
+        if (isStopped) { evidence(false, "WORKER_STOPPED"); return }
+        val glucoseValue = store.actualBg() ?: run { evidence(false, "NO_FRESH_ACTUAL_BG"); return }
         synchronized(loop) {
             if (isStopped || workflowChainData.postFor(
                     inputData.getString(WorkflowChainData.JOB_KEY),
                     inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
-                ) == null || glucoseValue.timestamp <= loop.lastBgTriggeredRun) return
+                ) == null) { evidence(false, "STALE_GENERATION_OR_STOPPED"); return }
+            if (glucoseValue.timestamp <= loop.lastBgTriggeredRun) { evidence(false, "DUPLICATE_OR_OLDER_BG"); return }
             loop.lastBgTriggeredRun = glucoseValue.timestamp
         }
-        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        evidence(true, "NEW_BG_DISPATCHED")
         aapsLogger.info(LTag.APS, "WorkflowDecision stage=BG_CLAIMED generation=$generation bgTimestamp=${glucoseValue.timestamp} at=${System.currentTimeMillis()}")
         try {
             loop.invoke("Calculation for $glucoseValue", true)

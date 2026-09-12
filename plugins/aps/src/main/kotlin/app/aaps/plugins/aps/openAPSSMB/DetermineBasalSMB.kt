@@ -234,6 +234,7 @@ class DetermineBasalSMB @Inject constructor(
             algorithm = "SMB", dynamicIsf = dynIsfMode, calculatedAt = currentTime, inputTimestamp = glucose_status.date,
             profileIsfMgdl = profile.sens, currentDynamicIsfMgdl = profile.variable_sens.takeIf { dynIsfMode },
             carbRatio = profile.carb_ratio,
+            tddU = profile.TDD.takeIf { dynIsfMode }, insulinDivisor = profile.insulinDivisor.takeIf { dynIsfMode },
             smbConfigured = profile.enableSMB_always || profile.enableSMB_with_COB || profile.enableSMB_after_carbs || profile.enableSMB_with_temptarget
         )
 
@@ -1204,6 +1205,7 @@ class DetermineBasalSMB @Inject constructor(
                 }
 
                 var smbLowTempReq = 0.0
+                rT.smbZeroTempEquivalentMinutes = durationReq
                 if (durationReq <= 0) {
                     durationReq = 0
                     // don't set an SMB zero temp longer than 60 minutes
@@ -1212,7 +1214,8 @@ class DetermineBasalSMB @Inject constructor(
                     durationReq = min(60, max(0, durationReq))
                 } else {
                     // if SMB durationReq is less than 30m, set a nonzero low temp
-                    smbLowTempReq = round(basal * durationReq / 30.0, 2)
+                    // Hold back durationReq minutes of basal across a 30-minute temp (#5082).
+                    smbLowTempReq = round(basal * (30 - durationReq) / 30.0, 2)
                     durationReq = 30
                 }
                 rT.reason.append(" insulinReq $insulinReq")

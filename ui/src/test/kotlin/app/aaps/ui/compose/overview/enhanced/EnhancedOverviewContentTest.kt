@@ -35,13 +35,15 @@ class EnhancedOverviewContentTest {
         R.string.apex7_site, R.string.apex7_sensor, R.string.apex7_loop)
 
     private val now = 1_789_200_000_000L
-    private fun render(warning: Boolean = false, missingActivity: Boolean = false, disconnected: Boolean = false, missingAll: Boolean = false, tempTarget: Boolean = false) {
+    private fun render(warning: Boolean = false, missingActivity: Boolean = false, disconnected: Boolean = false, missingAll: Boolean = false, tempTarget: Boolean = false, smb: OverviewSmbState = OverviewSmbState.ON) {
+        val english = RuntimeEnvironment.getApplication().resources.configuration.locales[0].language == "en"
         val state = OverviewDashboardState(titles.map { title ->
             DashboardTile(title, null, listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null)))
         }.map { tile -> tile.copy(summary = if (missingAll) null else when (tile.title) { R.string.apex7_iob -> "1,6 Е"; R.string.apex7_cob -> "22 г"; else -> null }) }, now,
             if (missingAll) OverviewVitals() else OverviewVitals(
-                units = "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = null,
-                activity = if (missingActivity) null else "лёгкая", activityDetail = if (missingActivity) null else "Ходьба · 24 мин",
+                units = if (english) "mmol/L" else "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = "2,4", algorithmTitle = R.string.apex7_disf,
+                activity = if (missingActivity) null else if (english) "light" else "лёгкая", activityDetail = if (missingActivity) null else if (english) "Walking / 24 min" else "Ходьба · 24 мин",
+                activityUpdatedAt = if (missingActivity) null else now - 32_000L, smbState = smb,
                 pumpConnected = !disconnected, reservoir = "142 Е", battery = "87%", siteAge = "2 д 10 ч", siteWarning = warning,
                 sensorAge = "5 д 16 ч", bgAge = if (warning) "14 мин" else "42 с", loopAge = "38 с", syncAge = "23 с", profile = "100%"))
         val bg = BgInfoUiState(if (missingAll) null else BgInfoData(5.6, "5,6", BgRange.IN_RANGE, warning, now - 120_000,
@@ -130,6 +132,25 @@ class EnhancedOverviewContentTest {
         capture("overview-portrait-normal-fixture")
     }
     @Test fun portraitWarnings() { render(warning = true); capture("overview-portrait-warnings-fixture") }
+    @Test fun portraitSmbWait() { render(smb = OverviewSmbState.WAIT); compose.onNodeWithText("SMB WAIT").assertExists(); capture("overview-portrait-wait-fixture") }
+    @Test fun portraitSmbOff() { render(smb = OverviewSmbState.OFF); compose.onNodeWithText("SMB OFF").assertExists(); capture("overview-portrait-off-fixture") }
+    @Test @Config(qualifiers = "en-w400dp-h850dp")
+    fun englishPortrait() { render(); capture("overview-portrait-en-fixture") }
+    @Test fun largeFontKeepsSingleStatusRow() {
+        RuntimeEnvironment.setFontScale(1.5f)
+        try { render(); capture("overview-large-font-fixture") }
+        finally { RuntimeEnvironment.setFontScale(1f) }
+    }
+    @Test fun activityAgeAndAdaptiveTileAreVisibleAndStatusesShareOneRow() {
+        render()
+        compose.onNodeWithTag("activity-updated", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("dISF").assertIsDisplayed()
+        val statuses = listOf(R.string.apex7_smb, R.string.apex7_loop, R.string.apex7_sync_short, R.string.apex7_profile)
+            .map { compose.onNodeWithTag("detail-$it").fetchSemanticsNode().boundsInRoot }
+        assertTrue(statuses.all { kotlin.math.abs(it.top - statuses.first().top) < 1f })
+        assertTrue(statuses.all { kotlin.math.abs(it.bottom - statuses.first().bottom) < 1f })
+        capture("overview-status-and-activity-fixture")
+    }
     @Test fun portraitMissingActivity() { render(missingActivity = true); capture("overview-portrait-no-activity-fixture") }
     @Test fun portraitDisconnectedPump() { render(disconnected = true); capture("overview-portrait-disconnected-fixture") }
     @Test fun rightLegendsAndRangeSelection() {

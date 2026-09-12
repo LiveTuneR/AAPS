@@ -61,6 +61,16 @@ class FastCgmAnchorTest : TestBaseWithProfile() {
         assertEquals(-1L, source.referenceTime)
     }
 
+    @Test fun `failed bucketing also clears live pass anchor`() {
+        val source = AutosensDataStoreObject().apply { referenceTime = start }
+        source.bgReadings = object : AbstractList<GV>() {
+            override val size: Int get() = throw IllegalStateException("synthetic interrupted load")
+            override fun get(index: Int): GV = throw IllegalStateException("synthetic interrupted load")
+        }
+        assertThrows(IllegalStateException::class.java) { source.createBucketedData(aapsLogger, dateUtil) }
+        assertEquals(-1L, source.referenceTime)
+    }
+
     @Test fun `exact and near five minute data preserve order values and phase`() {
         for (jitter in listOf(false, true)) {
             val store = AutosensDataStoreObject()

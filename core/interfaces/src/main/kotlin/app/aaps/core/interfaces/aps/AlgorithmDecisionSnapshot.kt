@@ -33,7 +33,10 @@ data class AlgorithmDecisionSnapshot(
     val lastBolusAgeSeconds: Double? = null,
     val requestedSmbU: Double? = null,
     val requestedTbrUph: Double? = null,
-    val requestedTbrMinutes: Int? = null
+    val requestedTbrMinutes: Int? = null,
+    val tddU: Double? = null,
+    val insulinDivisor: Int? = null,
+    val dynIsfAdjustmentFactor: Double? = null
 ) {
     @Serializable
     enum class Reason { INPUT_CONSTRAINT, HIGH_TT_BLOCK, ALWAYS, COB, RECENT_CARBS, TT, NO_CONDITION, PREDICTED_LOW, EXCESSIVE_DELTA, IOB, INVALID_INPUT }

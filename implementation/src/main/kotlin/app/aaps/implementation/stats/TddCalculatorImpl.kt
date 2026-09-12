@@ -103,6 +103,8 @@ class TddCalculatorImpl @Inject constructor(
                 midnight = MidnightTime.calc(midnight + T.hours(27).msecs()) // be sure we find correct midnight
             }
         }
+        // A refused partial sync result must not leave apparently valid daily cache rows.
+        if (result.size().toLong() != days && !allowMissingDays) return null
         for (i in 0 until result.size()) {
             val tdd = result.valueAt(i)
             if (tdd.ids.pumpType != PumpType.CACHE) {
@@ -112,8 +114,7 @@ class TddCalculatorImpl @Inject constructor(
                 aapsLogger.debug(LTag.APS, "Skipping storing TotalDailyDose for ${dateUtil.dateString(tdd.timestamp)}")
             }
         }
-        if (result.size().toLong() == days || allowMissingDays) return result
-        return null
+        return result
     }
 
     override suspend fun calculateToday(): TDD? {

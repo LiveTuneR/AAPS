@@ -111,7 +111,9 @@ fun GraphsSection(
     val savedGraphConfig by graphViewModel.graphConfigFlow.collectAsStateWithLifecycle()
     // In simple mode: fixed layout (BG, IOB+BAS, COB — no overlays, no editing)
     val selectedConfig = if (isSimpleMode) SIMPLE_MODE_CONFIG else savedGraphConfig
-    val graphConfig = selectedConfig.copy(bgHeight = maxOf(selectedConfig.bgHeight, minimumBgHeight))
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val legendWidth = 68.dp * fontScale
+    val graphConfig = selectedConfig.copy(bgHeight = maxOf(selectedConfig.bgHeight, if (referenceStyle) (minimumBgHeight * fontScale).toInt() else minimumBgHeight))
 
     // Zoom.x(...) allocates a fresh (non-equal, unmemoized) lambda instance on every call.
     // rememberVicoZoomState's underlying rememberSaveable is keyed on initialZoom/minZoom/maxZoom
@@ -368,7 +370,7 @@ fun GraphsSection(
             zoomState = beltZoomState,
             derivedTimeRange = derivedTimeRange,
             nowTimestamp = nowTimestamp,
-            modifier = Modifier.fillMaxWidth().padding(end = if (referenceStyle) 68.dp else 0.dp)
+            modifier = Modifier.fillMaxWidth().padding(end = if (referenceStyle) legendWidth else 0.dp)
         )
         // BG Graph - primary interactive graph
         var editingBgOverlays by remember { mutableStateOf(false) }
@@ -612,7 +614,8 @@ private data class ChartLegendItem(val label: String, val value: String?, val co
 
 @Composable
 private fun ChartLegend(items: List<ChartLegendItem>, tag: String) {
-    Column(Modifier.width(68.dp).padding(start = 6.dp, top = 10.dp).testTag(tag), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
+    Column(Modifier.width(68.dp * fontScale).padding(start = 6.dp, top = 10.dp).testTag(tag), verticalArrangement = Arrangement.spacedBy(9.dp)) {
         items.forEach { item ->
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {

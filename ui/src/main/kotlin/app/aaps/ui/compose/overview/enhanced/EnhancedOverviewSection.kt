@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -18,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +55,17 @@ fun EnhancedOverviewContent(
     var selected by rememberSaveable { mutableStateOf<Int?>(null) }
     val unknown = stringResource(R.string.apex7_unavailable_short)
     val v = state.vitals
+    var displayNow by remember(state.capturedAt) { mutableLongStateOf(state.capturedAt ?: System.currentTimeMillis()) }
+    LaunchedEffect(state.capturedAt) {
+        val base = state.capturedAt ?: System.currentTimeMillis()
+        val started = android.os.SystemClock.elapsedRealtime()
+        while (true) {
+            displayNow = base + android.os.SystemClock.elapsedRealtime() - started
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    val activityAge = v.activityUpdatedAt?.let { displayNow - it }?.takeIf { it >= 0 }
+    val algorithmTitle = v.algorithmTitle
     fun summary(title: Int) = state.tiles.firstOrNull { it.title == title }?.summary
     val details = state.tiles + DashboardTile(R.string.apex7_target_short, target, listOf(DashboardField(R.string.apex7_target_short, target))) +
         DashboardTile(R.string.apex7_profile, v.profile, listOf(DashboardField(R.string.apex7_profile, v.profile)))
@@ -75,7 +88,7 @@ fun EnhancedOverviewContent(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Metric(R.string.apex7_cr_short, v.cr, amber, Icons.Default.Grain, Modifier.weight(1f)) { selected = R.string.apex7_isfcr }
-                            Metric(R.string.apex7_autoisf, v.autoIsf, cyan, Icons.Default.BarChart, Modifier.weight(1f)) { selected = R.string.apex7_autoisf }
+                            Metric(algorithmTitle, v.autoIsf, cyan, Icons.Default.BarChart, Modifier.weight(1f), "detail-${R.string.apex7_autoisf}") { selected = R.string.apex7_autoisf }
                         }
                     }
                 }
@@ -95,6 +108,12 @@ fun EnhancedOverviewContent(
                         Text("${stringResource(R.string.apex7_activity)}: ${v.activity ?: unknown}", fontSize = 12.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium)
                         v.activityDetail?.let { Text(it, fontSize = 10.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
+                    activityAge?.let { age ->
+                        Text(if (age < 60_000) stringResource(R.string.apex7_updated_seconds, age / 1000)
+                            else stringResource(R.string.apex7_updated_minutes, age / 60_000),
+                            Modifier.testTag("activity-updated"), fontSize = 9.sp, lineHeight = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     Icon(Icons.Default.ChevronRight, null, Modifier.size(18.dp))
                 }
             }
@@ -109,11 +128,18 @@ fun EnhancedOverviewContent(
                 Device(R.string.apex7_sensor, R.drawable.ic_overview_cgm, green, v.sensorAge ?: unknown,
                     v.bgAge?.let { "BG $it" }, bg.bgInfo?.isOutdated == true, Modifier.weight(1f)) { selected = R.string.apex7_sensor }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Status(R.string.apex7_smb, if (smbEnabled) "ON" else "OFF", Icons.Default.Bolt, if (smbEnabled) green else amber, Modifier.weight(1f)) { selected = R.string.apex7_smb }
+            BoxWithConstraints(Modifier.fillMaxWidth().testTag("overview-status-strip")) {
+            val rowWidth = maxOf(maxWidth, 360.dp * LocalDensity.current.fontScale)
+            Row(Modifier.horizontalScroll(rememberScrollState()).width(rowWidth), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Status(R.string.apex7_smb, when (v.smbState) {
+                    OverviewSmbState.ON -> "ON"; OverviewSmbState.WAIT -> "WAIT"; OverviewSmbState.OFF -> "OFF"; OverviewSmbState.UNKNOWN -> "--"
+                }, Icons.Default.Bolt, when (v.smbState) {
+                    OverviewSmbState.ON -> green; OverviewSmbState.WAIT -> amber; OverviewSmbState.OFF -> MaterialTheme.colorScheme.error; OverviewSmbState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+                }, Modifier.weight(1f)) { selected = R.string.apex7_smb }
                 Status(R.string.apex7_loop_short, v.loopAge, Icons.Default.Sync, cyan, Modifier.weight(1f), "detail-${R.string.apex7_loop}") { selected = R.string.apex7_loop }
                 Status(R.string.apex7_sync_short, v.syncAge, Icons.Default.CloudQueue, cyan, Modifier.weight(1f)) { selected = R.string.apex7_pump }
-                Status(R.string.apex7_profile_short, v.profile, Icons.Default.Person, violet, Modifier.weight(1f), "detail-${R.string.apex7_profile}") { selected = R.string.apex7_profile }
+                Status(R.string.apex7_profile_short, v.profile, Icons.Default.Person, violet, Modifier.weight(1.35f), "detail-${R.string.apex7_profile}") { selected = R.string.apex7_profile }
+            }
             }
             modeNotice?.let {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -136,7 +162,7 @@ fun EnhancedOverviewContent(
         ModalBottomSheet(onDismissRequest = { selected = null }) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(stringResource(tile.title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(if (tile.title == R.string.apex7_autoisf) algorithmTitle else tile.title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                     IconButton(onClick = { selected = null }) { Icon(Icons.Default.Close, stringResource(R.string.apex7_close)) }
                 }
                 tile.fields.forEach { field ->
@@ -203,11 +229,10 @@ private fun Device(label: Int, icon: Int, tint: Color, value: String, detail: St
 
 @Composable
 private fun Status(label: Int, value: String?, icon: ImageVector, tint: Color, modifier: Modifier, tag: String = "detail-$label", onClick: () -> Unit) {
-    Column(modifier.heightIn(min = 36.dp).testTag(tag).clickable(onClick = onClick).padding(3.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Icon(icon, null, Modifier.size(14.dp), tint = tint)
-            Text(stringResource(label), fontSize = 10.sp)
-        }
-        Text(value ?: "--", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    Row(modifier.height(32.dp).testTag(tag).clickable(onClick = onClick).padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Icon(icon, null, Modifier.size(12.dp), tint = tint)
+        Text("${stringResource(label)} ${value ?: "--"}", color = tint, fontSize = 10.sp, maxLines = 1,
+            fontWeight = FontWeight.Medium)
     }
 }

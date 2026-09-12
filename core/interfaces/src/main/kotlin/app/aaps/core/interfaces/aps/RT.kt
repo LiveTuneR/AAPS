@@ -52,6 +52,9 @@ data class RT(
     // Not part of dosing serialization, equality, constructor or transport contracts.
     @kotlinx.serialization.Transient
     var decision: AlgorithmDecisionSnapshot? = null
+    /** Diagnostic branch input before conversion to the pump's 30-minute temporary rate. */
+    @kotlinx.serialization.Transient
+    var smbZeroTempEquivalentMinutes: Int? = null
 
     fun serialize() = Json.encodeToString(serializer(), this)
 

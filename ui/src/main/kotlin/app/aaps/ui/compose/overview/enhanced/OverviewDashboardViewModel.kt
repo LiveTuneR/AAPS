@@ -37,6 +37,17 @@ import java.util.Locale
 
 data class DashboardField(val label: Int, val value: String?)
 data class DashboardTile(val title: Int, val summary: String?, val fields: List<DashboardField>)
+
+enum class OverviewSmbState { ON, WAIT, OFF, UNKNOWN }
+
+fun overviewSmbState(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): OverviewSmbState = when {
+    decision == null -> OverviewSmbState.UNKNOWN
+    !decision.smbConfigured || decision.conditionEligible == false || decision.blockReason != null -> OverviewSmbState.OFF
+    decision.conditionEligible != true -> OverviewSmbState.UNKNOWN
+    decision.intervalWaiting == true -> OverviewSmbState.WAIT
+    decision.intervalWaiting == false -> OverviewSmbState.ON
+    else -> OverviewSmbState.UNKNOWN
+}
 data class OverviewVitals(
     val units: String? = null,
     val isf: String? = null,
@@ -54,7 +65,10 @@ data class OverviewVitals(
     val bgAge: String? = null,
     val loopAge: String? = null,
     val syncAge: String? = null,
-    val profile: String? = null
+    val profile: String? = null,
+    val algorithmTitle: Int = R.string.apex7_smb,
+    val activityUpdatedAt: Long? = null,
+    val smbState: OverviewSmbState = OverviewSmbState.UNKNOWN
 )
 
 data class OverviewDashboardState(val tiles: List<DashboardTile> = emptyList(), val capturedAt: Long? = null, val vitals: OverviewVitals = OverviewVitals())
@@ -157,8 +171,11 @@ class OverviewDashboardViewModel @Inject constructor(
         })
         mutableState.value = OverviewDashboardState(listOf(
             tile(R.string.apex7_autoisf, request?.algorithm?.name,
-                R.string.apex7_factor to null, R.string.apex7_base_isf to baseIsf,
+                R.string.apex7_factor to number(decision?.dynIsfAdjustmentFactor), R.string.apex7_base_isf to baseIsf,
                 R.string.apex7_current_dynamic_isf to currentDynamicIsf, R.string.apex7_dosing_isf to dosingIsf,
+                R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
+                R.string.apex7_isf_basis to decision?.futureIsfBasis?.name,
+                R.string.apex7_tdd to number(decision?.tddU), R.string.apex7_insulin_divisor to decision?.insulinDivisor?.toString(),
                 R.string.apex7_time to time(request?.date), R.string.apex7_age to age(request?.date, now),
                 R.string.apex7_trace to activePlugin.activeAPS?.getSensitivityOverviewString()),
             tile(R.string.apex7_activity, activityState,
@@ -231,9 +248,16 @@ class OverviewDashboardViewModel @Inject constructor(
             baseIsf = profile?.getProfileIsfMgdl()?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
             cr = effectiveCr.takeIf { recent(request?.date) },
             // No structured final AutoISF factor exists yet. Never substitute an autosens ratio.
-            autoIsf = null,
+            autoIsf = decision?.currentDynamicIsfMgdl?.takeIf { recent(request?.date) && it > 0 }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
+            algorithmTitle = when {
+                request?.algorithm == app.aaps.core.interfaces.aps.APSResult.Algorithm.AUTO_ISF -> R.string.apex7_autoisf
+                decision?.dynamicIsf == true -> R.string.apex7_disf
+                else -> R.string.apex7_smb
+            },
             activity = activityState.takeIf { activity.access == ActivityAccess.AVAILABLE },
             activityDetail = event?.let { listOfNotNull(it.category.name, compactAge(it.startTime, it.endTime ?: now)).joinToString(" / ") },
+            activityUpdatedAt = event?.lastUpdatedAt ?: activity.lastSuccessfulRead,
+            smbState = overviewSmbState(decision.takeIf { recent(request?.date) }),
             pumpConnected = pump.isConnected().takeIf { pumpKnown },
             reservoir = if (pumpKnown) number(pump.reservoirLevel.value.cU)?.let { rh.gs(R.string.apex7_insulin_units, it) } else null,
             battery = if (pumpKnown) pump.batteryLevel.value?.let { "$it%" } else null,
@@ -241,7 +265,7 @@ class OverviewDashboardViewModel @Inject constructor(
             siteWarning = site?.timestamp?.let { now - it >= preferences.get(IntKey.OverviewCageWarning) * 3_600_000L } ?: false,
             sensorAge = compactAge(sensor?.timestamp, now),
             bgAge = compactAge(snapshot.newestRawBgTimestamp, now),
-            loopAge = compactAge(snapshot.lastBgTriggeredRun, now),
+            loopAge = compactAge(snapshot.lastCalculationSuccessTimestamp, now),
             syncAge = compactAge(pump.lastDataTime.value, now),
             profile = profile?.percentage?.let { "$it%" }
         ))

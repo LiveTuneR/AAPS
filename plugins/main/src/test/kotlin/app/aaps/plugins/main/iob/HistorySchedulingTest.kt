@@ -13,6 +13,40 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 class HistorySchedulingTest : TestBaseWithProfile() {
+    @Test fun `direct EPS invalidation clears TDD from affected midnight before restart`() = runTest {
+        val persistence = mock<PersistenceLayer>()
+        val workflow = mock<CalculationWorkflow>()
+        val plugin = IobCobCalculatorPlugin(aapsLogger, mock(), mock(), preferences, rh, profileFunction, activePlugin,
+            fabricPrivacy, dateUtil, persistence, mock(), workflow, decimalFormatter, processedTbrEbData, mock(), javax.inject.Provider { mock() })
+        val affected = java.time.Instant.parse("2026-09-12T13:42:17Z").toEpochMilli()
+        val method = plugin.javaClass.getDeclaredMethod("newHistoryData", Long::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+        method.isAccessible = true
+        method.invoke(plugin, affected, false, false)
+        verify(persistence).clearCachedTddData(app.aaps.core.interfaces.utils.MidnightTime.calc(affected))
+        verify(workflow).stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "onEventNewHistoryData")
+        verify(workflow).runCalculation(any(), any(), any(), any(), any(), eq("DBChange"), any(), eq(false), eq(false))
+        verifyNoMoreInteractions(persistence)
+    }
+
+    @Test fun `debounced history invalidation clears same midnight exactly once`() = runTest {
+        val persistence = mock<PersistenceLayer>()
+        val workflow = mock<CalculationWorkflow>()
+        val plugin = IobCobCalculatorPlugin(aapsLogger, mock(), mock(), preferences, rh, profileFunction, activePlugin,
+            fabricPrivacy, dateUtil, persistence, mock(), workflow, decimalFormatter, processedTbrEbData, mock(), javax.inject.Provider { mock() })
+        val executor = mock<ScheduledExecutorService>()
+        val actions = mutableListOf<Runnable>()
+        whenever(executor.schedule(any<Runnable>(), any<Long>(), any<TimeUnit>())).thenAnswer {
+            actions.add(it.getArgument(0)); mock<ScheduledFuture<Any>>()
+        }
+        plugin.javaClass.getDeclaredField("historyWorker").apply { isAccessible = true }.set(plugin, executor)
+        val affected = java.time.Instant.parse("2026-09-12T13:42:17Z").toEpochMilli()
+        plugin.scheduleHistoryDataChange(affected, false, false)
+        actions.single().run()
+        verify(workflow).runCalculation(any(), any(), any(), any(), any(), eq("DBChange"), any(), eq(false), eq(false))
+        verify(persistence).clearCachedTddData(app.aaps.core.interfaces.utils.MidnightTime.calc(affected))
+        verifyNoMoreInteractions(persistence)
+        plugin.onStop()
+    }
     @Test
     fun `scheduler exists when first database collector subscribes`() = runTest {
         val persistence = mock<PersistenceLayer>()

@@ -127,10 +127,11 @@ class PrepareGraphDataWorker @AssistedInject constructor(
 
     override suspend fun doWorkAndLog(): Result {
         val started = System.nanoTime()
+        val startedAt = dateUtil.now()
         try { return executeWork() }
         finally {
             val sections = timings.entries.joinToString(" ") { "${it.key}Calls=${it.value.calls} ${it.key}Ms=${it.value.nanos / 1_000_000}" }
-            aapsLogger.info(LTag.WORKER, "CalculationTiming job=${inputData.getString(WorkflowChainData.JOB_KEY)} generation=${inputData.getLong(WorkflowChainData.GEN_KEY, -1L)} stopped=$isStopped totalMs=${(System.nanoTime() - started) / 1_000_000} adsCacheHits=$adsCacheHits adsCacheMisses=$adsCacheMisses $sections")
+            aapsLogger.info(LTag.WORKER, "CalculationTiming job=${inputData.getString(WorkflowChainData.JOB_KEY)} generation=${inputData.getLong(WorkflowChainData.GEN_KEY, -1L)} startedAt=$startedAt finishedAt=${dateUtil.now()} stopped=$isStopped totalMs=${(System.nanoTime() - started) / 1_000_000} adsCacheHits=$adsCacheHits adsCacheMisses=$adsCacheMisses $sections")
         }
     }
 
@@ -184,6 +185,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val readings = persistenceLayer.getBgReadingsDataFromTimeToTime(start, to + T.mins(2).msecs(), false)
         synchronized(dataLock) {
             bgReadings = readings
+            pruneOlderThan(start)
             aapsLogger.debug(LTag.AUTOSENS) { "BG data loaded. Size: ${bgReadings.size} Start date: ${dateUtil.dateAndTimeString(start)} End date: ${dateUtil.dateAndTimeString(to)}" }
             createBucketedData(aapsLogger, dateUtil)
         }
@@ -681,7 +683,12 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     private fun publishAds(data: PrepareGraphData, ads: AutosensDataStore, startedAt: Long) {
         val job = inputData.getString(WorkflowChainData.JOB_KEY)
         val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
-        if (!workflowChainData.publishIfCurrent(job, generation, { isStopped }) { data.iobCobCalculator.ads = ads }) {
+        if (!workflowChainData.publishIfCurrent(job, generation, { isStopped }) {
+                ads.markCalculationCompleted()
+                data.iobCobCalculator.ads = ads
+                val pass = ads.lastBucketPass
+                aapsLogger.info(LTag.AUTOSENS, "CgmDecision stage=ADS_PUBLISHED generation=$generation rawBgTimestamp=${ads.bgReadings.firstOrNull()?.timestamp} bucketBgTimestamp=${ads.lastBg()?.timestamp} referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${ads.bucketReferenceTime} bucketStartedAt=${pass?.startedAt} bucketFinishedAt=${pass?.finishedAt} calculationStartedAt=$startedAt publishedAt=${dateUtil.now()}")
+            }) {
             data.iobCobCalculator.loopHealth?.publishSkipped()
             aapsLogger.debug(LTag.AUTOSENS, "Skipping ADS publish: superseded workerGeneration=$generation activeGeneration=${workflowChainData.activeGeneration(job)} job=$job ageMs=${dateUtil.now() - startedAt}")
         }

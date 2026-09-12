@@ -87,6 +87,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.CancellationException
 import app.aaps.core.interfaces.iob.loopHealthSnapshot
@@ -672,34 +675,7 @@ class LoopPlugin @Inject constructor(
                         fabricPrivacy.logCustom("APSRequest")
                         // TBR request must be applied first to prevent situation where
                         // SMB was executed and zero TBR afterward failed
-                        aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_ENTER calculation=${resultAfterConstraints.date} at=${dateUtil.now()}")
-                        val tbrResult = applyTBRRequest(resultAfterConstraints, profile)
-                        aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_RESULT calculation=${resultAfterConstraints.date} at=${dateUtil.now()} success=${tbrResult.success} enacted=${tbrResult.enacted} queued=${tbrResult.queued} absoluteUph=${tbrResult.absolute} percent=${tbrResult.percent} isPercent=${tbrResult.isPercent} durationMinutes=${tbrResult.duration}")
-                        lastRun.tbrSetByPump = tbrResult
-                        lastRun.lastTBRRequest = lastRun.lastAPSRun
-                        if (tbrResult.enacted || tbrResult.success) {
-                            lastRun.lastTBREnact = dateUtil.now()
-                            // deliverAt is used to prevent executing too old SMB request (older than 1 min)
-                            // executing TBR may take some time thus give more time to SMB
-                            resultAfterConstraints.deliverAt = lastRun.lastTBREnact
-                            rxBus.send(EventLoopUpdateGui())
-                            if (resultAfterConstraints.isBolusRequested) {
-                                aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_ENTER calculation=${resultAfterConstraints.date} at=${dateUtil.now()} requestedU=${resultAfterConstraints.smb}")
-                                val smbResult = applySMBRequest(resultAfterConstraints)
-                                aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_RESULT calculation=${resultAfterConstraints.date} at=${dateUtil.now()} success=${smbResult.success} enacted=${smbResult.enacted} queued=${smbResult.queued} reportedDeliveredU=${smbResult.bolusDelivered}")
-                                if (smbResult.enacted || smbResult.success) {
-                                    lastRun.smbSetByPump = smbResult
-                                    lastRun.lastSMBRequest = lastRun.lastAPSRun
-                                    lastRun.lastSMBEnact = dateUtil.now()
-                                    scheduleBuildAndStoreDeviceStatus("applySMBRequest")
-                                } else {
-                                    handler?.postDelayed({ appScope.launch { invoke("tempBasalFallback", allowNotification, true) } }, 1000)
-                                }
-                            } else {
-                                aapsLogger.debug(LTag.APS, "No SMB requested")
-                                scheduleBuildAndStoreDeviceStatus("applyTBRRequest")
-                            }
-                        }
+                        enactConstrainedDecision(lastRun, resultAfterConstraints, profile, allowNotification)
                         rxBus.send(EventLoopUpdateGui())
                     } else {
                         lastRun.tbrSetByPump = null
@@ -787,7 +763,11 @@ class LoopPlugin @Inject constructor(
         val profile = profileFunction.getProfile() ?: return
         lastRun?.let { lastRun ->
             lastRun.constraintsProcessed?.let { constraintsProcessed ->
+                currentCoroutineContext().ensureActive()
+                withContext(NonCancellable) {
                 val result = applyTBRRequest(constraintsProcessed, profile)
+                lastRun.tbrSetByPump = result
+                lastRun.lastTBRRequest = lastRun.lastAPSRun
                 if (result.enacted) {
                     lastRun.tbrSetByPump = result
                     lastRun.lastTBRRequest = lastRun.lastAPSRun
@@ -797,9 +777,44 @@ class LoopPlugin @Inject constructor(
                     preferences.inc(IntNonKey.ObjectivesManualEnacts)
                 }
                 rxBus.send(EventAcceptOpenLoopChange())
+                }
             }
         }
         fabricPrivacy.logCustom("AcceptTemp")
+    }
+
+    // Only the finalized pump conversation survives calculation cancellation (#5100).
+    // invokeMutex remains held by invoke; constraints and APS calculation stay cancellable.
+    internal suspend fun enactConstrainedDecision(lastRun: LastRun, request: APSResult, profile: Profile, allowNotification: Boolean) {
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_ENTER calculation=${request.date} at=${dateUtil.now()}")
+            val tbr = applyTBRRequest(request, profile)
+            lastRun.tbrSetByPump = tbr
+            lastRun.lastTBRRequest = lastRun.lastAPSRun
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_RESULT calculation=${request.date} success=${tbr.success} enacted=${tbr.enacted} queued=${tbr.queued}")
+            if (tbr.enacted || tbr.success) {
+                lastRun.lastTBREnact = dateUtil.now()
+                // Preserve upstream's bounded post-TBR delivery window; queue expiry still applies.
+                request.deliverAt = lastRun.lastTBREnact
+                rxBus.send(EventLoopUpdateGui())
+                if (request.isBolusRequested) {
+                    aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_ENTER calculation=${request.date} requestedU=${request.smb}")
+                    val smb = applySMBRequest(request)
+                    // Failed outcomes must replace QUEUED too, never leave an unknown pending result.
+                    lastRun.smbSetByPump = smb
+                    lastRun.lastSMBRequest = lastRun.lastAPSRun
+                    aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_RESULT calculation=${request.date} success=${smb.success} enacted=${smb.enacted} queued=${smb.queued} reportedDeliveredU=${smb.bolusDelivered}")
+                    if (smb.enacted || smb.success) lastRun.lastSMBEnact = dateUtil.now()
+                    else handler?.postDelayed({ appScope.launch { invoke("tempBasalFallback", allowNotification, true) } }, 1000)
+                    scheduleBuildAndStoreDeviceStatus("applySMBRequest")
+                } else scheduleBuildAndStoreDeviceStatus("applyTBRRequest")
+            } else {
+                lastRun.smbSetByPump = null
+                scheduleBuildAndStoreDeviceStatus("applyTBRRequestFailed")
+            }
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=ENACTMENT_FINISHED calculation=${request.date} at=${dateUtil.now()}")
+        }
     }
 
     /**

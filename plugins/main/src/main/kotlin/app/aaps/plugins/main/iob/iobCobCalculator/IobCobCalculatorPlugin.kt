@@ -162,13 +162,13 @@ class IobCobCalculatorPlugin @Inject constructor(
         // GlucoseValue changes → reload BG data + trigger loop
         persistenceLayer.observeChanges(GV::class.java)
             .collectInput(newScope, "GV") { gvList ->
-                val loaded = ads.getBgReadingsDataTableCopy().associateBy { it.id }
-                val metadata = gvList.count {
-                    app.aaps.core.data.diagnostics.GlucoseChangeClassifier.classify(loaded[it.id], it) == app.aaps.core.data.diagnostics.GlucoseChange.METADATA_ONLY
-                }
+                val completed = ads
+                val classified = gvList.map { it to completed.classifyCompletedGlucose(it) }
+                val relevant = classified.filter { it.second != app.aaps.core.data.diagnostics.GlucoseChange.METADATA_ONLY }.map { it.first }
+                val metadata = gvList.size - relevant.size
                 loopHealth.glucoseEvents(metadata, gvList.size - metadata)
-                aapsLogger.debug(LTag.AUTOSENS, "GV changes metadata=$metadata relevantOrUnknown=${gvList.size - metadata}; recalculation retained until completed-input provenance is available")
-                gvList.minOfOrNull { it.timestamp }?.let { timestamp ->
+                aapsLogger.debug(LTag.AUTOSENS, "GV changes metadataSkipped=$metadata relevantOrUnknown=${relevant.size}")
+                relevant.minOfOrNull { it.timestamp }?.let { timestamp ->
                     scheduleHistoryDataChange(timestamp, reloadBgData = true, triggeredByNewBG = true)
                 }
             }
@@ -485,7 +485,6 @@ class IobCobCalculatorPlugin @Inject constructor(
                         if (scheduledData !== data) return@synchronized
                         try {
                             aapsLogger.debug(LTag.AUTOSENS, "Running newHistoryData")
-                            runBlocking { persistenceLayer.clearCachedTddData(MidnightTime.calc(data.oldDataTimestamp)) }
                             newHistoryData(data.oldDataTimestamp, data.reloadBgData, data.triggeredByNewBG)
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -510,6 +509,8 @@ class IobCobCalculatorPlugin @Inject constructor(
     // When historical data is changed (coming from NS etc.) finished calculations after this date must be invalidated
     private fun newHistoryData(oldDataTimestamp: Long, bgDataReload: Boolean, triggeredByNewBG: Boolean) {
         calculationWorkflow.stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "onEventNewHistoryData")
+        // EffectiveProfileSwitch calls this directly, bypassing the debounce scheduler.
+        runBlocking { persistenceLayer.clearCachedTddData(MidnightTime.calc(oldDataTimestamp)) }
         synchronized(dataLock) {
 
             // clear up 5 min back for proper COB calculation

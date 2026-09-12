@@ -21,9 +21,9 @@ class LogArchiveTest {
     }
 
     @Test fun `numeric indices cross digit widths where old selection loses latest records`() {
-        val files = listOf(9, 10, 90, 99, 100, 101, 1000).map(::rotated)
+        val files = listOf(1, 9, 10, 90, 91, 99, 100, 101, 1000).map(::rotated)
         assertEquals(rotated(99).name, files.sortedByDescending { it.name }.first().name)
-        assertEquals(listOf(1000, 101, 100, 99, 90, 10, 9).map { rotated(it).name }, LogFileOrder.newest(files).map { it.name })
+        assertEquals(listOf(1000, 101, 100, 99, 91, 90, 10, 9, 1).map { rotated(it).name }, LogFileOrder.newest(files).map { it.name })
         val active = File(directory, "AndroidAPS.log")
         assertEquals(active, LogFileOrder.newest(files + active).first())
         assertEquals(rotated(1, "2026-09-12"), LogFileOrder.newest(files + rotated(1, "2026-09-12")).first())

@@ -27,6 +27,31 @@ class DetermineBasalSMBTest : TestBaseWithProfile() {
 
     private val currentTime = 1656358822000L
 
+    @Test fun `SMB and DynISF short zero temps withhold equivalent basal for one fifteen twenty nine minutes`() {
+        for (dynamic in listOf(false, true)) {
+            val found = mutableSetOf<Int>()
+            for (iobHundredths in 100..650) {
+                val iob = iobArray().also { rows -> rows.forEach { it.iob = iobHundredths / 100.0 } }
+                val result = sut.determine_basal(
+                    glucoseStatus(), CurrentTemp(0, 0.0, null), iob,
+                    profile().copy(enableSMB_with_COB = true), AutosensResult(ratio = 1.0),
+                    MealData(carbs = 40.0, mealCOB = 20.0, lastCarbTime = currentTime - 1_800_000L),
+                    true, currentTime, false, dynamic
+                )
+                val minutes = result.smbZeroTempEquivalentMinutes ?: continue
+                if (minutes !in listOf(1, 15, 29)) continue
+                assertThat(result.duration).isEqualTo(30)
+                val exactRate = (30 - minutes) / 30.0
+                assertThat(result.rate!!).isWithin(0.0051).of(exactRate)
+                assertThat(result.rate!! * 0.5).isWithin(0.0026).of((30 - minutes) / 60.0)
+                assertThat(result.units).isNotNull()
+                if (minutes !in found) println("TherapyReplay algorithm=${if (dynamic) "DynISF" else "SMB"} cob=20 iob=${iobHundredths / 100.0} zeroTempMinutes=$minutes oldRate=${kotlin.math.round(minutes / 30.0 * 100) / 100} newRate=${result.rate} deliveredBasal30m=${result.rate!! * 0.5} change=5082_COMPLEMENT")
+                found.add(minutes)
+            }
+            assertThat(found).containsExactly(1, 15, 29)
+        }
+    }
+
     @BeforeEach
     fun setup() {
         sut = DetermineBasalSMB(profileUtil, fabricPrivacy)

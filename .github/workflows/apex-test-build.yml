@@ -49,6 +49,7 @@ jobs:
             :pump:medtrum:testFullDebugUnitTest :plugins:aps:testFullDebugUnitTest \
             :plugins:smoothing:testFullDebugUnitTest \
             :implementation:testFullDebugUnitTest --tests '*LogArchiveTest' --tests '*MaintenanceImplTest' \
+            --tests '*TddCalculatorImplTest' --tests '*WizardBolusExecutorImplTest' --tests '*CommandSMBBolusTest' \
             :shared:impl:testFullDebugUnitTest --tests '*RxBusLoggingTest' \
             :ui:testFullDebugUnitTest --tests '*EnhancedOverviewContentTest' --tests '*ActivityEventCodecTest' \
             --no-daemon --max-workers=2 --console=plain -I doc/apex7-validation.init.gradle \
