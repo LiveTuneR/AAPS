@@ -40,6 +40,7 @@ data class DashboardTile(val title: Int, val summary: String?, val fields: List<
 data class OverviewVitals(
     val units: String? = null,
     val isf: String? = null,
+    val baseIsf: String? = null,
     val cr: String? = null,
     val autoIsf: String? = null,
     val activity: String? = null,
@@ -227,6 +228,7 @@ class OverviewDashboardViewModel @Inject constructor(
         ), now, OverviewVitals(
             units = units.asText,
             isf = decision?.currentDynamicIsfMgdl?.takeIf { it > 0 && recent(request?.date) }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
+            baseIsf = profile?.getProfileIsfMgdl()?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
             cr = effectiveCr.takeIf { recent(request?.date) },
             // No structured final AutoISF factor exists yet. Never substitute an autosens ratio.
             autoIsf = null,

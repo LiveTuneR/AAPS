@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="apex7_target_short">Цель</string>
+    <string name="apex7_temp_target_short">Врем. цель</string>
+    <string name="apex7_base_short">база %1$s</string>
+    <string name="apex7_isf_unit_label">%1$s/Е</string>
+    <string name="apex7_hours_short">%1$d ч</string>
+    <string name="apex7_prediction_short">Прогноз</string>
+    <string name="apex7_range_short">Диапазон</string>
+    <string name="apex7_rate_units">%1$s Е/ч</string>
     <string name="apex7_profile_short">Профиль</string>
     <string name="apex7_age_warning">Превышен порог</string>
     <string name="apex7_isf_short">ISF</string>

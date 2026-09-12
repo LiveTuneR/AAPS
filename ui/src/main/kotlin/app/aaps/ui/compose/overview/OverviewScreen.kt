@@ -139,12 +139,13 @@ fun OverviewScreen(
             val bg by graphViewModel.bgInfoState.collectAsStateWithLifecycle()
             EnhancedOverviewContent(
                 state = state, bg = bg, target = tempTargetText, smbEnabled = smbEnabled,
+                targetActive = tempTargetState == TempTargetChipState.Active,
                 modeNotice = runningModeText.takeUnless { runningMode == RM.Mode.CLOSED_LOOP },
                 modifier = Modifier.padding(paddingValues),
                 banner = { ActiveSceneBanner(activeState = activeSceneState, expired = sceneExpired,
                     onEndClick = onEndScene, onDismiss = onDismissScene, endEnabled = endSceneEnabled,
                     formatDuration = formatDuration) },
-                graphs = { GraphsSection(graphViewModel, isSimpleMode, minimumBgHeight = 180) }
+                graphs = { GraphsSection(graphViewModel, isSimpleMode, minimumBgHeight = 180, referenceStyle = true) }
             )
         } else if (isTablet) {
             OverviewScreenTablet(

@@ -116,7 +116,8 @@ fun BgGraphCompose(
     derivedTimeRange: Pair<Long, Long>?,
     nowTimestamp: Long,
     visibleTimeRange: Pair<Long, Long>? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    referenceStyle: Boolean = false
 ) {
     // Collect flows independently - each triggers recomposition only when it changes
     val bgReadings by viewModel.bgReadingsFlow.collectAsStateWithLifecycle()
@@ -388,8 +389,8 @@ fun BgGraphCompose(
         bucketedData.associateBy { timestampToX(it.timestamp, minTimestamp) }
     }
 
-    val bucketedPointProvider = remember(bucketedLookup, lowColor, inRangeColor, highColor) {
-        BucketedPointProvider(bucketedLookup, lowColor, inRangeColor, highColor)
+    val bucketedPointProvider = remember(bucketedLookup, lowColor, inRangeColor, highColor, referenceStyle) {
+        BucketedPointProvider(bucketedLookup, lowColor, inRangeColor, highColor, if (referenceStyle) 4.dp else 6.dp)
     }
 
     // Time formatter and axis configuration
@@ -563,10 +564,11 @@ fun BgGraphCompose(
     // In-range belt — translucent band between lowMark and highMark on the BG axis
     val lowMark = chartConfig.lowMark
     val highMark = chartConfig.highMark
-    val inRangeBox = remember(lowMark, highMark, inRangeColor) {
+    val inRangeBox = remember(lowMark, highMark, inRangeColor, referenceStyle) {
         HorizontalBox(
             y = { lowMark..highMark },
-            box = ShapeComponent(fill = Fill(inRangeColor.copy(alpha = 0.2f))),
+            box = ShapeComponent(fill = Fill(inRangeColor.copy(alpha = if (referenceStyle) 0.07f else 0.2f)),
+                strokeFill = Fill(inRangeColor.copy(alpha = if (referenceStyle) 0.45f else 0f)), strokeThickness = if (referenceStyle) 0.5.dp else 0.dp),
             verticalAxisPosition = Axis.Position.Vertical.Start
         )
     }

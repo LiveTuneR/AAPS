@@ -35,19 +35,19 @@ class EnhancedOverviewContentTest {
         R.string.apex7_site, R.string.apex7_sensor, R.string.apex7_loop)
 
     private val now = 1_789_200_000_000L
-    private fun render(warning: Boolean = false, missingActivity: Boolean = false, disconnected: Boolean = false, missingAll: Boolean = false) {
+    private fun render(warning: Boolean = false, missingActivity: Boolean = false, disconnected: Boolean = false, missingAll: Boolean = false, tempTarget: Boolean = false) {
         val state = OverviewDashboardState(titles.map { title ->
             DashboardTile(title, null, listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null)))
         }.map { tile -> tile.copy(summary = if (missingAll) null else when (tile.title) { R.string.apex7_iob -> "1,6 Е"; R.string.apex7_cob -> "22 г"; else -> null }) }, now,
             if (missingAll) OverviewVitals() else OverviewVitals(
-                units = "ммоль/л", isf = "2,4", cr = "6,4", autoIsf = null,
+                units = "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = null,
                 activity = if (missingActivity) null else "лёгкая", activityDetail = if (missingActivity) null else "Ходьба · 24 мин",
                 pumpConnected = !disconnected, reservoir = "142 Е", battery = "87%", siteAge = "2 д 10 ч", siteWarning = warning,
                 sensorAge = "5 д 16 ч", bgAge = if (warning) "14 мин" else "42 с", loopAge = "38 с", syncAge = "23 с", profile = "100%"))
         val bg = BgInfoUiState(if (missingAll) null else BgInfoData(5.6, "5,6", BgRange.IN_RANGE, warning, now - 120_000,
             TrendArrow.FLAT, "Ровно", 0.0, "0,0", null, null, null, null), if (warning) "14 мин назад" else "2 мин назад")
         val vm = mock<GraphViewModel>()
-        val points = (0..72).map { index -> BgDataPoint(now - (72 - index) * 300_000L, 6.0 + kotlin.math.sin(index / 8.0), BgRange.IN_RANGE, BgType.BUCKETED) }
+        val points = (0..72).map { index -> BgDataPoint(now - 120_000L - (72 - index) * 300_000L, 5.6 + kotlin.math.sin((72 - index) / 8.0), BgRange.IN_RANGE, BgType.BUCKETED) }
         whenever(vm.graphConfigFlow).thenReturn(MutableStateFlow(GraphConfig(bgOverlays = listOf(SeriesType.PREDICTIONS), iobOverlays = emptyList())))
         whenever(vm.nowTimestamp).thenReturn(MutableStateFlow(now))
         whenever(vm.derivedTimeRange).thenReturn(MutableStateFlow((now - 21_600_000L) to (now + 3_600_000L)))
@@ -56,20 +56,21 @@ class EnhancedOverviewContentTest {
         whenever(vm.bucketedDataFlow).thenReturn(MutableStateFlow(points))
         whenever(vm.predictionsFlow).thenReturn(MutableStateFlow((1..12).map { BgDataPoint(now + it * 300_000L, 5.6 - it * 0.05, BgRange.IN_RANGE, BgType.IOB_PREDICTION) }))
         whenever(vm.chartConfigFlow).thenReturn(MutableStateFlow(ChartConfig(10.0, 3.9)))
+        whenever(vm.tempTargetFlow).thenReturn(MutableStateFlow(TempTargetDisplayData(if (tempTarget) "6,0 - 7,0" else "5,5 - 6,3", if (tempTarget) TempTargetState.ACTIVE else TempTargetState.NONE, now - 60_000, if (tempTarget) 3_600_000 else 0)))
         whenever(vm.basalGraphFlow).thenReturn(MutableStateFlow(BasalGraphData(points.map { GraphDataPoint(it.timestamp, 1.1) }, points.map { GraphDataPoint(it.timestamp, 1.1) }, 1.1)))
-        whenever(vm.targetLineFlow).thenReturn(MutableStateFlow(TargetLineData(points.map { GraphDataPoint(it.timestamp, 5.9) })))
+        whenever(vm.targetLineFlow).thenReturn(MutableStateFlow(TargetLineData(points.map { GraphDataPoint(it.timestamp, if (tempTarget) 6.5 else 5.9) })))
         whenever(vm.epsGraphFlow).thenReturn(MutableStateFlow(emptyList()))
         whenever(vm.activityGraphFlow).thenReturn(MutableStateFlow(ActivityGraphData(emptyList(), emptyList())))
         whenever(vm.treatmentGraphFlow).thenReturn(MutableStateFlow(TreatmentGraphData(emptyList(), emptyList(), emptyList(), emptyList())))
         whenever(vm.runningModeGraphFlow).thenReturn(MutableStateFlow(RunningModeGraphData(emptyList())))
-        whenever(vm.iobGraphFlow).thenReturn(MutableStateFlow(IobGraphData(points.map { GraphDataPoint(it.timestamp, 1.6 + kotlin.math.sin(it.timestamp / 3_000_000.0)) }, emptyList())))
+        whenever(vm.iobGraphFlow).thenReturn(MutableStateFlow(IobGraphData(points.mapIndexed { index, p -> GraphDataPoint(p.timestamp, 1.6 + kotlin.math.sin((72 - index) / 8.0)) }, emptyList())))
         whenever(vm.cobGraphFlow).thenReturn(MutableStateFlow(CobGraphData(points.mapIndexed { i, p -> GraphDataPoint(p.timestamp, 22.0 * i / 72) }, emptyList())))
         val preferences = mock<Preferences>()
         whenever(preferences.observe(StringKey.GeneralDarkMode)).thenReturn(MutableStateFlow("dark"))
         compose.setContent { CompositionLocalProvider(LocalPreferences provides preferences) { AapsTheme { Surface {
-            EnhancedOverviewContent(state, bg, if (missingAll) null else "5,5 - 6,3", smbEnabled = !warning,
+            EnhancedOverviewContent(state, bg, if (missingAll) null else if (tempTarget) "6,0 - 7,0 до 13:30" else "5,5 - 6,3", targetActive = tempTarget, smbEnabled = !warning,
                 modeNotice = if (warning) "Цикл приостановлен" else null,
-                graphs = { GraphsSection(vm, false, minimumBgHeight = 180) })
+                graphs = { GraphsSection(vm, false, minimumBgHeight = 180, referenceStyle = true) })
         } } } }
     }
 
@@ -131,5 +132,23 @@ class EnhancedOverviewContentTest {
     @Test fun portraitWarnings() { render(warning = true); capture("overview-portrait-warnings-fixture") }
     @Test fun portraitMissingActivity() { render(missingActivity = true); capture("overview-portrait-no-activity-fixture") }
     @Test fun portraitDisconnectedPump() { render(disconnected = true); capture("overview-portrait-disconnected-fixture") }
+    @Test fun rightLegendsAndRangeSelection() {
+        render()
+        val bgLegend = compose.onNodeWithTag("legend-bg").fetchSemanticsNode().boundsInRoot
+        val iobLegend = compose.onNodeWithTag("legend-iob").fetchSemanticsNode().boundsInRoot
+        val cobLegend = compose.onNodeWithTag("legend-secondary-0").fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(bgLegend.left - iobLegend.left) < 1f)
+        assertTrue(kotlin.math.abs(bgLegend.left - cobLegend.left) < 1f)
+        for (hours in listOf(3, 12, 24, 6)) {
+            compose.onNodeWithTag("graph-range-$hours").performScrollTo().performClick().assertIsSelected()
+        }
+        capture("overview-range-controls-fixture")
+    }
+    @Test fun activeTemporaryTargetKeepsValueAndExpiry() {
+        render(tempTarget = true)
+        compose.onNodeWithText("Врем. цель").assertExists()
+        compose.onNodeWithText("6,0 - 7,0 до 13:30").assertExists()
+        capture("overview-temp-target-fixture")
+    }
 
 }
