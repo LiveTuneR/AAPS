@@ -28,8 +28,7 @@ class AutosensDataStoreObject : AutosensDataStore {
         val MAX_AUTOSENS_AGE_MS = T.mins(11).msecs()
     }
 
-    // we need to make sure that bucketed_data will always have the same timestamp for correct use of cached values
-    // once referenceTime != null all bucketed data should be (x * 5min) from referenceTime
+    // Align buckets within one building pass; never retain the anchor across a live reload.
     var referenceTime: Long = -1
     override val bucketReferenceTime: Long? get() = referenceTime.takeIf { it >= 0 }
 
@@ -203,14 +202,20 @@ class AutosensDataStoreObject : AutosensDataStore {
     }
 
     override fun createBucketedData(aapsLogger: AAPSLogger, dateUtil: DateUtil) {
-        val fiveMinData = isAbout5minData(aapsLogger)
-        if (lastUsed5minCalculation != null && lastUsed5minCalculation != fiveMinData) {
-            // changing mode => clear cache
-            aapsLogger.debug("Invalidating cached data because of changed mode.")
-            reset()
+        try {
+            val fiveMinData = isAbout5minData(aapsLogger)
+            if (lastUsed5minCalculation != null && lastUsed5minCalculation != fiveMinData) {
+                // changing mode => clear cache
+                aapsLogger.debug("Invalidating cached data because of changed mode.")
+                reset()
+            }
+            lastUsed5minCalculation = fiveMinData
+            if (fiveMinData) createBucketedData5min(aapsLogger, dateUtil) else createBucketedDataRecalculated(aapsLogger, dateUtil)
+        } finally {
+            // A superseded calculation may never publish its clone. Clear the live store too,
+            // including short/failed passes, so the next 1/2-minute BG cannot inherit an old grid.
+            referenceTime = -1L
         }
-        lastUsed5minCalculation = fiveMinData
-        if (fiveMinData) createBucketedData5min(aapsLogger, dateUtil) else createBucketedDataRecalculated(aapsLogger, dateUtil)
     }
 
     fun findNewer(time: Long): GV? {

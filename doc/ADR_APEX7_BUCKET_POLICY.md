@@ -1,4 +1,19 @@
-# ADR: preserve cadence while instrumenting the reliability follow-up
+# ADR: per-pass bucket anchor (supersedes the diagnostic-only decision)
+
+Decision updated 2026-09-12 under the explicit fast-CGM follow-up request.
+`referenceTime` belongs to one bucketing pass and is cleared in `finally`.
+Clones continue to omit the anchor. No other part of 17dd2bbd8e is reverted.
+The live-store reload path failed before this change, even with clone isolation.
+FastCgmAnchorTest covers 60/120-second streams for 30 minutes at 12:01:17 phase,
+completed publication and superseded/live reload, 5-minute jitter and phase changes.
+Three deliberate mutations were detected; see APEX7_FAST_CGM_REFERENCE_RU.md.
+
+Scheduler policy remains unchanged. The real enqueue/slot boundary experiment with
+virtual execution demonstrates starvation for 70/90/120-second work under continuous
+60-second arrivals. A separate pending-latest design needs approval and validation.
+Bucket correctness alone does not establish end-to-end loop liveness or dosing safety.
+
+## Previous decision (historical, superseded)
 
 Status: current behavior retained; full policy/backport acceptance pending.
 No new per-minute dosing path is authorized by this ADR.

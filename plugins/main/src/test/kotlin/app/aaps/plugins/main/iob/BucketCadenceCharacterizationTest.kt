@@ -17,10 +17,12 @@ class BucketCadenceCharacterizationTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun `persistent anchor holds latest bucket until next five minute slot`() {
+    fun `legacy persistent anchor reconstruction holds latest bucket until next five minute slot`() {
         for (interval in listOf(1, 2)) {
             val store = AutosensDataStoreObject()
             for (minute in 0..120 step interval) {
+                // Deliberately reconstruct the old persistent policy, not production behavior.
+                store.referenceTime = start
                 store.bgReadings = readings(minute, interval)
                 store.createBucketedData(aapsLogger, dateUtil)
                 val timestamp = store.lastBg()!!.timestamp
