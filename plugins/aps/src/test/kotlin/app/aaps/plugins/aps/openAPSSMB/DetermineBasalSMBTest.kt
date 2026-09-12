@@ -1,6 +1,7 @@
 package app.aaps.plugins.aps.openAPSSMB
 
 import app.aaps.core.interfaces.aps.APSResult
+import app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason
 import app.aaps.core.interfaces.aps.AutosensResult
 import app.aaps.core.interfaces.aps.CurrentTemp
 import app.aaps.core.interfaces.aps.GlucoseStatusSMB
@@ -26,9 +27,94 @@ class DetermineBasalSMBTest : TestBaseWithProfile() {
 
     private val currentTime = 1656358822000L
 
+    @Test fun `SMB and DynISF short zero temps withhold equivalent basal for one fifteen twenty nine minutes`() {
+        for (dynamic in listOf(false, true)) {
+            val found = mutableSetOf<Int>()
+            for (iobHundredths in 100..650) {
+                val iob = iobArray().also { rows -> rows.forEach { it.iob = iobHundredths / 100.0 } }
+                val result = sut.determine_basal(
+                    glucoseStatus(), CurrentTemp(0, 0.0, null), iob,
+                    profile().copy(enableSMB_with_COB = true), AutosensResult(ratio = 1.0),
+                    MealData(carbs = 40.0, mealCOB = 20.0, lastCarbTime = currentTime - 1_800_000L),
+                    true, currentTime, false, dynamic
+                )
+                val minutes = result.smbZeroTempEquivalentMinutes ?: continue
+                if (minutes !in listOf(1, 15, 29)) continue
+                assertThat(result.duration).isEqualTo(30)
+                val exactRate = (30 - minutes) / 30.0
+                assertThat(result.rate!!).isWithin(0.0051).of(exactRate)
+                assertThat(result.rate!! * 0.5).isWithin(0.0026).of((30 - minutes) / 60.0)
+                assertThat(result.units).isNotNull()
+                if (minutes !in found) println("TherapyReplay algorithm=${if (dynamic) "DynISF" else "SMB"} cob=20 iob=${iobHundredths / 100.0} zeroTempMinutes=$minutes oldRate=${kotlin.math.round(minutes / 30.0 * 100) / 100} newRate=${result.rate} deliveredBasal30m=${result.rate!! * 0.5} change=5082_COMPLEMENT")
+                found.add(minutes)
+            }
+            assertThat(found).containsExactly(1, 15, 29)
+        }
+    }
+
     @BeforeEach
     fun setup() {
         sut = DetermineBasalSMB(profileUtil, fabricPrivacy)
+    }
+
+    @Test
+    fun `diagnostics preserve frozen pre-instrumentation complete serialized outputs`() {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        var cases = 0
+        for (dynamic in listOf(false, true))
+            for (cob in listOf(0.0, 20.0))
+                for (target in listOf(80.0, 100.0, 140.0))
+                    for (flags in 0..15)
+                        for (recentBolus in listOf(false, true))
+                            for (limitedIob in listOf(false, true)) {
+                                val p = profile().copy(
+                                    temptargetSet = target != 100.0, min_bg = target, max_bg = target, target_bg = target,
+                                    enableSMB_always = flags and 1 != 0, enableSMB_with_COB = flags and 2 != 0,
+                                    enableSMB_after_carbs = flags and 4 != 0, enableSMB_with_temptarget = flags and 8 != 0,
+                                    max_iob = if (limitedIob) 0.5 else 7.0
+                                )
+                                val iob = iobArray().also { array ->
+                                    array.forEach { it.lastBolusTime = currentTime - if (recentBolus) 60_000L else 3_600_000L }
+                                }
+                                val result = sut.determine_basal(
+                                    glucoseStatus(), CurrentTemp(0, 0.0, null), iob, p, AutosensResult(ratio = 1.0),
+                                    MealData(carbs = cob, mealCOB = cob, lastCarbTime = currentTime - 60_000L),
+                                    true, currentTime, false, dynamic
+                                )
+                                digest.update(result.serialize().toByteArray(Charsets.UTF_8))
+                                digest.update(0.toByte())
+                                val expectedReason = when {
+                                    target > 100.0 -> Reason.HIGH_TT_BLOCK
+                                    flags and 1 != 0 -> Reason.ALWAYS
+                                    flags and 2 != 0 && cob != 0.0 -> Reason.COB
+                                    flags and 4 != 0 && cob != 0.0 -> Reason.RECENT_CARBS
+                                    flags and 8 != 0 && target < 100.0 -> Reason.TT
+                                    else -> Reason.NO_CONDITION
+                                }
+                                assertThat(result.decision?.conditionReason).isEqualTo(expectedReason)
+                                assertThat(result.decision?.conditionEligible).isEqualTo(expectedReason !in listOf(Reason.HIGH_TT_BLOCK, Reason.NO_CONDITION))
+                                assertThat(result.decision?.currentDynamicIsfMgdl).isEqualTo(if (dynamic) 50.0 else null)
+                                result.decision?.intervalWaiting?.let { assertThat(it).isEqualTo(recentBolus) }
+                                result.decision?.maxBolusU?.let { cap -> assertThat(result.units ?: 0.0).isAtMost(cap) }
+                                cases++
+                            }
+        assertThat(cases).isEqualTo(768)
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        // Captured on b33828d43 before adding any algorithm instrumentation (768 full JSON outputs).
+        assertThat(actual).isEqualTo("727dd06bbab8d19c18dc4ce7b5a980a8d735e16803c581261ed9eb0042f058f0")
+    }
+
+    @Test
+    fun `unavailable input has explicit reason without inventing dosing ISF`() {
+        val result = sut.determine_basal(
+            glucoseStatus().copy(date = currentTime - 3_600_000L), CurrentTemp(0, 0.0, null), iobArray(), profile(),
+            AutosensResult(ratio = 1.0), MealData(), true, currentTime, false, true
+        )
+        assertThat(result.decision?.blockReason).isEqualTo(Reason.INVALID_INPUT)
+        assertThat(result.decision?.insulinReqIsfMgdl).isNull()
+        assertThat(result.decision?.conditionEligible).isNull()
+        assertThat(result.serialize()).doesNotContain("decision")
+        assertThat(result.decision?.toJson()).contains("INVALID_INPUT")
     }
 
     // BG well above target and steady, timestamped now so the bad-CGM guard does not return early.

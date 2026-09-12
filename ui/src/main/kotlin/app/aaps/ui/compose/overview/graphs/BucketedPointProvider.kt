@@ -4,6 +4,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import app.aaps.core.interfaces.overview.graph.BgDataPoint
 import app.aaps.core.interfaces.overview.graph.BgRange
 import com.patrykandpatrick.vico.compose.cartesian.data.LineCartesianLayerModel
@@ -21,7 +22,8 @@ class BucketedPointProvider(
     private val dataLookup: Map<Double, BgDataPoint>,
     lowColor: Color,
     inRangeColor: Color,
-    highColor: Color
+    highColor: Color,
+    private val pointSize: Dp = 6.dp
 ) : LineCartesianLayer.PointProvider {
 
     // Pre-build point components for efficiency
@@ -34,7 +36,7 @@ class BucketedPointProvider(
             fill = Fill(color),
             shape = CircleShape
         ),
-        size = 6.dp
+        size = pointSize
     )
 
     override fun getPoint(

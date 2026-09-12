@@ -19,6 +19,15 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.any
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
+import org.mockito.kotlin.times
+import org.mockito.kotlin.verify
+import kotlinx.coroutines.test.runTest
+import app.aaps.core.data.aps.BasalData
+import app.aaps.core.interfaces.profile.EffectiveProfile
+import app.aaps.core.interfaces.pump.PumpWithConcentration
 
 class TddCalculatorImplTest : TestBase() {
 
@@ -33,6 +42,38 @@ class TddCalculatorImplTest : TestBase() {
 
     private val now = 1000000000L
     private val midnight = MidnightTime.calc(now)
+
+    @Test fun `incomplete seven day result writes no cache rows`() = runTest {
+        givenWindow(6)
+        assertThat(tddCalculator.calculate(now, 7, false)).isNull()
+        verify(persistenceLayer, never()).insertOrUpdateCachedTotalDailyDose(any())
+    }
+
+    @Test fun `complete seven day result writes seven cache rows`() = runTest {
+        givenWindow(0)
+        assertThat(tddCalculator.calculate(now, 7, false)?.size()).isEqualTo(7)
+        verify(persistenceLayer, times(7)).insertOrUpdateCachedTotalDailyDose(any())
+    }
+
+    @Test fun `explicit allow missing days retains partial cache behavior`() = runTest {
+        givenWindow(6)
+        assertThat(tddCalculator.calculate(now, 7, true)?.size()).isEqualTo(1)
+        verify(persistenceLayer, times(1)).insertOrUpdateCachedTotalDailyDose(any())
+    }
+
+    private suspend fun givenWindow(profileAvailableFromDay: Int) {
+        val profile = mock<EffectiveProfile>()
+        val pump = mock<PumpWithConcentration>()
+        whenever(activePlugin.activePump).thenReturn(pump)
+        whenever(pump.isFakingTempsByExtendedBoluses).thenReturn(true)
+        whenever(persistenceLayer.getCalculatedTotalDailyDose(any())).thenReturn(null)
+        whenever(persistenceLayer.getBolusesFromTimeToTime(any(), any(), any())).thenReturn(emptyList())
+        whenever(persistenceLayer.getCarbsFromTimeToTimeExpanded(any(), any(), any())).thenReturn(emptyList())
+        whenever(iobCobCalculator.getBasalData(any(), any())).thenReturn(BasalData().apply { tempBasalAbsolute = 1.0 })
+        val start = MidnightTime.calcDaysBack(now, 7)
+        val available = MidnightTime.calc(start + T.days(profileAvailableFromDay.toLong()).msecs())
+        whenever(profileFunction.getProfile(any())).thenAnswer { if (it.getArgument<Long>(0) >= available) profile else null }
+    }
 
     @BeforeEach
     fun setup() {

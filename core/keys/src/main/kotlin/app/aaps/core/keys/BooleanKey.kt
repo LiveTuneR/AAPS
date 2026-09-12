@@ -35,6 +35,7 @@ enum class BooleanKey(
         enabledCondition = PreferenceEnabledCondition { it.isConcentrationEnabled },
         sync = SyncSpec(SyncChannel.Cold, SyncDirection.Bidirectional)
     ),
+    OverviewEnhanced("overview_enhanced_apex7", false, R.string.pref_title_enhanced_overview),
     OverviewKeepScreenOn(key = "keep_screen_on", defaultValue = false, titleResId = R.string.pref_title_keep_screen_on, summaryResId = R.string.pref_summary_keep_screen_on, calculatedDefaultValue = true),
     OverviewShowTreatmentButton(key = "show_treatment_button", defaultValue = false, titleResId = R.string.pref_title_show_treatment_button, defaultedBySM = true),
     OverviewShowWizardButton(key = "show_wizard_button", defaultValue = true, titleResId = R.string.pref_title_show_wizard_button, defaultedBySM = true),

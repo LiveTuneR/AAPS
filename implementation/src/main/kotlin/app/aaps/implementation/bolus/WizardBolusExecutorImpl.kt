@@ -535,7 +535,7 @@ class WizardBolusExecutorImpl @Inject constructor(
             if (tt != null && !raising && accepted) applyTempTarget(tt, source)
             // Insulin activation re-applies the active profile with the new insulin — run BEFORE any explicit PS
             // (insulin set first), independent of any dose (an InsulinActivate-only batch no-ops the deliver(0,0)).
-            p.insulinActivate?.let { applyInsulinActivate(it, source) }
+            p.insulinActivate?.let { applyInsulinActivate(it, source, onError) }
             // Careportal therapy events (≥0) — dose-independent metadata; the master persists them (sole writer).
             p.therapyEvents.forEach { applyTherapyEvent(it, source) }
             // Edits of existing therapy events (≥0) — the master updates its own copy in place (sole writer); a
@@ -949,8 +949,9 @@ class WizardBolusExecutorImpl @Inject constructor(
         listOf(ConfirmationLine(ConfirmationRole.PRIMARY, rh.gs(R.string.confirmation_line, rh.gs(R.string.activate_insulin), ia.iCfg.insulinLabel)))
 
     /** Apply an insulin activation: re-apply the master's CURRENT active profile with this insulin (active-EPS precondition checked at prepare). */
-    private suspend fun applyInsulinActivate(ia: BatchAction.InsulinActivate, source: Sources) {
-        profileFunction.createProfileSwitchWithNewInsulin(ia.iCfg, source)
+    private suspend fun applyInsulinActivate(ia: BatchAction.InsulinActivate, source: Sources, onError: (String) -> Unit) {
+        if (!profileFunction.createProfileSwitchWithNewInsulin(ia.iCfg, source))
+            onError(rh.gs(app.aaps.core.ui.R.string.insulin_activation_failed))
     }
 
     /** The careportal-event confirmation line (rarely surfaced — careportal auto-commits without showing the batch preview). */

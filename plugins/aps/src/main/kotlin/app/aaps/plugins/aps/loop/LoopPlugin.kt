@@ -86,6 +86,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CancellationException
+import app.aaps.core.interfaces.iob.loopHealthSnapshot
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -148,13 +155,14 @@ class LoopPlugin @Inject constructor(
 ), Loop, PluginConstraints {
 
     private val disposable = CompositeDisposable()
-    override var lastBgTriggeredRun: Long = 0
+    @Volatile override var lastBgTriggeredRun: Long = 0
     private var carbsSuggestionsSuspendedUntil: Long = 0
     private var prevCarbsreq = 0
     override var lastRun: LastRun? = null
     override var closedLoopEnabled: Constraint<Boolean>? = null
 
     private var handler: Handler? = null
+    private var healthObserver: Job? = null
 
     // Serializes loop runs. Master's invoke() was @Synchronized; the suspend migration dropped that
     // (and @Synchronized cannot span suspension points). invoke() is reachable concurrently — the
@@ -169,6 +177,23 @@ class LoopPlugin @Inject constructor(
         createNotificationChannel()
         super.onStart()
         handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
+        healthObserver?.cancel()
+        healthObserver = appScope.launch(Dispatchers.Default) {
+            var previous: app.aaps.core.data.diagnostics.LoopHealthStatus? = null
+            while (isActive) {
+                try {
+                    val now = dateUtil.now()
+                    val health = activePlugin.activeIobCobCalculator.loopHealthSnapshot(this@LoopPlugin)
+                    val state = health.status(now)
+                    if (state != previous) {
+                        aapsLogger.debug(LTag.AUTOSENS, "Passive LoopHealth state=$state rawAgeMs=${health.age(health.newestRawBgTimestamp, now)} bucketAgeMs=${health.age(health.newestBucketedBgTimestamp, now)} loopAgeMs=${health.age(health.lastBgTriggeredRun, now)} autosensAgeMs=${health.age(health.autosensLastDataTimestamp, now)} generation=${health.activeWorkflowGeneration} skipped=${health.supersededAdsPublishSkipCount}")
+                        previous = state
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { aapsLogger.error(LTag.AUTOSENS, "Passive LoopHealth observation failed: ${error.javaClass.simpleName}") }
+                delay(60_000)
+            }
+        }
         // TempTarget changes
         persistenceLayer.observeChanges(TT::class.java)
             // Skip db change of ending previous TT
@@ -212,6 +237,8 @@ class LoopPlugin @Inject constructor(
     }
 
     override suspend fun onStop() {
+        healthObserver?.cancel()
+        healthObserver = null
         disposable.clear()
         handler?.removeCallbacksAndMessages(null)
         handler?.looper?.quit()
@@ -541,6 +568,7 @@ class LoopPlugin @Inject constructor(
                 resultAfterConstraints.smb = 0.0
             }
             prevCarbsreq = lastRun?.constraintsProcessed?.carbsReq ?: prevCarbsreq
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=CONSTRAINED calculation=${apsResult.date} at=${dateUtil.now()} smbRequestedU=${apsResult.smb} smbConstrainedU=${resultAfterConstraints.smb} tbrRequestedUph=${apsResult.rate} tbrConstrainedUph=${resultAfterConstraints.rate} durationMinutes=${resultAfterConstraints.duration}")
             if (lastRun == null) lastRun = LastRun()
             lastRun?.let { lastRun ->
                 lastRun.request = apsResult
@@ -647,30 +675,7 @@ class LoopPlugin @Inject constructor(
                         fabricPrivacy.logCustom("APSRequest")
                         // TBR request must be applied first to prevent situation where
                         // SMB was executed and zero TBR afterward failed
-                        val tbrResult = applyTBRRequest(resultAfterConstraints, profile)
-                        lastRun.tbrSetByPump = tbrResult
-                        lastRun.lastTBRRequest = lastRun.lastAPSRun
-                        if (tbrResult.enacted || tbrResult.success) {
-                            lastRun.lastTBREnact = dateUtil.now()
-                            // deliverAt is used to prevent executing too old SMB request (older than 1 min)
-                            // executing TBR may take some time thus give more time to SMB
-                            resultAfterConstraints.deliverAt = lastRun.lastTBREnact
-                            rxBus.send(EventLoopUpdateGui())
-                            if (resultAfterConstraints.isBolusRequested) {
-                                val smbResult = applySMBRequest(resultAfterConstraints)
-                                if (smbResult.enacted || smbResult.success) {
-                                    lastRun.smbSetByPump = smbResult
-                                    lastRun.lastSMBRequest = lastRun.lastAPSRun
-                                    lastRun.lastSMBEnact = dateUtil.now()
-                                    scheduleBuildAndStoreDeviceStatus("applySMBRequest")
-                                } else {
-                                    handler?.postDelayed({ appScope.launch { invoke("tempBasalFallback", allowNotification, true) } }, 1000)
-                                }
-                            } else {
-                                aapsLogger.debug(LTag.APS, "No SMB requested")
-                                scheduleBuildAndStoreDeviceStatus("applyTBRRequest")
-                            }
-                        }
+                        enactConstrainedDecision(lastRun, resultAfterConstraints, profile, allowNotification)
                         rxBus.send(EventLoopUpdateGui())
                     } else {
                         lastRun.tbrSetByPump = null
@@ -758,7 +763,11 @@ class LoopPlugin @Inject constructor(
         val profile = profileFunction.getProfile() ?: return
         lastRun?.let { lastRun ->
             lastRun.constraintsProcessed?.let { constraintsProcessed ->
+                currentCoroutineContext().ensureActive()
+                withContext(NonCancellable) {
                 val result = applyTBRRequest(constraintsProcessed, profile)
+                lastRun.tbrSetByPump = result
+                lastRun.lastTBRRequest = lastRun.lastAPSRun
                 if (result.enacted) {
                     lastRun.tbrSetByPump = result
                     lastRun.lastTBRRequest = lastRun.lastAPSRun
@@ -768,9 +777,44 @@ class LoopPlugin @Inject constructor(
                     preferences.inc(IntNonKey.ObjectivesManualEnacts)
                 }
                 rxBus.send(EventAcceptOpenLoopChange())
+                }
             }
         }
         fabricPrivacy.logCustom("AcceptTemp")
+    }
+
+    // Only the finalized pump conversation survives calculation cancellation (#5100).
+    // invokeMutex remains held by invoke; constraints and APS calculation stay cancellable.
+    internal suspend fun enactConstrainedDecision(lastRun: LastRun, request: APSResult, profile: Profile, allowNotification: Boolean) {
+        currentCoroutineContext().ensureActive()
+        withContext(NonCancellable) {
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_ENTER calculation=${request.date} at=${dateUtil.now()}")
+            val tbr = applyTBRRequest(request, profile)
+            lastRun.tbrSetByPump = tbr
+            lastRun.lastTBRRequest = lastRun.lastAPSRun
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_RESULT calculation=${request.date} success=${tbr.success} enacted=${tbr.enacted} queued=${tbr.queued}")
+            if (tbr.enacted || tbr.success) {
+                lastRun.lastTBREnact = dateUtil.now()
+                // Preserve upstream's bounded post-TBR delivery window; queue expiry still applies.
+                request.deliverAt = lastRun.lastTBREnact
+                rxBus.send(EventLoopUpdateGui())
+                if (request.isBolusRequested) {
+                    aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_ENTER calculation=${request.date} requestedU=${request.smb}")
+                    val smb = applySMBRequest(request)
+                    // Failed outcomes must replace QUEUED too, never leave an unknown pending result.
+                    lastRun.smbSetByPump = smb
+                    lastRun.lastSMBRequest = lastRun.lastAPSRun
+                    aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_RESULT calculation=${request.date} success=${smb.success} enacted=${smb.enacted} queued=${smb.queued} reportedDeliveredU=${smb.bolusDelivered}")
+                    if (smb.enacted || smb.success) lastRun.lastSMBEnact = dateUtil.now()
+                    else handler?.postDelayed({ appScope.launch { invoke("tempBasalFallback", allowNotification, true) } }, 1000)
+                    scheduleBuildAndStoreDeviceStatus("applySMBRequest")
+                } else scheduleBuildAndStoreDeviceStatus("applyTBRRequest")
+            } else {
+                lastRun.smbSetByPump = null
+                scheduleBuildAndStoreDeviceStatus("applyTBRRequestFailed")
+            }
+            aapsLogger.info(LTag.APS, "TherapyDecision stage=ENACTMENT_FINISHED calculation=${request.date} at=${dateUtil.now()}")
+        }
     }
 
     /**

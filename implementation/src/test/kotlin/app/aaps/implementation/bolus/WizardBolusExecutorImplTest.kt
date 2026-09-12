@@ -471,6 +471,23 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     }
 
     @Test
+    fun `failed insulin reapplication reports error and consume once prevents retry`() = runTest {
+        stubPassthroughConstraints()
+        whenever(profileFunction.getProfile()).thenReturn(mock<ProfileSealed.EPS>())
+        whenever(profileFunction.createProfileSwitchWithNewInsulin(any(), any())).thenReturn(false)
+        whenever(rh.gs(app.aaps.core.ui.R.string.insulin_activation_failed)).thenReturn("activation failed")
+        val executor = create()
+        val iCfg = ICfg(insulinLabel = "Rapid", insulinEndTime = 360, insulinPeakTime = 75, concentration = 1.0)
+        val prepared = executor.prepareBatch(listOf(BatchAction.InsulinActivate(iCfg))) as WizardBolusExecutor.PrepareResult.Preview
+        val errors = mutableListOf<String>()
+        executor.confirm(prepared.bolusId, Sources.NSClient, errors::add)
+        assertThat(errors).containsExactly("activation failed")
+        assertThat(executor.confirm(prepared.bolusId, Sources.NSClient, errors::add)).isEqualTo(WizardBolusExecutor.ConfirmResult.NoPending)
+        verify(profileFunction).createProfileSwitchWithNewInsulin(any(), any())
+        verify(commandQueue, never()).bolus(anyOrNull())
+    }
+
+    @Test
     fun prepareBatch_twoBatchesInTheSameMillisecond_getDistinctIdsAndBothCommit() = runTest {
         stubPassthroughConstraints()
         // dateUtil.now() is frozen in the test base — which is exactly the production race. The fill dialog fires

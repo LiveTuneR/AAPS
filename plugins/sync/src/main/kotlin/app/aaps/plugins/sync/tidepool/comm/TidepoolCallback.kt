@@ -32,7 +32,7 @@ internal class TidepoolCallback<T>(
                 session.populateHeaders(response.headers())
                 onSuccess()
             } else {
-                val msg = name + " was not successful: " + response.code() + " " + response.message()
+                val msg = name + " was not successful: " + response.code()
                 aapsLogger.debug(LTag.TIDEPOOL, msg)
                 rxBus.send(EventTidepoolStatus(msg))
                 onFail()
@@ -42,7 +42,7 @@ internal class TidepoolCallback<T>(
 
     override fun onFailure(call: Call<T>, t: Throwable) {
         coroutineScope.launch {
-            val msg = "$name Failed: $t"
+            val msg = "$name Failed: ${t.javaClass.simpleName}"
             aapsLogger.debug(LTag.TIDEPOOL, msg)
             rxBus.send(EventTidepoolStatus(msg))
             onFail()

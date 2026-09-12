@@ -17,7 +17,7 @@
             <maxHistory>120</maxHistory>
         </rollingPolicy>
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %.-1level/%logger: %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} [%thread] %.-1level/%logger: %msg%n</pattern>
         </encoder>
     </appender>
 

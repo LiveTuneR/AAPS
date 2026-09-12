@@ -15,7 +15,7 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToLong
 
-class AutosensDataStoreObject : AutosensDataStore {
+class AutosensDataStoreObject(private val nowProvider: () -> Long = System::currentTimeMillis) : AutosensDataStore {
 
     override val dataLock = Any()
     override var lastUsed5minCalculation: Boolean? = null // true if used 5min bucketed data
@@ -28,9 +28,20 @@ class AutosensDataStoreObject : AutosensDataStore {
         val MAX_AUTOSENS_AGE_MS = T.mins(11).msecs()
     }
 
-    // we need to make sure that bucketed_data will always have the same timestamp for correct use of cached values
-    // once referenceTime != null all bucketed data should be (x * 5min) from referenceTime
+    // Align buckets within one building pass; never retain the anchor across a live reload.
     var referenceTime: Long = -1
+    override val bucketReferenceTime: Long? get() = referenceTime.takeIf { it >= 0 }
+    override var lastBucketPass: app.aaps.core.interfaces.aps.BucketPassEvidence? = null
+        private set
+    private var completedReadings: Map<Long, GV> = emptyMap()
+
+    override fun markCalculationCompleted() = synchronized(dataLock) {
+        completedReadings = bgReadings.filter { it.id > 0 }.associate { it.id to it.copy(ids = it.ids.copy()) }
+    }
+
+    override fun classifyCompletedGlucose(gv: GV) = synchronized(dataLock) {
+        app.aaps.core.data.diagnostics.GlucoseChangeClassifier.classify(completedReadings[gv.id], gv)
+    }
 
     override var bgReadings: List<GV> = listOf() // newest at index 0
         @Synchronized set
@@ -45,22 +56,38 @@ class AutosensDataStoreObject : AutosensDataStore {
         @Synchronized get
 
     override fun clone(): AutosensDataStore =
-        AutosensDataStoreObject().also {
+        AutosensDataStoreObject(nowProvider).also {
             synchronized(dataLock) {
-                it.bgReadings = this.bgReadings.toMutableList()
-                it.autosensDataTable = LongSparseArray<AutosensData>(this.autosensDataTable.size).apply { putAll(this@AutosensDataStoreObject.autosensDataTable) }
-                it.bucketedData = this.bucketedData?.toMutableList()
+                it.lastBucketPass = this.lastBucketPass
+                it.bgReadings = this.bgReadings.map { row -> row.copy(ids = row.ids.copy()) }
+                it.autosensDataTable = LongSparseArray<AutosensData>(this.autosensDataTable.size).apply {
+                    val source = this@AutosensDataStoreObject.autosensDataTable
+                    for (index in 0 until source.size()) put(source.keyAt(index), source.valueAt(index).deepCopy())
+                }
+                it.bucketedData = this.bucketedData?.map { row -> row.copy() }?.toMutableList()
             }
         }
 
-    override fun getBucketedDataTableCopy(): MutableList<InMemoryGlucoseValue>? = synchronized(dataLock) { bucketedData?.toMutableList() }
-    override fun getBgReadingsDataTableCopy(): List<GV> = synchronized(dataLock) { bgReadings.toMutableList() }
+    override fun getBucketedDataTableCopy(): MutableList<InMemoryGlucoseValue>? = synchronized(dataLock) { bucketedData?.map { it.copy() }?.toMutableList() }
+    override fun getBgReadingsDataTableCopy(): List<GV> = synchronized(dataLock) { bgReadings.map { it.copy(ids = it.ids.copy()) } }
 
     override fun reset() {
+        synchronized(dataLock) { completedReadings = emptyMap() }
         synchronized(autosensDataTable) { autosensDataTable = LongSparseArray() }
     }
 
+    override fun pruneOlderThan(cut: Long) = synchronized(dataLock) {
+        val table = autosensDataTable
+        synchronized(table) {
+            var count = 0
+            while (count < table.size() && table.keyAt(count) < cut) count++
+            // SparseArray compacts after removal; descending indices keep consecutive keys safe.
+            for (index in count - 1 downTo 0) table.removeAt(index)
+        }
+    }
+
     override fun newHistoryData(time: Long, aapsLogger: AAPSLogger, dateUtil: DateUtil) {
+        synchronized(dataLock) { completedReadings = emptyMap() }
         synchronized(autosensDataTable) {
             for (index in autosensDataTable.size() - 1 downTo 0) {
                 if (autosensDataTable.keyAt(index) > time) {
@@ -98,7 +125,7 @@ class AutosensDataStoreObject : AutosensDataStore {
      */
     override fun actualBg(): InMemoryGlucoseValue? {
         val lastBg = lastBg() ?: return null
-        return if (lastBg.timestamp > System.currentTimeMillis() - T.mins(9).msecs()) lastBg else null
+        return if (lastBg.timestamp > nowProvider() - T.mins(9).msecs()) lastBg else null
     }
 
     override fun lastDataTime(dateUtil: DateUtil): String =
@@ -199,14 +226,27 @@ class AutosensDataStoreObject : AutosensDataStore {
     }
 
     override fun createBucketedData(aapsLogger: AAPSLogger, dateUtil: DateUtil) {
-        val fiveMinData = isAbout5minData(aapsLogger)
-        if (lastUsed5minCalculation != null && lastUsed5minCalculation != fiveMinData) {
-            // changing mode => clear cache
-            aapsLogger.debug("Invalidating cached data because of changed mode.")
-            reset()
+        val startedAt = dateUtil.now()
+        var completed = false
+        try {
+            val fiveMinData = isAbout5minData(aapsLogger)
+            if (lastUsed5minCalculation != null && lastUsed5minCalculation != fiveMinData) {
+                // changing mode => clear cache
+                aapsLogger.debug("Invalidating cached data because of changed mode.")
+                reset()
+            }
+            lastUsed5minCalculation = fiveMinData
+            if (fiveMinData) createBucketedData5min(aapsLogger, dateUtil) else createBucketedDataRecalculated(aapsLogger, dateUtil)
+            completed = true
+        } finally {
+            // Superseded generations may never publish their clone: reset the live store too.
+            val used = referenceTime.takeIf { it >= 0 }
+            referenceTime = -1L
+            lastBucketPass = app.aaps.core.interfaces.aps.BucketPassEvidence(
+                startedAt, dateUtil.now(), used, bgReadings.firstOrNull()?.timestamp,
+                bucketedData?.firstOrNull()?.timestamp, completed
+            )
         }
-        lastUsed5minCalculation = fiveMinData
-        if (fiveMinData) createBucketedData5min(aapsLogger, dateUtil) else createBucketedDataRecalculated(aapsLogger, dateUtil)
     }
 
     fun findNewer(time: Long): GV? {

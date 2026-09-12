@@ -13,6 +13,14 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.sp
+import app.aaps.core.ui.compose.AapsTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -96,18 +104,24 @@ private val CONFIGURABLE_SERIES = SeriesType.entries.filter {
 fun GraphsSection(
     graphViewModel: GraphViewModel,
     isSimpleMode: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    minimumBgHeight: Int = GraphConfig.DEFAULT_GRAPH_HEIGHT_DP,
+    referenceStyle: Boolean = false
 ) {
     val savedGraphConfig by graphViewModel.graphConfigFlow.collectAsStateWithLifecycle()
     // In simple mode: fixed layout (BG, IOB+BAS, COB — no overlays, no editing)
-    val graphConfig = if (isSimpleMode) SIMPLE_MODE_CONFIG else savedGraphConfig
+    val selectedConfig = if (isSimpleMode) SIMPLE_MODE_CONFIG else savedGraphConfig
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val legendWidth = 68.dp * fontScale
+    val graphConfig = selectedConfig.copy(bgHeight = maxOf(selectedConfig.bgHeight, if (referenceStyle) (minimumBgHeight * fontScale).toInt() else minimumBgHeight))
 
     // Zoom.x(...) allocates a fresh (non-equal, unmemoized) lambda instance on every call.
     // rememberVicoZoomState's underlying rememberSaveable is keyed on initialZoom/minZoom/maxZoom
     // by reference, so passing a freshly-allocated Zoom on every recomposition of this composable
     // tears down and recreates the VicoZoomState — resetting the zoom level back to initialZoom.
     // Memoize these once so all zoom states below stay stable across recompositions.
-    val defaultZoom = remember { Zoom.x(DEFAULT_GRAPH_ZOOM_MINUTES) }
+    var selectedHours by rememberSaveable { mutableIntStateOf(6) }
+    val defaultZoom = remember(selectedHours) { Zoom.x(if (referenceStyle) selectedHours * 60.0 else DEFAULT_GRAPH_ZOOM_MINUTES) }
     val bgMinZoom = remember { Zoom.x(Constants.GRAPH_TIME_RANGE_HOURS * 60.0) }
     val bgMaxZoom = remember { Zoom.x(MIN_GRAPH_ZOOM_MINUTES) }
 
@@ -126,7 +140,7 @@ fun GraphsSection(
     // firing wrong corrections (this caused the secondary graphs to visibly "dance"/flash on the
     // first attempt at this).
     var bgViewportResetTrigger by remember { mutableIntStateOf(0) }
-    val (bgScrollState, bgZoomState) = key(bgViewportResetTrigger) {
+    val (bgScrollState, bgZoomState) = key(bgViewportResetTrigger, selectedHours) {
         rememberVicoScrollState(
             scrollEnabled = true,
             initialScroll = Scroll.Absolute.End
@@ -323,23 +337,45 @@ fun GraphsSection(
     }
 
 
+    val chartConfig by graphViewModel.chartConfigFlow.collectAsStateWithLifecycle()
+    val iob by graphViewModel.iobGraphFlow.collectAsStateWithLifecycle()
+    val cob by graphViewModel.cobGraphFlow.collectAsStateWithLifecycle()
+    val basal by graphViewModel.basalGraphFlow.collectAsStateWithLifecycle()
+    val targetDisplay by graphViewModel.tempTargetFlow.collectAsStateWithLifecycle()
+    val targetRange = targetDisplay?.takeIf { nowTimestamp >= it.timestamp && (it.duration <= 0 || nowTimestamp < it.timestamp + it.duration) }?.targetRangeText
+    val runningModes by graphViewModel.runningModeGraphFlow.collectAsStateWithLifecycle()
+    val treatments by graphViewModel.treatmentGraphFlow.collectAsStateWithLifecycle()
+    val showBelt = !referenceStyle || runningModes.segments.any { it.mode != app.aaps.core.data.model.RM.Mode.CLOSED_LOOP && it.mode != app.aaps.core.data.model.RM.Mode.RESUME } ||
+        treatments.boluses.isNotEmpty() || treatments.carbs.isNotEmpty() || treatments.extendedBoluses.isNotEmpty() || treatments.therapyEvents.isNotEmpty()
+    fun current(points: List<app.aaps.core.interfaces.overview.graph.GraphDataPoint>) = points.filter { it.timestamp <= nowTimestamp }.maxByOrNull { it.timestamp }?.value
+    fun number(value: Double?) = value?.takeIf { it.isFinite() }?.let { String.format(java.util.Locale.getDefault(), "%.1f", it) } ?: "--"
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = if (referenceStyle) 2.dp else 16.dp, vertical = 8.dp)
     ) {
+        if (referenceStyle) Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(app.aaps.ui.R.string.apex7_bg_graph), Modifier.weight(1f), fontSize = 12.sp)
+            for (hours in listOf(3, 6, 12, 24)) Box(Modifier.width(36.dp).height(30.dp)
+                .testTag("graph-range-$hours")
+                .background(if (hours == selectedHours) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .selectable(hours == selectedHours, role = Role.RadioButton) { selectedHours = hours; graphViewModel.onGraphInteraction() }, contentAlignment = Alignment.Center) {
+                Text(stringResource(app.aaps.ui.R.string.apex7_hours_short, hours), fontSize = 11.sp)
+            }
+        }
         // Treatment Belt Graph - running mode background + therapy events
-        TreatmentBeltGraphCompose(
+        if (showBelt) TreatmentBeltGraphCompose(
             viewModel = graphViewModel,
             scrollState = beltScrollState,
             zoomState = beltZoomState,
             derivedTimeRange = derivedTimeRange,
             nowTimestamp = nowTimestamp,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().padding(end = if (referenceStyle) legendWidth else 0.dp)
         )
         // BG Graph - primary interactive graph
         var editingBgOverlays by remember { mutableStateOf(false) }
-        Box(modifier = Modifier.offset(y = (-16).dp)) {
+        Row(Modifier.fillMaxWidth().offset(y = if (showBelt) (-16).dp else 0.dp)) {
+        Box(modifier = Modifier.weight(1f)) {
             BgGraphCompose(
                 viewModel = graphViewModel,
                 bgOverlays = graphConfig.bgOverlays,
@@ -348,6 +384,7 @@ fun GraphsSection(
                 derivedTimeRange = derivedTimeRange,
                 nowTimestamp = nowTimestamp,
                 visibleTimeRange = bgVisibleTimeRange,
+                referenceStyle = referenceStyle,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(graphConfig.bgHeight.dp)
@@ -360,6 +397,17 @@ fun GraphsSection(
                         .padding(end = 4.dp, top = 2.dp)
                 )
             }
+        }
+        if (referenceStyle) ChartLegend(listOf(
+            ChartLegendItem("BG", bgInfoState.bgInfo?.bgText ?: "--", when (bgInfoState.bgInfo?.bgRange) {
+                app.aaps.core.interfaces.overview.graph.BgRange.LOW -> AapsTheme.generalColors.bgLow
+                app.aaps.core.interfaces.overview.graph.BgRange.HIGH -> AapsTheme.generalColors.bgHigh
+                else -> AapsTheme.generalColors.bgInRange
+            }),
+            ChartLegendItem(stringResource(app.aaps.ui.R.string.apex7_prediction_short), if (SeriesType.PREDICTIONS in graphConfig.bgOverlays && predictions.isNotEmpty()) "..." else "--", AapsTheme.generalColors.iobPrediction),
+            ChartLegendItem(stringResource(app.aaps.ui.R.string.apex7_target_short), targetRange ?: "--", AapsTheme.elementColors.tempTarget),
+            ChartLegendItem(stringResource(app.aaps.ui.R.string.apex7_range_short), "${number(chartConfig.lowMark)}-${number(chartConfig.highMark)}", AapsTheme.generalColors.bgInRange)
+        ), "legend-bg")
         }
         if (editingBgOverlays) {
             GraphSeriesBottomSheet(
@@ -380,7 +428,8 @@ fun GraphsSection(
         }
         // Fixed IOB graph (Graph 1) with optional Activity overlay
         var editingIobOverlays by remember { mutableStateOf(false) }
-        Box(modifier = Modifier.offset(y = (-8).dp)) {
+        Row(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
+        Box(modifier = Modifier.weight(1f)) {
             SecondaryGraphCompose(
                 viewModel = graphViewModel,
                 seriesTypes = listOf(SeriesType.IOB),
@@ -411,6 +460,11 @@ fun GraphsSection(
                 )
             }
         }
+        if (referenceStyle) ChartLegend(listOf(
+            ChartLegendItem("IOB", stringResource(app.aaps.ui.R.string.apex7_insulin_units, number(current(iob.iob))), AapsTheme.generalColors.iobPrediction),
+            ChartLegendItem(stringResource(app.aaps.core.ui.R.string.basal_shortname), stringResource(app.aaps.ui.R.string.apex7_rate_units, number(current(basal.actualBasal))), AapsTheme.elementColors.tempBasal)
+        ), "legend-iob")
+        }
         if (editingIobOverlays) {
             GraphSeriesBottomSheet(
                 title = stringResource(app.aaps.core.ui.R.string.iob) + " / " + stringResource(app.aaps.core.ui.R.string.basal_shortname),
@@ -433,7 +487,8 @@ fun GraphsSection(
         var editingGraphIndex by remember { mutableIntStateOf(-1) }
         for (i in 0 until activeCount) {
             val secondary = graphConfig.secondaryGraphs[i]
-            Box(modifier = Modifier.offset(y = (-8).dp)) {
+            Row(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
+            Box(modifier = Modifier.weight(1f)) {
                 SecondaryGraphCompose(
                     viewModel = graphViewModel,
                     seriesTypes = secondary.series,
@@ -461,6 +516,11 @@ fun GraphsSection(
                             .padding(end = 4.dp, top = 2.dp)
                     )
                 }
+            }
+            if (referenceStyle) ChartLegend(secondary.series.map { type ->
+                ChartLegendItem(type.name, if (type == SeriesType.COB) stringResource(app.aaps.ui.R.string.apex7_carb_units, number(current(cob.cob))) else null,
+                    if (type == SeriesType.COB) AapsTheme.generalColors.cobPrediction else MaterialTheme.colorScheme.onSurfaceVariant)
+            }, "legend-secondary-$i")
             }
         }
         if (editingGraphIndex >= 0 && editingGraphIndex < activeCount) {
@@ -547,6 +607,24 @@ fun GraphsSection(
         }
         // Spacer so the last graph / Add button isn't covered by QuickLaunch toolbar
         Spacer(Modifier.height(48.dp))
+    }
+}
+
+private data class ChartLegendItem(val label: String, val value: String?, val color: Color)
+
+@Composable
+private fun ChartLegend(items: List<ChartLegendItem>, tag: String) {
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
+    Column(Modifier.width(68.dp * fontScale).padding(start = 6.dp, top = 10.dp).testTag(tag), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        items.forEach { item ->
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Box(Modifier.width(8.dp).height(3.dp).background(item.color))
+                    Text(item.label, fontSize = 10.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                item.value?.let { Text(it, fontSize = 11.sp, lineHeight = 13.sp, color = item.color) }
+            }
+        }
     }
 }
 

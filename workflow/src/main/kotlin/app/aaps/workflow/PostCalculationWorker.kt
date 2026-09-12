@@ -11,6 +11,7 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.overview.OverviewData
 import app.aaps.core.interfaces.overview.graph.BgDataPoint
@@ -71,7 +72,7 @@ class PostCalculationWorker @AssistedInject constructor(
         ) ?: return Result.failure(workDataOf("Error" to "missing or stale input data"))
 
         if (data.runLoopAndWidgetPhase) {
-            invokeLoop(data)
+            invokeLoop()
             if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
             widgetUpdater.update("WorkFlow")
             if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
@@ -80,20 +81,42 @@ class PostCalculationWorker @AssistedInject constructor(
         preparePredictions(data)
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
+        if (data.runLoopAndWidgetPhase) iobCobCalculator.loopHealth?.completed(inputData.getLong(WorkflowChainData.GEN_KEY, -1L), System.currentTimeMillis())
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
         return Result.success()
     }
 
     /*
      * Triggered once autosens calculation has completed so the Loop has current data to work with.
-     * Autosens can be triggered by multiple sources but currently only a new BG should trigger a loop run.
+     * A replacement DB chain can finish work started by NewBG; claim the BG, not its trigger flag.
      */
-    private suspend fun invokeLoop(data: PostCalculationData) {
-        if (!data.triggeredByNewBG) return
-        val glucoseValue = iobCobCalculator.ads.actualBg() ?: return
-        if (glucoseValue.timestamp <= loop.lastBgTriggeredRun) return
-        loop.lastBgTriggeredRun = glucoseValue.timestamp
-        loop.invoke("Calculation for $glucoseValue", true)
+    private suspend fun invokeLoop() {
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        val store = iobCobCalculator.ads
+        val raw = store.bgReadings.firstOrNull()?.timestamp
+        val bucket = store.lastBg()?.timestamp
+        val pass = store.lastBucketPass
+        fun evidence(invoked: Boolean, reason: String) = aapsLogger.info(LTag.APS,
+            "CgmDecision stage=LOOP_GATE generation=$generation rawBgTimestamp=$raw bucketBgTimestamp=$bucket referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${store.bucketReferenceTime} loopInvoked=$invoked reason=$reason lastClaimedBg=${loop.lastBgTriggeredRun} at=${System.currentTimeMillis()}")
+        if (isStopped) { evidence(false, "WORKER_STOPPED"); return }
+        val glucoseValue = store.actualBg() ?: run { evidence(false, "NO_FRESH_ACTUAL_BG"); return }
+        synchronized(loop) {
+            if (isStopped || workflowChainData.postFor(
+                    inputData.getString(WorkflowChainData.JOB_KEY),
+                    inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+                ) == null) { evidence(false, "STALE_GENERATION_OR_STOPPED"); return }
+            if (glucoseValue.timestamp <= loop.lastBgTriggeredRun) { evidence(false, "DUPLICATE_OR_OLDER_BG"); return }
+            loop.lastBgTriggeredRun = glucoseValue.timestamp
+        }
+        evidence(true, "NEW_BG_DISPATCHED")
+        aapsLogger.info(LTag.APS, "WorkflowDecision stage=BG_CLAIMED generation=$generation bgTimestamp=${glucoseValue.timestamp} at=${System.currentTimeMillis()}")
+        try {
+            loop.invoke("Calculation for $glucoseValue", true)
+            aapsLogger.info(LTag.APS, "WorkflowDecision stage=INVOKE_RETURNED generation=$generation bgTimestamp=${glucoseValue.timestamp} resultTimestamp=${loop.lastRun?.request?.date} at=${System.currentTimeMillis()}")
+        } catch (error: Exception) {
+            aapsLogger.info(LTag.APS, "WorkflowDecision stage=INVOKE_INTERRUPTED generation=$generation bgTimestamp=${glucoseValue.timestamp} type=${error.javaClass.simpleName} at=${System.currentTimeMillis()}")
+            throw error
+        }
     }
 
     private fun preparePredictions(data: PostCalculationData) {

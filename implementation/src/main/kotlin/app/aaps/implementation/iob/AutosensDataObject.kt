@@ -2,6 +2,7 @@ package app.aaps.implementation.iob
 
 import app.aaps.core.interfaces.aps.AutosensData
 import app.aaps.core.interfaces.aps.AutosensResult
+import app.aaps.core.interfaces.aps.copyStateTo
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.utils.DateUtil
@@ -80,6 +81,8 @@ class AutosensDataObject @Inject constructor(
         }
         return newActiveCarbsList
     }
+
+    override fun deepCopy(): AutosensData = copyStateTo(AutosensDataObject(aapsLogger, preferences, dateUtil))
 
     // remove carbs older than timeframe
     override fun removeOldCarbs(toTime: Long, isAAPSOrWeighted: Boolean) {

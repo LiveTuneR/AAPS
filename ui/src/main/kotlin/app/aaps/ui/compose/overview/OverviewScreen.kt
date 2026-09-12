@@ -24,6 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aaps.ui.compose.overview.enhanced.OverviewDashboardViewModel
+import app.aaps.ui.compose.overview.enhanced.EnhancedOverviewContent
+import app.aaps.ui.compose.overview.graphs.GraphsSection
+import app.aaps.ui.compose.scenes.ActiveSceneBanner
+import app.aaps.core.ui.compose.LocalConfig
 import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TT
@@ -123,9 +130,24 @@ fun OverviewScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isTablet = configuration.smallestScreenWidthDp >= TABLET_MIN_SW_DP && isLandscape
+    val dashboard: OverviewDashboardViewModel = hiltViewModel()
+    val enhanced by dashboard.enabled.collectAsStateWithLifecycle()
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (isTablet) {
+        if (enhanced && !LocalConfig.current.AAPSCLIENT) {
+            val state by dashboard.state.collectAsStateWithLifecycle()
+            val bg by graphViewModel.bgInfoState.collectAsStateWithLifecycle()
+            EnhancedOverviewContent(
+                state = state, bg = bg, target = tempTargetText, smbEnabled = smbEnabled,
+                targetActive = tempTargetState == TempTargetChipState.Active,
+                modeNotice = runningModeText.takeUnless { runningMode == RM.Mode.CLOSED_LOOP },
+                modifier = Modifier.padding(paddingValues),
+                banner = { ActiveSceneBanner(activeState = activeSceneState, expired = sceneExpired,
+                    onEndClick = onEndScene, onDismiss = onDismissScene, endEnabled = endSceneEnabled,
+                    formatDuration = formatDuration) },
+                graphs = { GraphsSection(graphViewModel, isSimpleMode, minimumBgHeight = 180, referenceStyle = true) }
+            )
+        } else if (isTablet) {
             OverviewScreenTablet(
                 profileName = profileName,
                 isProfileModified = isProfileModified,

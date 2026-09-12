@@ -1,5 +1,9 @@
 package app.aaps.plugins.aps.openAPSSMB
 
+import app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot
+import app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason
+import app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.IsfBasis
+
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.format.NumberFormat
 import app.aaps.core.interfaces.aps.APSResult
@@ -78,25 +82,29 @@ class DetermineBasalSMB @Inject constructor(
     //if (profile.out_units === "mmol/L") round(value / 18, 1).toFixed(1);
     //else Math.round(value);
 
-    fun enable_smb(profile: OapsProfile, microBolusAllowed: Boolean, meal_data: MealData, target_bg: Double): Boolean {
+    fun enable_smb(profile: OapsProfile, microBolusAllowed: Boolean, meal_data: MealData, target_bg: Double, decision: (Boolean, Reason) -> Unit = { _, _ -> }): Boolean {
         // disable SMB when a high temptarget is set
         if (!microBolusAllowed) {
             consoleError.add("SMB disabled (!microBolusAllowed)")
+            decision(false, Reason.INPUT_CONSTRAINT)
             return false
         } else if (!profile.allowSMB_with_high_temptarget && profile.temptargetSet && target_bg > Constants.NORMAL_TARGET_MGDL) {
             consoleError.add("SMB disabled due to high temptarget of $target_bg")
+            decision(false, Reason.HIGH_TT_BLOCK)
             return false
         }
 
         // enable SMB/UAM if always-on (unless previously disabled for high temptarget)
         if (profile.enableSMB_always) {
             consoleError.add("SMB enabled due to enableSMB_always")
+            decision(true, Reason.ALWAYS)
             return true
         }
 
         // enable SMB/UAM (if enabled in preferences) while we have COB
         if (profile.enableSMB_with_COB && meal_data.mealCOB != 0.0) {
             consoleError.add("SMB enabled for COB of ${meal_data.mealCOB}")
+            decision(true, Reason.COB)
             return true
         }
 
@@ -104,16 +112,19 @@ class DetermineBasalSMB @Inject constructor(
         // (6 hours is defined in carbWindow in lib/meal/total.js)
         if (profile.enableSMB_after_carbs && meal_data.carbs != 0.0) {
             consoleError.add("SMB enabled for 6h after carb entry")
+            decision(true, Reason.RECENT_CARBS)
             return true
         }
 
         // enable SMB/UAM (if enabled in preferences) if a low temptarget is set
         if (profile.enableSMB_with_temptarget && (profile.temptargetSet && target_bg < 100)) {
             consoleError.add("SMB enabled for temptarget of ${convert_bg(target_bg)}")
+            decision(true, Reason.TT)
             return true
         }
 
         consoleError.add("SMB disabled (no enableSMB preferences active or no condition satisfied)")
+        decision(false, Reason.NO_CONDITION)
         return false
     }
 
@@ -187,6 +198,7 @@ class DetermineBasalSMB @Inject constructor(
      * that is how the event reaches Crashlytics even though the returned result is finite.
      */
     private fun abortNonFinite(token: String, rT: RT, currenttemp: CurrentTemp, basal: Double, deliverAt: Long): RT {
+        rT.decision = rT.decision?.copy(blockReason = Reason.INVALID_INPUT)
         consoleError.add("Aborting run: $token")
         rT.reason.append("Aborting run: $token. ")
         if (currenttemp.rate > basal) {
@@ -218,6 +230,13 @@ class DetermineBasalSMB @Inject constructor(
             consoleLog = consoleLog,
             consoleError = consoleError
         )
+        rT.decision = AlgorithmDecisionSnapshot(
+            algorithm = "SMB", dynamicIsf = dynIsfMode, calculatedAt = currentTime, inputTimestamp = glucose_status.date,
+            profileIsfMgdl = profile.sens, currentDynamicIsfMgdl = profile.variable_sens.takeIf { dynIsfMode },
+            carbRatio = profile.carb_ratio,
+            tddU = profile.TDD.takeIf { dynIsfMode }, insulinDivisor = profile.insulinDivisor.takeIf { dynIsfMode },
+            smbConfigured = profile.enableSMB_always || profile.enableSMB_with_COB || profile.enableSMB_after_carbs || profile.enableSMB_with_temptarget
+        )
 
         // TODO eliminate
         val deliverAt = currentTime
@@ -248,6 +267,7 @@ class DetermineBasalSMB @Inject constructor(
             rT.reason.append("Error: CGM data is unchanged for the past ~45m")
         }
         if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 || (bg > 60 && flatBGsDetected)) {
+            rT.decision = rT.decision?.copy(blockReason = Reason.INVALID_INPUT)
             if (currenttemp.rate > basal) { // high temp is running
                 rT.reason.append(". Replacing high temp basal of ${currenttemp.rate} with neutral temp of $basal")
                 rT.deliverAt = deliverAt
@@ -427,6 +447,7 @@ class DetermineBasalSMB @Inject constructor(
 
         //console.error(reservoir_data);
 
+        val initialDecision = rT.decision
         rT = RT(
             algorithm = APSResult.Algorithm.SMB,
             runningDynamicIsf = dynIsfMode,
@@ -442,6 +463,7 @@ class DetermineBasalSMB @Inject constructor(
             consoleError = consoleError,
             variable_sens = profile.variable_sens
         )
+        rT.decision = initialDecision
 
         // generate predicted future BGs based on IOB, COB, and current absorption rate
 
@@ -456,7 +478,9 @@ class DetermineBasalSMB @Inject constructor(
         ZTpredBGs.add(bg)
         UAMpredBGs.add(bg)
 
-        var enableSMB = enable_smb(profile, microBolusAllowed, meal_data, target_bg)
+        var enableSMB = enable_smb(profile, microBolusAllowed, meal_data, target_bg) { eligible, reason ->
+            rT.decision = rT.decision?.copy(conditionEligible = eligible, conditionReason = reason)
+        }
 
         // enable UAM (if enabled in preferences)
         val enableUAM = profile.enableUAM
@@ -764,16 +788,19 @@ class DetermineBasalSMB @Inject constructor(
                 future_sens = round(future_sens, 1)
                 consoleLog.add("Future state sensitivity is $future_sens based on eventual and current bg due to flat glucose level above target")
                 rT.reason.append("Dosing sensitivity: $future_sens using eventual BG;")
+                rT.decision = rT.decision?.copy(futureIsfMgdl = future_sens, futureIsfBasis = IsfBasis.BLENDED_CURRENT_MIN_PREDICTED)
             } else if (glucose_status.delta > 0 && eventualBG > target_bg || eventualBG > bg) {
                 future_sens = (1800 / (ln((bg / profile.insulinDivisor) + 1) * profile.TDD))
                 future_sens = round(future_sens, 1)
                 consoleLog.add("Future state sensitivity is $future_sens using current bg due to small delta or variation")
                 rT.reason.append("Dosing sensitivity: $future_sens using current BG;")
+                rT.decision = rT.decision?.copy(futureIsfMgdl = future_sens, futureIsfBasis = IsfBasis.CURRENT_BG)
             } else {
                 future_sens = (1800 / (ln((fSensBG / profile.insulinDivisor) + 1) * profile.TDD))
                 future_sens = round(future_sens, 1)
                 consoleLog.add("Future state sensitivity is $future_sens based on eventual bg due to -ve delta")
                 rT.reason.append("Dosing sensitivity: $future_sens using eventual BG;")
+                rT.decision = rT.decision?.copy(futureIsfMgdl = future_sens, futureIsfBasis = IsfBasis.MIN_PREDICTED_BG)
             }
         }
 
@@ -882,6 +909,7 @@ class DetermineBasalSMB @Inject constructor(
         if (maxCOBPredBG > bg) {
             minPredBG = min(minPredBG, maxCOBPredBG)
         }
+        rT.decision = rT.decision?.copy(minPredBgMgdl = minPredBG, minGuardBgMgdl = minGuardBG)
 
         rT.COB = meal_data.mealCOB
         rT.IOB = iob_data.iob
@@ -940,11 +968,13 @@ class DetermineBasalSMB @Inject constructor(
         }
 
         if (enableSMB && minGuardBG < threshold) {
+            rT.decision = rT.decision?.copy(blockReason = Reason.PREDICTED_LOW)
             consoleError.add("minGuardBG ${convert_bg(minGuardBG)} projected below ${convert_bg(threshold)} - disabling SMB")
             //rT.reason += "minGuardBG "+minGuardBG+"<"+threshold+": SMB disabled; ";
             enableSMB = false
         }
         if (maxDelta > 0.20 * bg) {
+            rT.decision = rT.decision?.copy(blockReason = Reason.EXCESSIVE_DELTA)
             consoleError.add("maxDelta ${convert_bg(maxDelta)} > 20% of BG ${convert_bg(bg)} - disabling SMB")
             rT.reason.append("maxDelta " + convert_bg(maxDelta) + " > 20% of BG " + convert_bg(bg) + ": SMB disabled; ")
             enableSMB = false
@@ -1022,6 +1052,7 @@ class DetermineBasalSMB @Inject constructor(
             var insulinReq =
                 if (dynIsfMode) 2 * min(0.0, (eventualBG - target_bg) / future_sens)
                 else 2 * min(0.0, (eventualBG - target_bg) / sens)
+            rT.decision = rT.decision?.copy(insulinReqIsfMgdl = if (dynIsfMode) future_sens else sens)
             insulinReq = round(insulinReq, 2)
             // calculate naiveInsulinReq based on naive_eventualBG
             var naiveInsulinReq = min(0.0, (naive_eventualBG - target_bg) / sens)
@@ -1116,6 +1147,7 @@ class DetermineBasalSMB @Inject constructor(
             rT.reason.append("Eventual BG " + convert_bg(eventualBG) + " >= " + convert_bg(max_bg) + ", ")
         }
         if (iob_data.iob > max_iob) {
+            rT.decision = rT.decision?.copy(blockReason = Reason.IOB, iobLimited = true)
             rT.reason.append("IOB ${round(iob_data.iob, 2)} > max_iob $max_iob")
             if (currenttemp.duration > 15 && (round_basal(basal) == round_basal(currenttemp.rate))) {
                 rT.reason.append(", temp ${currenttemp.rate} ~ req ${round(basal, 2).withoutZeros()}U/hr. ")
@@ -1130,8 +1162,10 @@ class DetermineBasalSMB @Inject constructor(
             var insulinReq =
                 if (dynIsfMode) round((min(minPredBG, eventualBG) - target_bg) / future_sens, 2)
                 else round((min(minPredBG, eventualBG) - target_bg) / sens, 2)
+            rT.decision = rT.decision?.copy(insulinReqIsfMgdl = if (dynIsfMode) future_sens else sens)
             // if that would put us over max_iob, then reduce accordingly
             if (insulinReq > max_iob - iob_data.iob) {
+                rT.decision = rT.decision?.copy(iobLimited = true)
                 rT.reason.append("max_iob $max_iob, ")
                 insulinReq = max_iob - iob_data.iob
             }
@@ -1159,6 +1193,7 @@ class DetermineBasalSMB @Inject constructor(
                 // bolus 1/2 the insulinReq, up to maxBolus, rounding down to nearest bolus increment
                 val roundSMBTo = 1 / profile.bolus_increment
                 val microBolus = Math.floor(Math.min(insulinReq / 2, maxBolus) * roundSMBTo) / roundSMBTo
+                rT.decision = rT.decision?.copy(maxBolusU = maxBolus, bolusLimited = insulinReq / 2 >= maxBolus)
                 // calculate a long enough zero temp to eventually correct back up to target
                 val smbTarget = target_bg
                 val worstCaseInsulinReq = (smbTarget - (naive_eventualBG + minIOBPredBG) / 2.0) / sens
@@ -1170,6 +1205,7 @@ class DetermineBasalSMB @Inject constructor(
                 }
 
                 var smbLowTempReq = 0.0
+                rT.smbZeroTempEquivalentMinutes = durationReq
                 if (durationReq <= 0) {
                     durationReq = 0
                     // don't set an SMB zero temp longer than 60 minutes
@@ -1178,7 +1214,8 @@ class DetermineBasalSMB @Inject constructor(
                     durationReq = min(60, max(0, durationReq))
                 } else {
                     // if SMB durationReq is less than 30m, set a nonzero low temp
-                    smbLowTempReq = round(basal * durationReq / 30.0, 2)
+                    // Hold back durationReq minutes of basal across a 30-minute temp (#5082).
+                    smbLowTempReq = round(basal * (30 - durationReq) / 30.0, 2)
                     durationReq = 30
                 }
                 rT.reason.append(" insulinReq $insulinReq")
@@ -1195,6 +1232,7 @@ class DetermineBasalSMB @Inject constructor(
                 //console.error(lastBolusAge);
                 // allow SMBIntervals between 1 and 10 minutes
                 val SMBInterval = min(10, max(1, profile.SMBInterval)) * 60.0   // in seconds
+                rT.decision = rT.decision?.copy(intervalWaiting = lastBolusAge <= SMBInterval - 6.0, intervalSeconds = SMBInterval, lastBolusAgeSeconds = lastBolusAge)
                 //console.error(naive_eventualBG, insulinReq, worstCaseInsulinReq, durationReq);
                 consoleError.add("naive_eventualBG $naive_eventualBG,${durationReq}m ${smbLowTempReq}U/h temp needed; last bolus ${round(lastBolusAge / 60.0, 1)}m ago; maxBolus: $maxBolus")
                 if (lastBolusAge > SMBInterval - 6.0) {   // 6s tolerance

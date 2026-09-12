@@ -504,6 +504,12 @@ open class OpenAPSSMBPlugin @Inject constructor(
             flatBGsDetected = flatBGsDetected,
             dynIsfMode = effectiveDynIsfMode
         ).also {
+            it.decision = it.decision?.copy(
+                eventualBgMgdl = it.eventualBG, iobU = it.IOB, cobG = it.COB,
+                requestedSmbU = it.units, requestedTbrUph = it.rate, requestedTbrMinutes = it.duration,
+                dynIsfAdjustmentFactor = if (effectiveDynIsfMode) preferences.get(IntKey.ApsDynIsfAdjustmentFactor) / 100.0 else null
+            )
+            it.decision?.let { decision -> aapsLogger.info(LTag.APS, "AlgorithmDecision ${decision.toJson()}") }
             val determineBasalResult = apsResultProvider.get().with(it)
             // Preserve input data
             determineBasalResult.inputConstraints = inputConstraints
