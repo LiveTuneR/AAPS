@@ -687,10 +687,10 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 ads.markCalculationCompleted()
                 data.iobCobCalculator.ads = ads
                 val pass = ads.lastBucketPass
-                aapsLogger.info(LTag.AUTOSENS, "CgmDecision stage=ADS_PUBLISHED generation=$generation rawBgTimestamp=${ads.bgReadings.firstOrNull()?.timestamp} bucketBgTimestamp=${ads.lastBg()?.timestamp} referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${ads.bucketReferenceTime} bucketStartedAt=${pass?.startedAt} bucketFinishedAt=${pass?.finishedAt} calculationStartedAt=$startedAt publishedAt=${dateUtil.now()}")
+                aapsLogger.info(LTag.WORKER, "CgmDecision stage=ADS_PUBLISHED generation=$generation rawBgTimestamp=${ads.bgReadings.firstOrNull()?.timestamp} bucketBgTimestamp=${ads.lastBg()?.timestamp} referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${ads.bucketReferenceTime} bucketStartedAt=${pass?.startedAt} bucketFinishedAt=${pass?.finishedAt} calculationStartedAt=$startedAt publishedAt=${dateUtil.now()}")
             }) {
             data.iobCobCalculator.loopHealth?.publishSkipped()
-            aapsLogger.debug(LTag.AUTOSENS, "Skipping ADS publish: superseded workerGeneration=$generation activeGeneration=${workflowChainData.activeGeneration(job)} job=$job ageMs=${dateUtil.now() - startedAt}")
+            aapsLogger.info(LTag.WORKER, "CgmDecision stage=ADS_PUBLISH_SKIPPED generation=$generation activeGeneration=${workflowChainData.activeGeneration(job)} job=$job stopped=$isStopped reason=STALE_GENERATION_OR_STOPPED calculationStartedAt=$startedAt finishedAt=${dateUtil.now()}")
         }
     }
 
