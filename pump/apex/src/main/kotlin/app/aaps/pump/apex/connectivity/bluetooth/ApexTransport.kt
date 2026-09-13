@@ -16,3 +16,6 @@ enum class ApexTransportWriteOutcome {
     ISSUED_CONFIRMED_BY_GATT,
     ISSUED_OUTCOME_UNKNOWN,
 }
+
+internal fun rejectedWriteOutcome(anyChunkIssued: Boolean): ApexTransportWriteOutcome =
+    if (anyChunkIssued) ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN else ApexTransportWriteOutcome.NOT_ISSUED

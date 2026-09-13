@@ -218,7 +218,7 @@ class ApexBLE @Inject constructor(
         )
         while (start < data.size) {
             if (gatt !== bluetoothGatt || generation != activeGeneration) {
-                return if (anyChunkIssued) ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN else ApexTransportWriteOutcome.NOT_ISSUED
+                return rejectedWriteOutcome(anyChunkIssued)
             }
             val end = min(start + chunkSize, data.size)
             val chunk = data.copyOfRange(start, end)
@@ -249,7 +249,7 @@ class ApexBLE @Inject constructor(
             if (!issued) {
                 writeAck = null
                 failCurrent("write_not_issued")
-                return if (anyChunkIssued) ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN else ApexTransportWriteOutcome.NOT_ISSUED
+                return rejectedWriteOutcome(anyChunkIssued)
             }
             anyChunkIssued = true
             val writeStatus = withTimeoutOrNull(WRITE_TIMEOUT_MS) { ack.await() }
