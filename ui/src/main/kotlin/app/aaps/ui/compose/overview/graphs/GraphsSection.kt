@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import app.aaps.core.ui.compose.AapsTheme
 import androidx.compose.material.icons.Icons
@@ -518,7 +519,7 @@ fun GraphsSection(
                 }
             }
             if (referenceStyle) ChartLegend(secondary.series.map { type ->
-                ChartLegendItem(type.name, if (type == SeriesType.COB) stringResource(app.aaps.ui.R.string.apex7_carb_units, number(current(cob.cob))) else null,
+                ChartLegendItem(stringResource(seriesShortNameId(type)), if (type == SeriesType.COB) stringResource(app.aaps.ui.R.string.apex7_carb_units, number(current(cob.cob))) else null,
                     if (type == SeriesType.COB) AapsTheme.generalColors.cobPrediction else MaterialTheme.colorScheme.onSurfaceVariant)
             }, "legend-secondary-$i")
             }
@@ -620,9 +621,17 @@ private fun ChartLegend(items: List<ChartLegendItem>, tag: String) {
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     Box(Modifier.width(8.dp).height(3.dp).background(item.color))
-                    Text(item.label, fontSize = 10.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        item.label,
+                        modifier = Modifier.weight(1f),
+                        fontSize = 10.sp,
+                        lineHeight = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                item.value?.let { Text(it, fontSize = 11.sp, lineHeight = 13.sp, color = item.color) }
+                item.value?.let { Text(it, fontSize = 11.sp, lineHeight = 13.sp, color = item.color, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }

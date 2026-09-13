@@ -49,6 +49,8 @@ fun EnhancedOverviewContent(
     smbEnabled: Boolean = false,
     modeNotice: String? = null,
     modifier: Modifier = Modifier,
+    onTargetClick: () -> Unit = {},
+    onActivityPermissionClick: () -> Unit = {},
     banner: @Composable () -> Unit = {},
     graphs: @Composable () -> Unit = {}
 ) {
@@ -86,7 +88,7 @@ fun EnhancedOverviewContent(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Metric(if (targetActive) R.string.apex7_temp_target_short else R.string.apex7_target_short, target, if (targetActive) amber else green,
-                                Icons.Default.MyLocation, Modifier.weight(1f), "detail-${R.string.apex7_target_short}") { selected = R.string.apex7_target_short }
+                                Icons.Default.MyLocation, Modifier.weight(1f), "detail-${R.string.apex7_target_short}") { onTargetClick() }
                             Metric(R.string.apex7_iob, summary(R.string.apex7_iob), cyan, Icons.Default.WaterDrop, Modifier.weight(1f)) { selected = R.string.apex7_iob }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -141,9 +143,15 @@ fun EnhancedOverviewContent(
             val rowWidth = maxOf(maxWidth, 360.dp * LocalDensity.current.fontScale)
             Row(Modifier.horizontalScroll(rememberScrollState()).width(rowWidth), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 Status(R.string.apex7_smb, when (smbState) {
-                    OverviewSmbState.ON -> "ON"; OverviewSmbState.WAIT -> "WAIT"; OverviewSmbState.OFF -> "OFF"; OverviewSmbState.UNKNOWN -> "--"
+                    OverviewSmbState.ON -> stringResource(R.string.apex7_smb_on)
+                    OverviewSmbState.WAIT -> stringResource(R.string.apex7_smb_wait)
+                    OverviewSmbState.BLOCKED -> stringResource(R.string.apex7_smb_blocked)
+                    OverviewSmbState.OFF -> stringResource(R.string.apex7_smb_off)
+                    OverviewSmbState.UNKNOWN -> stringResource(R.string.apex7_smb_unknown)
                 }, Icons.Default.Bolt, when (smbState) {
-                    OverviewSmbState.ON -> green; OverviewSmbState.WAIT -> amber; OverviewSmbState.OFF -> MaterialTheme.colorScheme.error; OverviewSmbState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+                    OverviewSmbState.ON -> green; OverviewSmbState.WAIT -> amber
+                    OverviewSmbState.BLOCKED, OverviewSmbState.OFF -> MaterialTheme.colorScheme.error
+                    OverviewSmbState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
                 }, Modifier.weight(1f)) { selected = R.string.apex7_smb }
                 Status(R.string.apex7_loop_short, age(v.loopTimestamp,v.loopAge), Icons.Default.Sync, cyan, Modifier.weight(1f), "detail-${R.string.apex7_loop}") { selected = R.string.apex7_loop }
                 Status(R.string.apex7_sync_short, age(v.syncTimestamp,v.syncAge), Icons.Default.CloudQueue, cyan, Modifier.weight(1f)) { selected = R.string.apex7_pump }
@@ -178,8 +186,13 @@ fun EnhancedOverviewContent(
                     HorizontalDivider()
                     Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                         Text(stringResource(field.label), style = MaterialTheme.typography.labelMedium)
-                        Text(field.value ?: stringResource(R.string.apex7_unknown), style = MaterialTheme.typography.bodyLarge)
+                        val parts = field.value?.split('\n',limit=2)
+                        Text(parts?.firstOrNull() ?: stringResource(R.string.apex7_unknown), style = MaterialTheme.typography.bodyLarge)
+                        parts?.getOrNull(1)?.let { Text(it,style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
+                }
+                if (tile.title == R.string.apex7_activity && v.activityPermissionRequired) {
+                    Button(onClick = onActivityPermissionClick, Modifier.fillMaxWidth()) { Text(stringResource(R.string.apex7_grant_access)) }
                 }
                 Spacer(Modifier.height(32.dp))
             }

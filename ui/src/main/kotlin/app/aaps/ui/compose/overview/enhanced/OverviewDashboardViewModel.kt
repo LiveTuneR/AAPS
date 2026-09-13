@@ -10,6 +10,10 @@ import app.aaps.core.data.model.TT
 import app.aaps.core.data.model.EPS
 import app.aaps.core.data.model.PS
 import app.aaps.core.data.model.CA
+import app.aaps.core.data.model.BS
+import app.aaps.core.data.activity.ActivityCategory
+import app.aaps.core.data.activity.ActivitySource
+import app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.collectResilient
 import app.aaps.core.interfaces.rx.events.*
@@ -38,13 +42,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import java.util.Locale
 
 data class DashboardField(val label: Int, val value: String?)
 data class DashboardTile(val title: Int, val summary: String?, val fields: List<DashboardField>)
 
-enum class OverviewSmbState { ON, WAIT, OFF, UNKNOWN }
+enum class OverviewSmbState { ON, WAIT, BLOCKED, OFF, UNKNOWN }
 
 fun overviewAdjustmentFactor(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): String? =
     decision?.let { if (it.algorithm == "AUTO_ISF") it.autoIsfFactor else if (it.dynamicIsf) it.dynIsfAdjustmentFactor else null }
@@ -53,7 +58,8 @@ fun overviewAdjustmentFactor(decision: app.aaps.core.interfaces.aps.AlgorithmDec
 
 fun overviewSmbState(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): OverviewSmbState = when {
     decision == null -> OverviewSmbState.UNKNOWN
-    !decision.smbConfigured || decision.conditionEligible == false || decision.blockReason != null -> OverviewSmbState.OFF
+    !decision.smbConfigured -> OverviewSmbState.OFF
+    decision.blockReason != null || decision.conditionEligible == false -> OverviewSmbState.BLOCKED
     decision.conditionEligible != true -> OverviewSmbState.UNKNOWN
     decision.intervalWaiting == true -> OverviewSmbState.WAIT
     decision.intervalWaiting == false -> OverviewSmbState.ON
@@ -83,7 +89,8 @@ data class OverviewVitals(
     val bgTimestamp: Long? = null,
     val loopTimestamp: Long? = null,
     val syncTimestamp: Long? = null,
-    val decisionTimestamp: Long? = null
+    val decisionTimestamp: Long? = null,
+    val activityPermissionRequired: Boolean = false,
 )
 
 data class OverviewDashboardState(val tiles: List<DashboardTile> = emptyList(), val capturedAt: Long? = null, val vitals: OverviewVitals = OverviewVitals())
@@ -123,14 +130,20 @@ class OverviewDashboardViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             preferences.observe(BooleanKey.OverviewEnhanced).collectLatest { enabled ->
                 if (enabled) {
-                    refreshRequests.trySend(Unit)
-                    for (ignored in refreshRequests) {
-                    try { refresh() }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) {
-                        mutableState.value = OverviewDashboardState()
-                        logger.error(LTag.AUTOSENS, "Overview diagnostics unavailable: ${error.javaClass.simpleName}")
-                    }
+                    activities.refresh()
+                    var lastActivityRefresh = System.currentTimeMillis()
+                    while (true) {
+                        withTimeoutOrNull(2_000L) { refreshRequests.receive() }
+                        try { refresh() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) {
+                            mutableState.value = OverviewDashboardState()
+                            logger.error(LTag.AUTOSENS, "Overview diagnostics unavailable: ${error.javaClass.simpleName}")
+                        }
+                        if (System.currentTimeMillis() - lastActivityRefresh >= 120_000L) {
+                            activities.refresh()
+                            lastActivityRefresh = System.currentTimeMillis()
+                        }
                     }
                 }
             }
@@ -142,6 +155,10 @@ class OverviewDashboardViewModel @Inject constructor(
     private fun age(value: Long?, now: Long): String? = value?.takeIf { it > 0 && it <= now }?.let { rh.gs(R.string.apex7_minutes, (now - it) / 60_000) }
     private fun bool(value: Boolean) = rh.gs(if (value) R.string.apex7_yes else R.string.apex7_no)
     private fun milliseconds(value: Long?) = value?.takeIf { it >= 0 }?.let { rh.gs(R.string.apex7_milliseconds, it) }
+    private fun durationSeconds(value: Double?): String? = value?.takeIf { it.isFinite() && it >= 0 }?.let {
+        if (it >= 60.0 && it % 60.0 == 0.0) rh.gs(R.string.apex7_duration_minutes, (it / 60.0).toInt())
+        else rh.gs(R.string.apex7_duration_seconds, it.toInt())
+    }
     private fun compactAge(value: Long?, now: Long): String? = value?.takeIf { it > 0 && it <= now }?.let {
         val minutes = (now - it) / 60_000
         when {
@@ -149,6 +166,107 @@ class OverviewDashboardViewModel @Inject constructor(
             minutes >= 60 -> rh.gs(R.string.apex7_hours_minutes, minutes / 60, minutes % 60)
             else -> rh.gs(R.string.apex7_minutes, minutes)
         }
+    }
+
+    fun refreshActivity() { viewModelScope.launch(Dispatchers.IO) { activities.refresh(); refreshRequests.trySend(Unit) } }
+    val activityPermissions: Set<String> get() = activities.requiredPermissions
+
+    private fun reason(value: AlgorithmDecisionSnapshot.Reason?): String? = value?.let {
+        val id = when (it) {
+            AlgorithmDecisionSnapshot.Reason.INPUT_CONSTRAINT -> R.string.apex7_reason_input_constraint
+            AlgorithmDecisionSnapshot.Reason.HIGH_TT_BLOCK -> R.string.apex7_reason_high_tt_block
+            AlgorithmDecisionSnapshot.Reason.ALWAYS -> R.string.apex7_reason_always
+            AlgorithmDecisionSnapshot.Reason.COB -> R.string.apex7_reason_cob
+            AlgorithmDecisionSnapshot.Reason.RECENT_CARBS -> R.string.apex7_reason_recent_carbs
+            AlgorithmDecisionSnapshot.Reason.TT -> R.string.apex7_reason_tt
+            AlgorithmDecisionSnapshot.Reason.NO_CONDITION -> R.string.apex7_reason_no_condition
+            AlgorithmDecisionSnapshot.Reason.PREDICTED_LOW -> R.string.apex7_reason_predicted_low
+            AlgorithmDecisionSnapshot.Reason.EXCESSIVE_DELTA -> R.string.apex7_reason_excessive_delta
+            AlgorithmDecisionSnapshot.Reason.IOB -> R.string.apex7_reason_iob
+            AlgorithmDecisionSnapshot.Reason.INVALID_INPUT -> R.string.apex7_reason_invalid_input
+            AlgorithmDecisionSnapshot.Reason.AUTO_FULL_LOOP -> R.string.apex7_reason_auto_full_loop
+            AlgorithmDecisionSnapshot.Reason.AUTO_LOOP_DISABLED -> R.string.apex7_reason_auto_loop_disabled
+        }
+        "${rh.gs(id)}\n${it.name}"
+    }
+
+    private fun isfBasis(value: AlgorithmDecisionSnapshot.IsfBasis?): String? = value?.let {
+        rh.gs(when (it) {
+            AlgorithmDecisionSnapshot.IsfBasis.BLENDED_CURRENT_MIN_PREDICTED -> R.string.apex7_isf_basis_blended
+            AlgorithmDecisionSnapshot.IsfBasis.CURRENT_BG -> R.string.apex7_isf_basis_current
+            AlgorithmDecisionSnapshot.IsfBasis.MIN_PREDICTED_BG -> R.string.apex7_isf_basis_predicted
+        })
+    }
+
+    private fun activityName(value: ActivityCategory?): String? = value?.let {
+        rh.gs(when (it) {
+            ActivityCategory.WALKING -> R.string.apex7_activity_walking
+            ActivityCategory.RUNNING -> R.string.apex7_activity_running
+            ActivityCategory.CYCLING -> R.string.apex7_activity_cycling
+            ActivityCategory.POOL_SWIMMING -> R.string.apex7_activity_pool
+            ActivityCategory.OPEN_WATER_SWIMMING -> R.string.apex7_activity_open_water
+            ActivityCategory.OTHER -> R.string.apex7_activity_other
+            ActivityCategory.UNKNOWN -> R.string.apex7_reason_unknown
+        })
+    }
+
+    private fun activitySource(event: app.aaps.core.data.activity.ActivityEvent?): String? = event?.let {
+        val label = when (it.source) {
+            ActivitySource.SAMSUNG_HEALTH -> rh.gs(R.string.apex7_source_samsung)
+            ActivitySource.PHONE -> rh.gs(R.string.apex7_source_phone)
+            else -> rh.gs(R.string.apex7_reason_unknown)
+        }
+        listOfNotNull(label, it.sourcePackage).joinToString("\n")
+    }
+
+    private fun pumpState(value: String?): String? = value?.let {
+        rh.gs(when (it) {
+            "Ready" -> R.string.apex7_pump_ready
+            "Connecting" -> R.string.apex7_pump_connecting
+            "Handshaking" -> R.string.apex7_pump_handshaking
+            "Backoff" -> R.string.apex7_pump_backoff
+            "Disconnected" -> R.string.apex7_pump_disconnected
+            "Stopped" -> R.string.apex7_pump_stopped
+            "Incompatible" -> R.string.apex7_pump_incompatible
+            else -> R.string.apex7_status_unknown
+        })
+    }
+
+    private fun commandName(value: String?): String = value?.let {
+        rh.gs(when (it) {
+            "Bolus" -> R.string.apex7_command_bolus
+            "CancelBolus" -> R.string.apex7_command_cancel_bolus
+            "TemporaryBasal" -> R.string.apex7_command_tbr
+            "CancelTemporaryBasal" -> R.string.apex7_command_cancel_tbr
+            "GetValue" -> R.string.apex7_command_get_value
+            else -> R.string.apex7_status_unknown
+        })
+    } ?: rh.gs(R.string.apex7_none)
+
+    private fun smbStateText(value: OverviewSmbState): String = rh.gs(when (value) {
+        OverviewSmbState.ON -> R.string.apex7_smb_on
+        OverviewSmbState.WAIT -> R.string.apex7_smb_wait
+        OverviewSmbState.BLOCKED -> R.string.apex7_smb_blocked
+        OverviewSmbState.OFF -> R.string.apex7_smb_off
+        OverviewSmbState.UNKNOWN -> R.string.apex7_smb_unknown
+    })
+
+    private fun bolusState(value: String?): String? = value?.let {
+        rh.gs(when (it) {
+            "PREPARED" -> R.string.apex7_bolus_state_prepared
+            "COMMAND_SENT" -> R.string.apex7_bolus_state_sent
+            "ACCEPTED" -> R.string.apex7_bolus_state_accepted
+            "DELIVERING" -> R.string.apex7_bolus_state_delivering
+            "LIVE_COMPLETED" -> R.string.apex7_bolus_state_live_completed
+            "HISTORY_CONFIRMING" -> R.string.apex7_bolus_state_history
+            "CONFIRMED_DELIVERED" -> R.string.apex7_bolus_state_confirmed
+            "REJECTED_BEFORE_DELIVERY", "DEFINITELY_NOT_DELIVERED" -> R.string.apex7_bolus_state_not_delivered
+            "CANCELLED_CONFIRMED" -> R.string.apex7_bolus_state_cancelled
+            "PARTIALLY_DELIVERED_CONFIRMED" -> R.string.apex7_bolus_state_partial
+            "DELIVERY_UNCERTAIN" -> R.string.apex7_bolus_state_uncertain
+            "RECONCILIATION_REQUIRED" -> R.string.apex7_bolus_state_reconciliation
+            else -> R.string.apex7_status_unknown
+        })
     }
 
     private suspend fun refresh() {
@@ -183,6 +301,7 @@ class OverviewDashboardViewModel @Inject constructor(
             ActivityState.NONE -> R.string.apex7_state_none
         })
         val event = activity.event
+        val lastSmb = persistence.getNewestBolusOfType(BS.Type.SMB)
         val units = profileFunction.getUnits()
         fun isf(value: Double?) = value?.takeIf { it > 0 }?.let { number(profileUtil.fromMgdlToUnits(it, units)) }?.let { rh.gs(R.string.apex7_isf_units, it, units.asText) }
         fun recent(timestamp: Long?) = timestamp != null && now - timestamp in 0..660_000L
@@ -199,31 +318,37 @@ class OverviewDashboardViewModel @Inject constructor(
             LoopHealthStatus.STALE -> R.string.apex7_status_stale
         })
         mutableState.value = OverviewDashboardState(listOf(
-            tile(R.string.apex7_autoisf, request?.algorithm?.name,
+            tile(R.string.apex7_autoisf, when {
+                request?.algorithm == app.aaps.core.interfaces.aps.APSResult.Algorithm.AUTO_ISF -> rh.gs(R.string.apex7_autoisf)
+                decision?.dynamicIsf == true -> rh.gs(R.string.apex7_disf)
+                request != null -> rh.gs(R.string.apex7_smb)
+                else -> null
+            },
                 R.string.apex7_factor to number(if (decision?.algorithm=="AUTO_ISF") decision.autoIsfFactor else decision?.dynIsfAdjustmentFactor), R.string.apex7_base_isf to baseIsf,
                 R.string.apex7_current_dynamic_isf to currentDynamicIsf, R.string.apex7_dosing_isf to dosingIsf,
                 R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
-                R.string.apex7_isf_basis to decision?.futureIsfBasis?.name,
+                R.string.apex7_isf_basis to isfBasis(decision?.futureIsfBasis),
                 R.string.apex7_tdd to number(decision?.tddU), R.string.apex7_insulin_divisor to decision?.insulinDivisor?.toString(),
                 R.string.apex7_time to time(request?.date), R.string.apex7_age to age(request?.date, now),
                 R.string.apex7_trace to activePlugin.activeAPS?.getSensitivityOverviewString()),
             tile(R.string.apex7_activity, activityState,
                 R.string.apex7_shadow to rh.gs(R.string.apex7_shadow), R.string.apex7_access to rh.gs(when (activity.access) {
-                    ActivityAccess.SDK_NOT_CONFIGURED -> R.string.apex7_sdk_missing
                     ActivityAccess.AVAILABLE -> R.string.apex7_access_available
-                    ActivityAccess.UNAVAILABLE -> R.string.apex7_access_unavailable
-                    ActivityAccess.PERMISSION_DENIED -> R.string.apex7_access_denied
+                    ActivityAccess.NO_DATA -> R.string.apex7_access_no_data
+                    ActivityAccess.HEALTH_CONNECT_UNAVAILABLE -> R.string.apex7_access_unavailable
+                    ActivityAccess.PERMISSION_REQUIRED -> R.string.apex7_access_denied
                     ActivityAccess.ERROR -> R.string.apex7_access_error
                 }),
                 R.string.apex7_last_read to time(activity.lastSuccessfulRead),
-                R.string.apex7_reachable to activity.watchReachable?.let { bool(it) },
+                R.string.apex7_reachable to activity.watchReachable?.let { bool(it) } ?: rh.gs(R.string.apex7_watch_reachability_unavailable),
                 R.string.apex7_clock_skew to bool(activity.clockSkew),
-                R.string.apex7_source to event?.source?.name, R.string.apex7_category to event?.let { "${it.category.name} / ${it.rawType}" },
+                R.string.apex7_source to activitySource(event), R.string.apex7_category to event?.let { "${activityName(it.category)}\n${it.rawType}" },
                 R.string.apex7_device to event?.sourceDevice, R.string.apex7_start to time(event?.startTime), R.string.apex7_end to time(event?.endTime),
                 R.string.apex7_received to time(event?.receivedAt), R.string.apex7_updated to time(event?.lastUpdatedAt),
                 R.string.apex7_age to age(event?.lastUpdatedAt, now), R.string.apex7_latency to milliseconds(event?.detectionLatencyMs),
                 R.string.apex7_duration to event?.let { milliseconds((it.endTime ?: now) - it.startTime) },
-                R.string.apex7_steps to event?.steps?.toString(), R.string.apex7_hr to number(event?.heartRate)),
+                R.string.apex7_read_latency to milliseconds(activity.readLatencyMs), R.string.apex7_steps to event?.steps?.toString(),
+                R.string.apex7_hr to number(event?.heartRate), R.string.apex7_latest_hr to number(event?.latestHeartRate)),
             tile(R.string.apex7_iob, number(request?.iob?.iob)?.takeIf { recent(request?.date) }?.let { rh.gs(R.string.apex7_insulin_units, it) },
                 R.string.apex7_total to number(request?.iob?.iob), R.string.apex7_basal to number(request?.iob?.basaliob),
                 R.string.apex7_bolus to null, R.string.apex7_time to time(request?.date),
@@ -231,41 +356,52 @@ class OverviewDashboardViewModel @Inject constructor(
             tile(R.string.apex7_isfcr, dosingIsf.takeIf { recent(request?.date) },
                 R.string.apex7_base_isf to baseIsf, R.string.apex7_current_dynamic_isf to currentDynamicIsf,
                 R.string.apex7_dosing_isf to dosingIsf, R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
-                R.string.apex7_isf_basis to decision?.futureIsfBasis?.name,
+                R.string.apex7_isf_basis to isfBasis(decision?.futureIsfBasis),
                 R.string.apex7_base_cr to number(profile?.getIc()), R.string.apex7_effective_cr to effectiveCr,
                 R.string.apex7_profile to profile?.percentage?.toString(), R.string.apex7_time to time(request?.date)),
             tile(R.string.apex7_cob, number(cob?.second)?.takeIf { recent(cob?.first) }?.let { rh.gs(R.string.apex7_carb_units, it) },
                 R.string.apex7_total to number(cob?.second), R.string.apex7_time to time(cob?.first), R.string.apex7_age to age(cob?.first, now),
                 R.string.apex7_carbs_future to number(futureCarbs), R.string.apex7_carbs_last to time(lastCarb?.timestamp)),
-            tile(R.string.apex7_smb, age(lastRun?.lastSMBEnact, now),
+            tile(R.string.apex7_smb, age(lastSmb?.timestamp, now),
                 R.string.apex7_enabled to bool(preferences.get(BooleanKey.ApsUseSmb)),
+                R.string.apex7_smb_state to smbStateText(if (pumpDiagnostics?.bolusReconciliationRequired == true) OverviewSmbState.BLOCKED else overviewSmbState(decision.takeIf { recent(request?.date) })),
                 R.string.apex7_condition_eligible to decision?.conditionEligible?.let { bool(it) },
-                R.string.apex7_condition_reason to decision?.conditionReason?.name,
-                R.string.apex7_block_reason to decision?.blockReason?.name,
+                R.string.apex7_condition_reason to reason(decision?.conditionReason),
+                R.string.apex7_block_reason to if (pumpDiagnostics?.bolusReconciliationRequired == true) rh.gs(R.string.apex7_bolus_unreconciled) else reason(decision?.blockReason),
                 R.string.apex7_interval_waiting to decision?.intervalWaiting?.let { bool(it) },
+                R.string.apex7_smb_interval to durationSeconds(decision?.intervalSeconds),
+                R.string.apex7_smb_until_allowed to decision?.let { d -> if (d.intervalWaiting == true) durationSeconds(((d.intervalSeconds ?: 0.0) - (d.lastBolusAgeSeconds ?: 0.0)).coerceAtLeast(0.0)) else rh.gs(R.string.apex7_not_required) },
                 R.string.apex7_smb_cap to number(decision?.maxBolusU),
                 R.string.apex7_smb_requested to number(request?.smb),
                 R.string.apex7_smb_constrained to number(result?.smb),
+                R.string.apex7_smb_pump_command to when {
+                    pumpDiagnostics?.bolusReconciliationRequired == true -> rh.gs(R.string.apex7_command_unresolved)
+                    lastRun?.smbSetByPump?.queued == true -> rh.gs(R.string.apex7_command_queued)
+                    lastRun?.smbSetByPump?.success == true -> rh.gs(R.string.apex7_command_confirmed)
+                    lastRun?.smbSetByPump != null -> rh.gs(R.string.apex7_command_sent)
+                    else -> rh.gs(R.string.apex7_command_not_requested)
+                },
                 R.string.apex7_smb_reported_delivered to lastRun?.smbSetByPump?.takeIf { !it.queued }?.let { number(it.bolusDelivered) },
-                R.string.apex7_last_smb to time(lastRun?.lastSMBEnact), R.string.apex7_time to time(result?.date),
-                R.string.apex7_reason to listOfNotNull(
-                    rh.gs(R.string.apex7_bolus_unreconciled).takeIf { pumpDiagnostics?.bolusReconciliationRequired == true },
-                    result?.reason,
-                    result?.smbConstraint?.getReasons(),
-                ).joinToString("\n").ifBlank { null }),
-            tile(R.string.apex7_pump, if (pumpDiagnostics?.bolusReconciliationRequired == true) rh.gs(R.string.apex7_bolus_uncertain) else pump.model().name,
-                R.string.apex7_connection to bool(pump.isConnected()), R.string.apex7_reservoir to if (pumpKnown) number(pump.reservoirLevel.value.cU) else null,
-                R.string.apex7_battery to if (pumpKnown) pump.batteryLevel.value?.toString() else null, R.string.apex7_sync to time(pump.lastDataTime.value),
-                R.string.apex7_fsm to pumpDiagnostics?.linkState, R.string.apex7_generation to pumpDiagnostics?.generation?.toString(),
-                R.string.apex7_pending to pumpDiagnostics?.pendingCommand, R.string.apex7_queued to pumpDiagnostics?.queuedCommands?.toString(),
-                R.string.apex7_firmware to pumpDiagnostics?.firmware, R.string.apex7_protocol to pumpDiagnostics?.protocol,
-                R.string.apex7_serial to pumpDiagnostics?.maskedSerial,
-                R.string.apex7_bolus_state to pumpDiagnostics?.bolusState,
-                R.string.apex7_bolus_requested to number(pumpDiagnostics?.bolusRequestedU),
-                R.string.apex7_bolus_live to number(pumpDiagnostics?.bolusLiveCompletedU),
-                R.string.apex7_bolus_history to number(pumpDiagnostics?.bolusHistoryConfirmedU),
-                R.string.apex7_bolus_operation_age to age(pumpDiagnostics?.bolusOperationCreatedUtc, now),
-                R.string.apex7_bolus_last_reconcile to time(pumpDiagnostics?.bolusLastReconciliationUtc)),
+                R.string.apex7_smb_confirmed_history to number(lastSmb?.amount),
+                R.string.apex7_last_smb to time(lastSmb?.timestamp), R.string.apex7_time to time(result?.date),
+                R.string.apex7_reason to rh.gs(R.string.apex7_bolus_unreconciled).takeIf { pumpDiagnostics?.bolusReconciliationRequired == true }),
+            DashboardTile(R.string.apex7_pump, if (pumpDiagnostics?.bolusReconciliationRequired == true) rh.gs(R.string.apex7_bolus_uncertain) else if (pumpDiagnostics != null) rh.gs(R.string.apex7_pump_model_apex) else null, buildList {
+                fun addField(label: Int, value: String?) { add(DashboardField(label,value)) }
+                addField(R.string.apex7_connection,bool(pump.isConnected())); addField(R.string.apex7_reservoir,if(pumpKnown) number(pump.reservoirLevel.value.cU) else null)
+                addField(R.string.apex7_battery,if(pumpKnown) pump.batteryLevel.value?.toString() else null); addField(R.string.apex7_sync,time(pump.lastDataTime.value))
+                pumpDiagnostics?.let { d ->
+                    addField(R.string.apex7_fsm,pumpState(d.linkState)); addField(R.string.apex7_generation,d.generation?.toString())
+                    addField(R.string.apex7_pending,commandName(d.pendingCommand)); addField(R.string.apex7_queued,d.queuedCommands.toString())
+                    addField(R.string.apex7_firmware,d.firmware); addField(R.string.apex7_protocol,d.protocol); addField(R.string.apex7_serial,d.maskedSerial)
+                    addField(R.string.apex7_bolus_reconciliation,if(d.bolusReconciliationRequired) rh.gs(R.string.apex7_bolus_uncertain) else rh.gs(R.string.apex7_not_required))
+                    if(d.bolusReconciliationRequired) {
+                        addField(R.string.apex7_bolus_state,bolusState(d.bolusState)); addField(R.string.apex7_bolus_requested,number(d.bolusRequestedU))
+                        addField(R.string.apex7_bolus_live,number(d.bolusLiveCompletedU) ?: rh.gs(R.string.apex7_no_data)); addField(R.string.apex7_bolus_history,number(d.bolusHistoryConfirmedU) ?: rh.gs(R.string.apex7_no_data))
+                        addField(R.string.apex7_bolus_operation_age,age(d.bolusOperationCreatedUtc,now)); addField(R.string.apex7_bolus_last_reconcile,time(d.bolusLastReconciliationUtc) ?: rh.gs(R.string.apex7_no_data))
+                        addField(R.string.apex7_bolus_gate,rh.gs(R.string.apex7_enabled_state))
+                    }
+                }
+            }),
             tile(R.string.apex7_site, age(site?.timestamp, now), R.string.apex7_time to time(site?.timestamp),
                 R.string.apex7_warning to preferences.get(IntKey.OverviewCageWarning).toString(),
                 R.string.apex7_critical to preferences.get(IntKey.OverviewCageCritical).toString(), R.string.apex7_remaining to null),
@@ -293,10 +429,15 @@ class OverviewDashboardViewModel @Inject constructor(
                 decision?.dynamicIsf == true -> R.string.apex7_disf
                 else -> R.string.apex7_smb
             },
-            activity = activityState.takeIf { activity.access == ActivityAccess.AVAILABLE },
-            activityDetail = event?.let { listOfNotNull(it.category.name, compactAge(it.startTime, it.endTime ?: now)).joinToString(" / ") },
+            activity = when (activity.access) {
+                ActivityAccess.AVAILABLE -> activityName(event?.category) ?: rh.gs(R.string.apex7_activity_none)
+                ActivityAccess.NO_DATA -> rh.gs(R.string.apex7_activity_none)
+                ActivityAccess.PERMISSION_REQUIRED -> rh.gs(R.string.apex7_activity_permission)
+                ActivityAccess.HEALTH_CONNECT_UNAVAILABLE, ActivityAccess.ERROR -> rh.gs(R.string.apex7_activity_unavailable)
+            },
+            activityDetail = event?.let { listOfNotNull(activitySource(it)?.substringBefore('\n'),activityName(it.category),compactAge(it.startTime,it.endTime ?: now)).joinToString(" · ") },
             activityUpdatedAt = event?.lastUpdatedAt ?: activity.lastSuccessfulRead,
-            smbState = if (pumpDiagnostics?.bolusReconciliationRequired == true) OverviewSmbState.OFF else overviewSmbState(decision.takeIf { recent(request?.date) }),
+            smbState = if (pumpDiagnostics?.bolusReconciliationRequired == true) OverviewSmbState.BLOCKED else overviewSmbState(decision.takeIf { recent(request?.date) }),
             bgTimestamp = snapshot.newestRawBgTimestamp,
             loopTimestamp = snapshot.lastCalculationSuccessTimestamp,
             syncTimestamp = pump.lastDataTime.value,
@@ -310,7 +451,8 @@ class OverviewDashboardViewModel @Inject constructor(
             bgAge = compactAge(snapshot.newestRawBgTimestamp, now),
             loopAge = compactAge(snapshot.lastCalculationSuccessTimestamp, now),
             syncAge = compactAge(pump.lastDataTime.value, now),
-            profile = profile?.percentage?.let { "$it%" }
+            profile = profile?.percentage?.let { "$it%" },
+            activityPermissionRequired = activity.access == ActivityAccess.PERMISSION_REQUIRED,
         ))
     }
 }

@@ -23,6 +23,8 @@ class OverviewFactorTest {
         assertEquals(OverviewSmbState.UNKNOWN,overviewSmbState(decision))
         assertEquals(OverviewSmbState.ON,overviewSmbState(decision.copy(conditionEligible=true,intervalWaiting=false)))
         assertEquals(OverviewSmbState.WAIT,overviewSmbState(decision.copy(conditionEligible=true,intervalWaiting=true)))
-        assertEquals(OverviewSmbState.OFF,overviewSmbState(decision.copy(conditionEligible=false)))
+        assertEquals(OverviewSmbState.BLOCKED,overviewSmbState(decision.copy(conditionEligible=false)))
+        assertEquals(OverviewSmbState.BLOCKED,overviewSmbState(decision.copy(conditionEligible=true,intervalWaiting=true,blockReason=AlgorithmDecisionSnapshot.Reason.PREDICTED_LOW)))
+        assertEquals(OverviewSmbState.OFF,overviewSmbState(decision.copy(smbConfigured=false)))
     }
 }

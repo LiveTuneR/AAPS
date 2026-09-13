@@ -35,17 +35,67 @@ class EnhancedOverviewContentTest {
         R.string.apex7_site, R.string.apex7_sensor, R.string.apex7_loop)
 
     private val now = 1_789_200_000_000L
-    private fun render(warning: Boolean = false, missingActivity: Boolean = false, disconnected: Boolean = false, missingAll: Boolean = false, tempTarget: Boolean = false, smb: OverviewSmbState = OverviewSmbState.ON) {
+    private fun render(
+        warning: Boolean = false,
+        missingActivity: Boolean = false,
+        disconnected: Boolean = false,
+        missingAll: Boolean = false,
+        tempTarget: Boolean = false,
+        smb: OverviewSmbState = OverviewSmbState.ON,
+        pumpUncertain: Boolean = false,
+        activityPermission: Boolean = false,
+        activityUnavailable: Boolean = false,
+        onTargetClick: () -> Unit = {},
+    ) {
         val english = RuntimeEnvironment.getApplication().resources.configuration.locales[0].language == "en"
         val state = OverviewDashboardState(titles.map { title ->
-            DashboardTile(title, null, listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null)))
+            val fields = when (title) {
+                R.string.apex7_activity -> listOf(
+                    DashboardField(R.string.apex7_access, if (activityPermission) "Требуется разрешение" else if (activityUnavailable) "Источник недоступен" else "Доступен"),
+                    DashboardField(R.string.apex7_source, "Samsung Health\ncom.sec.android.app.shealth"),
+                    DashboardField(R.string.apex7_category, "Ходьба\nwalking"),
+                    DashboardField(R.string.apex7_steps, "3456"),
+                    DashboardField(R.string.apex7_hr, "112"),
+                    DashboardField(R.string.apex7_latest_hr, "118"),
+                )
+                R.string.apex7_smb -> listOf(
+                    DashboardField(R.string.apex7_enabled, "Да"),
+                    DashboardField(R.string.apex7_smb_state, when (smb) { OverviewSmbState.ON -> "ВКЛ"; OverviewSmbState.WAIT -> "ОЖИД."; OverviewSmbState.BLOCKED -> "БЛОК"; OverviewSmbState.OFF -> "ВЫКЛ"; OverviewSmbState.UNKNOWN -> "—" }),
+                    DashboardField(R.string.apex7_condition_reason, "Активные углеводы (COB)\nCOB"),
+                    DashboardField(R.string.apex7_block_reason, if (smb == OverviewSmbState.BLOCKED) "Прогноз низкой глюкозы\nPREDICTED_LOW" else null),
+                    DashboardField(R.string.apex7_smb_interval, "5 мин"),
+                    DashboardField(R.string.apex7_smb_requested, "0,00"),
+                    DashboardField(R.string.apex7_smb_pump_command, "Не запрашивалась"),
+                    DashboardField(R.string.apex7_smb_confirmed_history, "0,10"),
+                )
+                R.string.apex7_pump -> buildList {
+                    add(DashboardField(R.string.apex7_connection, if (disconnected) "Нет" else "Да"))
+                    add(DashboardField(R.string.apex7_fsm, if (disconnected) "Нет связи" else "Готово"))
+                    add(DashboardField(R.string.apex7_generation, "42"))
+                    add(DashboardField(R.string.apex7_pending, "Нет"))
+                    add(DashboardField(R.string.apex7_queued, "0"))
+                    add(DashboardField(R.string.apex7_firmware, "1.1.1.0"))
+                    add(DashboardField(R.string.apex7_protocol, "4.12"))
+                    add(DashboardField(R.string.apex7_serial, "***123"))
+                    add(DashboardField(R.string.apex7_bolus_reconciliation, if (pumpUncertain) "Подача не подтверждена" else "Не требуется"))
+                    if (pumpUncertain) {
+                        add(DashboardField(R.string.apex7_bolus_state, "Требуется сверка"))
+                        add(DashboardField(R.string.apex7_bolus_requested, "9,25"))
+                        add(DashboardField(R.string.apex7_bolus_gate, "Включена"))
+                    }
+                }
+                else -> listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null))
+            }
+            DashboardTile(title, null, fields)
         }.map { tile -> tile.copy(summary = if (missingAll) null else when (tile.title) { R.string.apex7_iob -> "1,6 Е"; R.string.apex7_cob -> "22 г"; else -> null }) }, now,
             if (missingAll) OverviewVitals() else OverviewVitals(
                 units = if (english) "mmol/L" else "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = "90%", algorithmTitle = R.string.apex7_disf,
-                activity = if (missingActivity) null else if (english) "light" else "лёгкая", activityDetail = if (missingActivity) null else if (english) "Walking / 24 min" else "Ходьба · 24 мин",
+                activity = when { activityPermission -> "Требуется доступ"; activityUnavailable -> "Источник недоступен"; missingActivity -> "Нет текущей активности"; english -> "Walking"; else -> "Ходьба" },
+                activityDetail = if (missingActivity || activityPermission || activityUnavailable) null else if (english) "Samsung Health · Walking · 24 min" else "Samsung Health · Ходьба · 24 мин",
                 activityUpdatedAt = if (missingActivity) null else now - 32_000L, smbState = smb,
                 pumpConnected = !disconnected, reservoir = "142 Е", battery = "87%", siteAge = "2 д 10 ч", siteWarning = warning,
-                sensorAge = "5 д 16 ч", bgAge = if (warning) "14 мин" else "42 с", loopAge = "38 с", syncAge = "23 с", profile = "100%"))
+                sensorAge = "5 д 16 ч", bgAge = if (warning) "14 мин" else "42 с", loopAge = "38 с", syncAge = "23 с", profile = "100%",
+                activityPermissionRequired = activityPermission))
         val bg = BgInfoUiState(if (missingAll) null else BgInfoData(5.6, "5,6", BgRange.IN_RANGE, warning, now - 120_000,
             TrendArrow.FLAT, "Ровно", 0.0, "0,0", null, null, null, null), if (warning) "14 мин назад" else "2 мин назад")
         val vm = mock<GraphViewModel>()
@@ -71,7 +121,7 @@ class EnhancedOverviewContentTest {
         whenever(preferences.observe(StringKey.GeneralDarkMode)).thenReturn(MutableStateFlow("dark"))
         compose.setContent { CompositionLocalProvider(LocalPreferences provides preferences) { AapsTheme { Surface {
             EnhancedOverviewContent(state, bg, if (missingAll) null else if (tempTarget) "6,0 - 7,0 до 13:30" else "5,5 - 6,3", targetActive = tempTarget, smbEnabled = !warning,
-                modeNotice = if (warning) "Цикл приостановлен" else null,
+                modeNotice = if (warning) "Цикл приостановлен" else null, onTargetClick = onTargetClick,
                 graphs = { GraphsSection(vm, false, minimumBgHeight = 180, referenceStyle = true) })
         } } } }
     }
@@ -132,8 +182,9 @@ class EnhancedOverviewContentTest {
         capture("overview-portrait-normal-fixture")
     }
     @Test fun portraitWarnings() { render(warning = true); capture("overview-portrait-warnings-fixture") }
-    @Test fun portraitSmbWait() { render(smb = OverviewSmbState.WAIT); compose.onNodeWithText("SMB WAIT").assertExists(); capture("overview-portrait-wait-fixture") }
-    @Test fun portraitSmbOff() { render(smb = OverviewSmbState.OFF); compose.onNodeWithText("SMB OFF").assertExists(); capture("overview-portrait-off-fixture") }
+    @Test fun portraitSmbWait() { render(smb = OverviewSmbState.WAIT); compose.onNodeWithText("SMB ОЖИД.").assertExists(); capture("overview-portrait-wait-fixture") }
+    @Test fun portraitSmbBlocked() { render(smb = OverviewSmbState.BLOCKED); compose.onNodeWithText("SMB БЛОК").assertExists(); capture("overview-portrait-blocked-fixture") }
+    @Test fun portraitSmbOff() { render(smb = OverviewSmbState.OFF); compose.onNodeWithText("SMB ВЫКЛ").assertExists(); capture("overview-portrait-off-fixture") }
     @Test @Config(qualifiers = "en-w400dp-h850dp")
     fun englishPortrait() { render(); capture("overview-portrait-en-fixture") }
     @Test fun largeFontKeepsSingleStatusRow() {
@@ -153,6 +204,8 @@ class EnhancedOverviewContentTest {
         capture("overview-status-and-activity-fixture")
     }
     @Test fun portraitMissingActivity() { render(missingActivity = true); capture("overview-portrait-no-activity-fixture") }
+    @Test fun portraitActivityPermissionRequired() { render(activityPermission = true); capture("overview-activity-permission-required-fixture") }
+    @Test fun portraitActivityUnavailable() { render(activityUnavailable = true); capture("overview-activity-unavailable-fixture") }
     @Test fun portraitDisconnectedPump() { render(disconnected = true); capture("overview-portrait-disconnected-fixture") }
     @Test fun rightLegendsAndRangeSelection() {
         render()
@@ -171,6 +224,45 @@ class EnhancedOverviewContentTest {
         compose.onNodeWithText("Врем. цель").assertExists()
         compose.onNodeWithText("6,0 - 7,0 до 13:30").assertExists()
         capture("overview-temp-target-fixture")
+    }
+
+    @Test fun targetTileInvokesExistingManagementAction() {
+        var clicks = 0
+        render(onTargetClick = { clicks++ })
+        compose.onNodeWithTag("detail-${R.string.apex7_target_short}").performClick()
+        compose.runOnIdle { assertTrue(clicks == 1) }
+    }
+
+    @Test fun populatedPumpDetailHasNoFakeUnknownRows() {
+        render()
+        compose.onNodeWithTag("detail-${R.string.apex7_pump}").performScrollTo().performClick()
+        compose.onNodeWithText("Готово").assertExists()
+        compose.onNodeWithText("1.1.1.0").assertExists()
+        compose.onNodeWithText("***123").assertExists()
+        compose.onNodeWithText("Не требуется").assertExists()
+        capture("pump-detail-populated-ru-fixture")
+    }
+
+    @Test fun uncertainPumpAndStructuredSmbDetailsAreCaptured() {
+        render(smb = OverviewSmbState.BLOCKED, pumpUncertain = true)
+        compose.onNodeWithTag("detail-${R.string.apex7_pump}").performScrollTo().performClick()
+        compose.onNodeWithText("Требуется сверка").assertExists()
+        capture("pump-detail-delivery-uncertain-ru-fixture")
+        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.apex7_close)).performClick()
+        compose.onNodeWithTag("detail-${R.string.apex7_smb}").performScrollTo().performClick()
+        compose.onNodeWithText("Прогноз низкой глюкозы").assertExists()
+        compose.onNodeWithText("PREDICTED_LOW").assertExists()
+        capture("smb-detail-populated-ru-fixture")
+    }
+
+    @Test fun activityDetailShowsProvenanceStepsAndHeartRate() {
+        render()
+        compose.onNodeWithTag("detail-${R.string.apex7_activity}").performScrollTo().performClick()
+        compose.onNodeWithText("Samsung Health").assertExists()
+        compose.onNodeWithText("com.sec.android.app.shealth").assertExists()
+        compose.onNodeWithText("3456").assertExists()
+        compose.onNodeWithText("118").assertExists()
+        capture("activity-detail-available-ru-fixture")
     }
 
 }

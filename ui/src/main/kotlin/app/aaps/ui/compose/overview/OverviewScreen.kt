@@ -1,6 +1,8 @@
 package app.aaps.ui.compose.overview
 
 import android.content.res.Configuration
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.health.connect.client.PermissionController
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -35,6 +37,7 @@ import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TT
 import app.aaps.core.interfaces.notifications.AapsNotification
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.overview.graph.TbrState
 import app.aaps.core.interfaces.pump.BolusProgressState
 import app.aaps.core.ui.compose.TABLET_MIN_SW_DP
@@ -132,6 +135,9 @@ fun OverviewScreen(
     val isTablet = configuration.smallestScreenWidthDp >= TABLET_MIN_SW_DP && isLandscape
     val dashboard: OverviewDashboardViewModel = hiltViewModel()
     val enhanced by dashboard.enabled.collectAsStateWithLifecycle()
+    val healthPermissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract(),
+    ) { dashboard.refreshActivity() }
 
     Box(modifier = modifier.fillMaxSize()) {
         if (enhanced && !LocalConfig.current.AAPSCLIENT) {
@@ -142,6 +148,8 @@ fun OverviewScreen(
                 targetActive = tempTargetState == TempTargetChipState.Active,
                 modeNotice = runningModeText.takeUnless { runningMode == RM.Mode.CLOSED_LOOP },
                 modifier = Modifier.padding(paddingValues),
+                onTargetClick = { onNavigate(NavigationRequest.Element(ElementType.TEMP_TARGET_MANAGEMENT)) },
+                onActivityPermissionClick = { healthPermissionLauncher.launch(dashboard.activityPermissions) },
                 banner = { ActiveSceneBanner(activeState = activeSceneState, expired = sceneExpired,
                     onEndClick = onEndScene, onDismiss = onDismissScene, endEnabled = endSceneEnabled,
                     formatDuration = formatDuration) },
