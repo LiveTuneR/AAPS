@@ -19,7 +19,18 @@ data class TherapyTelemetryHealth(
     val corruptedRecords: Long = 0,
     val storagePressure: Boolean = false,
     val uncleanSessions: Long = 0,
-    val lastErrorType: String? = null
+    val lastErrorType: String? = null,
+    val admissionLatencyP50Ms: Double = 0.0,
+    val admissionLatencyP95Ms: Double = 0.0,
+    val admissionLatencyP99Ms: Double = 0.0,
+    val admissionLatencyMaxMs: Double = 0.0,
+    val storeAppendLatencyP50Ms: Double = 0.0,
+    val storeAppendLatencyP95Ms: Double = 0.0,
+    val storeAppendLatencyP99Ms: Double = 0.0,
+    val storeAppendLatencyMaxMs: Double = 0.0,
+    val queueDepth: Int = 0,
+    val queueHighWater: Int = 0,
+    val admissionFailures: Long = 0,
 )
 
 interface TherapyTelemetry {

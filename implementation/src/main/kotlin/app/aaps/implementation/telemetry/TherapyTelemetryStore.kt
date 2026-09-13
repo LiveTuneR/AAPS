@@ -61,14 +61,16 @@ internal class TherapyTelemetryStore(
         highWater = maxOf(state.optLong("highWater"),wallClock())
         if (state.optBoolean("open")) {
             increment("uncleanSessions")
-            integrity("PROCESS_UNCLEAN_EXIT", wallClock(), wallClock(), 1, "previous_session_left_open")
+            val processStart = wallClock()
+            val lastCommitted = lastTimestamp(active) ?: state.optLong("sessionStartUtc", processStart)
+            integrity("PROCESS_UNCLEAN_EXIT", lastCommitted, processStart, 1, "POTENTIAL_RECORD_LOSS")
         }
         recoverActiveTail()
         if (active.length() > 0) rotate()
         // Rotation always leaves active intact until the completed gzip is committed.
         directory.listFiles()?.filter { it.name.endsWith(".jsonl.gz.part") }?.forEach { check(it.delete()) }
         backfillSegmentIndex()
-        state.put("open",true)
+        state.put("open",true).put("sessionStartUtc",wallClock())
         persistState()
     }
 
@@ -330,6 +332,12 @@ internal class TherapyTelemetryStore(
             val record = try { JSONObject(it).also { row -> row.getLong("timestampUtc") } } catch (_: Exception) { onCorrupt(); null }
             if (record != null) consume(record)
         } }
+    }
+    private fun lastTimestamp(file: File): Long? {
+        if (!file.isFile || file.length() == 0L) return null
+        var value: Long? = null
+        runCatching { records(file) { row -> value = row.optLong("timestampUtc").takeIf { it > 0 } ?: value } }
+        return value
     }
     private fun loadSegmentIndex() {
         if (!segmentIndexFile.exists()) return

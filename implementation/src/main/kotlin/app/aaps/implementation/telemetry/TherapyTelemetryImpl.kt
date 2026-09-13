@@ -38,6 +38,10 @@ class TherapyTelemetryImpl @Inject constructor(
     override val health = _health.asStateFlow()
     private val started = AtomicBoolean()
     private val drops = AtomicLong()
+    private val admissionFailures = AtomicLong()
+    private val queueHighWater = AtomicLong()
+    private val admissionLatency = LatencyWindow()
+    private val storeAppendLatency = LatencyWindow()
     private val crashMarker by lazy { TherapyCrashMarker(File(context.filesDir,"therapy-crash-v1")) }
     private val admissionLedger by lazy { TelemetryAdmissionLedger(File(context.filesDir,"therapy-telemetry-admission-v1.jsonl")) }
     private val writer = ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,ArrayBlockingQueue(4096),
@@ -72,11 +76,16 @@ class TherapyTelemetryImpl @Inject constructor(
             val observedUtc = System.currentTimeMillis()
             val observedMonotonic = SystemClock.elapsedRealtimeNanos()
             val observedZone = ZoneId.systemDefault()
-            val admission = admissionLedger.admit(observedUtc, type.name)
+            updateQueueHighWater(writer.queue.size + 1)
             writer.execute {
                 try {
+                    val admissionStarted = SystemClock.elapsedRealtimeNanos()
+                    val admission = admissionLedger.admit(observedUtc, type.name)
+                    admissionLatency.add(SystemClock.elapsedRealtimeNanos() - admissionStarted)
                     flushDrops()
+                    val storeStarted = SystemClock.elapsedRealtimeNanos()
                     val accepted = store.append(type.name,copied,generation,correlationId,observedUtc,observedMonotonic,observedZone)
+                    storeAppendLatency.add(SystemClock.elapsedRealtimeNanos() - storeStarted)
                     admissionLedger.commit(admission.sequence)
                     refreshHealth()
                     if (!accepted) logger.error(LTag.CORE,"TELEMETRY_STORAGE_PRESSURE writerDrops=${store.writerDrops}")
@@ -84,6 +93,7 @@ class TherapyTelemetryImpl @Inject constructor(
             }
         } catch (error: Exception) {
             drops.incrementAndGet()
+            admissionFailures.incrementAndGet()
             _health.value = _health.value.copy(writerDrops = _health.value.writerDrops + 1,lastErrorType=error.javaClass.simpleName)
             logger.error(LTag.CORE,"Telemetry enqueue failed type=${error.javaClass.simpleName}")
         }
@@ -111,7 +121,8 @@ class TherapyTelemetryImpl @Inject constructor(
                     JSONObject().put("sourceSha", config.HEAD).put("appVersion", config.VERSION_NAME)
                         .put("phoneModel", Build.MODEL).put("androidApi", Build.VERSION.SDK_INT)
                         .put("sessionStartUtc", startUtc).put("sessionEndUtc", endUtc)
-                        .put("status", "EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED"),
+                        .put("status", "EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED")
+                        .put("telemetryPerformance", performanceJson()),
                 )
                 refreshHealth()
                 if (continuation.isActive) continuation.resume(output) else output.delete()
@@ -133,7 +144,51 @@ class TherapyTelemetryImpl @Inject constructor(
         logger.error(LTag.CORE,"TherapyTelemetry failure type=${error.javaClass.simpleName}")
     }
     private fun refreshHealth() {
+        val admission = admissionLatency.snapshot()
+        val append = storeAppendLatency.snapshot()
         _health.value=TherapyTelemetryHealth(retentionDays=store.retentionDays,bytesOnDisk=store.bytesOnDisk(),writerDrops=store.writerDrops,
-            recoveredRecords=store.recoveredRecords,corruptedRecords=store.corruptedRecords,storagePressure=store.pressure,uncleanSessions=store.uncleanSessions)
+            recoveredRecords=store.recoveredRecords,corruptedRecords=store.corruptedRecords,storagePressure=store.pressure,uncleanSessions=store.uncleanSessions,
+            lastErrorType=_health.value.lastErrorType,
+            admissionLatencyP50Ms=admission.p50Ms,admissionLatencyP95Ms=admission.p95Ms,admissionLatencyP99Ms=admission.p99Ms,admissionLatencyMaxMs=admission.maxMs,
+            storeAppendLatencyP50Ms=append.p50Ms,storeAppendLatencyP95Ms=append.p95Ms,storeAppendLatencyP99Ms=append.p99Ms,storeAppendLatencyMaxMs=append.maxMs,
+            queueDepth=writer.queue.size,queueHighWater=queueHighWater.get().toInt(),admissionFailures=admissionFailures.get())
+    }
+
+    private fun updateQueueHighWater(value: Int) {
+        while (true) {
+            val previous = queueHighWater.get()
+            if (value <= previous || queueHighWater.compareAndSet(previous, value.toLong())) return
+        }
+    }
+
+    private fun performanceJson(): JSONObject {
+        val admission = admissionLatency.snapshot()
+        val append = storeAppendLatency.snapshot()
+        fun latency(value: LatencySnapshot) = JSONObject().put("p50Ms",value.p50Ms).put("p95Ms",value.p95Ms)
+            .put("p99Ms",value.p99Ms).put("maxMs",value.maxMs).put("samples",value.samples)
+        return JSONObject().put("admissionLatency",latency(admission)).put("storeAppendLatency",latency(append))
+            .put("queueDepth",writer.queue.size).put("queueHighWater",queueHighWater.get())
+            .put("admissionFailures",admissionFailures.get())
+    }
+}
+
+private data class LatencySnapshot(val p50Ms: Double, val p95Ms: Double, val p99Ms: Double, val maxMs: Double, val samples: Int)
+
+private class LatencyWindow(private val capacity: Int = 2048) {
+    private val values = LongArray(capacity)
+    private var count = 0
+    private var cursor = 0
+
+    @Synchronized fun add(nanos: Long) {
+        values[cursor] = nanos.coerceAtLeast(0L)
+        cursor = (cursor + 1) % capacity
+        if (count < capacity) count++
+    }
+
+    @Synchronized fun snapshot(): LatencySnapshot {
+        if (count == 0) return LatencySnapshot(0.0,0.0,0.0,0.0,0)
+        val sorted = values.copyOf(count).sortedArray()
+        fun percentile(value: Double): Double = sorted[((sorted.lastIndex * value).toInt()).coerceIn(0,sorted.lastIndex)] / 1_000_000.0
+        return LatencySnapshot(percentile(0.50),percentile(0.95),percentile(0.99),sorted.last()/1_000_000.0,count)
     }
 }
