@@ -3,7 +3,7 @@ package app.aaps.core.data.activity
 enum class ActivitySource { SAMSUNG_HEALTH, WEAR_STEPS, PHONE, MANUAL, UNKNOWN }
 enum class ActivityCategory { WALKING, RUNNING, CYCLING, POOL_SWIMMING, OPEN_WATER_SWIMMING, OTHER, UNKNOWN }
 enum class ActivityState { ACTIVE, POST_ACTIVITY, STALE_ACTIVITY, NONE }
-enum class ActivityAccess { AVAILABLE, UNAVAILABLE, PERMISSION_DENIED, SDK_NOT_CONFIGURED, ERROR }
+enum class ActivityAccess { AVAILABLE, PERMISSION_REQUIRED, HEALTH_CONNECT_UNAVAILABLE, NO_DATA, ERROR }
 
 data class ActivityEvent(
     val id: String,
@@ -15,8 +15,10 @@ data class ActivityEvent(
     val receivedAt: Long,
     val lastUpdatedAt: Long,
     val sourceDevice: String? = null,
+    val sourcePackage: String? = null,
     val steps: Long? = null,
-    val heartRate: Double? = null
+    val heartRate: Double? = null,
+    val latestHeartRate: Double? = null,
 ) {
     val detectionLatencyMs: Long get() = receivedAt - startTime
 }
@@ -24,31 +26,35 @@ data class ActivityEvent(
 data class ActivityContext(
     val state: ActivityState = ActivityState.NONE,
     val event: ActivityEvent? = null,
-    val access: ActivityAccess = ActivityAccess.SDK_NOT_CONFIGURED,
+    val access: ActivityAccess = ActivityAccess.HEALTH_CONNECT_UNAVAILABLE,
     val lastSuccessfulRead: Long? = null,
     val watchReachable: Boolean? = null,
-    val clockSkew: Boolean = false
+    val clockSkew: Boolean = false,
+    val readLatencyMs: Long? = null,
 ) {
     val usedForDosing: Boolean get() = false
 }
 
 /** Bounded read-only observation store. Activity is never converted into a dosing factor. */
 class ActivityContextStore(restored: List<ActivityEvent> = emptyList()) {
-    private val records = LinkedHashMap<Pair<ActivitySource, String>, ActivityEvent>()
-    private var access = ActivityAccess.SDK_NOT_CONFIGURED
+    private val records = LinkedHashMap<Triple<ActivitySource, String?, String>, ActivityEvent>()
+    private var access = ActivityAccess.HEALTH_CONNECT_UNAVAILABLE
     private var lastRead: Long? = null
+    private var readLatencyMs: Long? = null
     init { restored.forEach { accept(it) } }
 
-    @Synchronized fun sourceHealth(access: ActivityAccess, successfulReadAt: Long? = null) {
+    @Synchronized fun sourceHealth(access: ActivityAccess, successfulReadAt: Long? = null, latencyMs: Long? = null) {
         this.access = access
-        if (access == ActivityAccess.AVAILABLE) lastRead = successfulReadAt ?: lastRead
+        if (access == ActivityAccess.AVAILABLE || access == ActivityAccess.NO_DATA) lastRead = successfulReadAt ?: lastRead
+        readLatencyMs = latencyMs ?: readLatencyMs
     }
 
     @Synchronized fun accept(event: ActivityEvent): Boolean {
         if (event.id.isBlank() || event.startTime <= 0 || event.lastUpdatedAt <= 0 || event.receivedAt <= 0 ||
             event.endTime?.let { it < event.startTime } == true || event.steps?.let { it < 0 } == true ||
-            event.heartRate?.let { !it.isFinite() || it < 0 } == true) return false
-        val key = event.source to event.id
+            event.heartRate?.let { !it.isFinite() || it < 0 } == true ||
+            event.latestHeartRate?.let { !it.isFinite() || it < 0 } == true) return false
+        val key = Triple(event.source, event.sourcePackage, event.id)
         val previous = records[key]
         if (previous != null && event.lastUpdatedAt <= previous.lastUpdatedAt) return false
         // Polling an unchanged record must not refresh its signal age or first-receipt latency.
@@ -62,7 +68,7 @@ class ActivityContextStore(restored: List<ActivityEvent> = emptyList()) {
     @Synchronized fun snapshot(now: Long): ActivityContext {
         val identified = records.values.filter { it.category != ActivityCategory.UNKNOWN }
         val selected = (identified.ifEmpty { records.values.toList() }).maxWithOrNull(compareBy<ActivityEvent> { it.endTime ?: it.lastUpdatedAt }.thenBy { it.startTime })
-            ?: return ActivityContext(access = access, lastSuccessfulRead = lastRead)
+            ?: return ActivityContext(access = access, lastSuccessfulRead = lastRead, readLatencyMs = readLatencyMs)
         val skew = selected.startTime > now || selected.lastUpdatedAt > now || selected.receivedAt > now || selected.endTime?.let { it > now } == true
         val state = when {
             skew || access != ActivityAccess.AVAILABLE || selected.category == ActivityCategory.UNKNOWN -> ActivityState.STALE_ACTIVITY
@@ -70,7 +76,7 @@ class ActivityContextStore(restored: List<ActivityEvent> = emptyList()) {
             now - selected.lastUpdatedAt > SIGNAL_MAX_AGE_MS -> ActivityState.STALE_ACTIVITY
             else -> ActivityState.ACTIVE
         }
-        return ActivityContext(state, selected, access, lastRead, clockSkew = skew)
+        return ActivityContext(state, selected, access, lastRead, clockSkew = skew, readLatencyMs = readLatencyMs)
     }
 
     companion object {
@@ -90,7 +96,7 @@ class SamsungActivityProvider(private val reader: SamsungExerciseReader, private
     suspend fun refresh(now: Long) {
         val result = try { reader.readExercises(now - 24 * 3_600_000L) }
         catch (cancelled: java.util.concurrent.CancellationException) { throw cancelled }
-        catch (_: SecurityException) { SamsungExerciseRead(ActivityAccess.PERMISSION_DENIED) }
+        catch (_: SecurityException) { SamsungExerciseRead(ActivityAccess.PERMISSION_REQUIRED) }
         catch (_: Exception) { SamsungExerciseRead(ActivityAccess.ERROR) }
         store.sourceHealth(result.access, if (result.access == ActivityAccess.AVAILABLE) now else null)
         if (result.access == ActivityAccess.AVAILABLE) result.events

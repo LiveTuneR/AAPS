@@ -21,6 +21,17 @@ class ActivityContextTest {
             assertFalse(context.usedForDosing)
         }
     }
+    @Test fun `all activity observations remain shadow only`() {
+        for (category in ActivityCategory.entries) {
+            val store = store()
+            store.accept(event(category).copy(heartRate = 176.0, latestHeartRate = 181.0, steps = 12_345))
+            assertFalse(store.snapshot(now).usedForDosing)
+        }
+    }
+    @Test fun `invalid heart rate cannot enter the observation cache`() {
+        assertFalse(store().accept(event().copy(latestHeartRate = Double.NaN)))
+        assertFalse(store().accept(event().copy(heartRate = -1.0)))
+    }
     @Test fun `delayed ended activity is post activity then stale never active`() {
         val store = store()
         store.accept(event().copy(endTime = now - 120_000))
@@ -39,11 +50,11 @@ class ActivityContextTest {
     }
     @Test fun `unavailable permissions and future clock fail to stale or none`() {
         val empty = ActivityContextStore()
-        empty.sourceHealth(ActivityAccess.UNAVAILABLE)
+        empty.sourceHealth(ActivityAccess.HEALTH_CONNECT_UNAVAILABLE)
         assertEquals(ActivityState.NONE, empty.snapshot(now).state)
         val store = store()
         store.accept(event())
-        store.sourceHealth(ActivityAccess.PERMISSION_DENIED)
+        store.sourceHealth(ActivityAccess.PERMISSION_REQUIRED)
         assertEquals(ActivityState.STALE_ACTIVITY, store.snapshot(now).state)
         store.sourceHealth(ActivityAccess.AVAILABLE)
         assertTrue(store.snapshot(now - 1_000_000).clockSkew)
