@@ -110,9 +110,22 @@ class ApexBolusCoordinator @Inject constructor(
         true
     }
 
-    fun markWriteFailed(operationUuid: String) = update(operationUuid) {
+    fun markDefinitelyNotIssued(operationUuid: String) = update(operationUuid) {
+        if (it.state != ApexBolusState.COMMAND_SENT && it.state != ApexBolusState.PREPARED) return@update
         it.state = ApexBolusState.DEFINITELY_NOT_DELIVERED
-        trace.record("bolus_write_definitely_failed", it.transportGeneration, fields = it.traceFields())
+        trace.record("bolus_write_definitely_not_issued", it.transportGeneration, fields = it.traceFields())
+    }
+
+    fun markTransportOutcomeUnknown(operationUuid: String, generation: Long, reason: String) =
+        markTimeoutOrDisconnect(operationUuid, generation, reason)
+
+    fun markCancelAcceptedRequiresHistory(operationUuid: String, generation: Long) = update(operationUuid) {
+        if (it.state.terminal) return@update
+        it.cancelled = true
+        it.transportGeneration = generation
+        it.state = ApexBolusState.DELIVERY_UNCERTAIN
+        trace.record("bolus_cancel_accepted_history_required", generation, fields = it.traceFields())
+        trace.record("bolus_safety_gate_enabled", generation, fields = mapOf("operationUuid" to it.operationUuid, "reason" to "cancel_accepted_requires_history"))
     }
 
     fun markAccepted(operationUuid: String, generation: Long) = update(operationUuid) {

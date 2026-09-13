@@ -4,6 +4,7 @@ import android.os.SystemClock
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.pump.apex.connectivity.bluetooth.ApexTransport
+import app.aaps.pump.apex.connectivity.bluetooth.ApexTransportWriteOutcome
 import app.aaps.pump.apex.connectivity.bluetooth.Configuration
 import app.aaps.pump.apex.connectivity.commands.device.DeviceCommand
 import app.aaps.pump.apex.connectivity.commands.device.Bolus
@@ -524,16 +525,32 @@ class ApexCommDirector @Inject constructor(
                     continue
                 }
             }
-            if (!apexBluetooth.send(request.command)) {
-                request.bolusOperationUuid?.let { bolusCoordinator?.markWriteFailed(it) }
-                trace.record("command_write_failed", activeGeneration, request.operationId)
+            val transportOutcome = apexBluetooth.send(request.command)
+            if (transportOutcome != ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT) {
+                request.bolusOperationUuid?.let { operationUuid ->
+                    when (transportOutcome) {
+                        ApexTransportWriteOutcome.NOT_ISSUED -> bolusCoordinator?.markDefinitelyNotIssued(operationUuid)
+                        ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN -> bolusCoordinator?.markTransportOutcomeUnknown(
+                            operationUuid,
+                            activeGeneration,
+                            "ble_write_outcome_unknown",
+                        )
+                        ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT -> Unit
+                    }
+                }
+                trace.record(
+                    "command_write_failed",
+                    activeGeneration,
+                    request.operationId,
+                    commandFields(request.command, "transportOutcome" to transportOutcome),
+                )
                 request.result.complete(null)
                 clearPending(current)
-                events.trySend(LinkEvent.TransportFault(activeGeneration, "write_failed"))
+                events.trySend(LinkEvent.TransportFault(activeGeneration, "write_${transportOutcome.name.lowercase()}"))
                 continue
             }
             lastSendUptime = SystemClock.uptimeMillis()
-            trace.record("command_sent",activeGeneration,request.operationId,commandFields(request.command,"transportAccepted" to true))
+            trace.record("command_sent",activeGeneration,request.operationId,commandFields(request.command,"transportOutcome" to transportOutcome))
 
             val timeout = if (single) Configuration.PUMP_RESPONSE_TIMEOUT else COMPLEX_RESPONSE_TIMEOUT_MS
             val response = withTimeoutOrNull(timeout) { request.result.await() }

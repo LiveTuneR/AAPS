@@ -1,6 +1,7 @@
 package app.aaps.pump.apex
 
 import app.aaps.pump.apex.connectivity.bluetooth.ApexTransport
+import app.aaps.pump.apex.connectivity.bluetooth.ApexTransportWriteOutcome
 import app.aaps.pump.apex.connectivity.bluetooth.Configuration
 import app.aaps.pump.apex.connectivity.commands.device.Bolus
 import app.aaps.pump.apex.connectivity.commands.device.CancelBolus
@@ -353,10 +354,10 @@ class ApexCommDirectorTest : TestBase() {
         override fun disconnect() = Unit
         override fun shutdown() = Unit
 
-        override suspend fun send(command: DeviceCommand): Boolean {
+        override suspend fun send(command: DeviceCommand): ApexTransportWriteOutcome {
             sent += command
             if (autoRespondToWrites && command !is GetValue) response(generation)
-            return true
+            return ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT
         }
 
         fun connected(generation: Long) = callback?.onConnect(generation)

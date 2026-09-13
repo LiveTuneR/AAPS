@@ -433,7 +433,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         }
         if (!syncResult) {
             trace.record("bolus_temp_record_failed", generation = linkState.generation)
-            bolusCoordinator.markWriteFailed(operation.operationUuid)
+            bolusCoordinator.markDefinitelyNotIssued(operation.operationUuid)
             return null
         }
         pump.inProgressBolus = inProgress
@@ -453,7 +453,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             aapsLogger.error(LTag.PUMPCOMM, "[bolus caller=$caller] Timed out while trying to communicate with the pump")
             val durable = bolusCoordinator.current()
             if (durable?.state == ApexBolusState.PREPARED) {
-                bolusCoordinator.markWriteFailed(operation.operationUuid)
+                bolusCoordinator.markDefinitelyNotIssued(operation.operationUuid)
                 rejectBolusStart(inProgress)
                 return null
             }
@@ -1149,19 +1149,15 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                 )
             }
 
-            if (it.currentDose >= 0.025) {
-                it.uncertain = true
-                bolusCoordinator.markTimeoutOrDisconnect(it.operationUuid, linkState.generation, "bolus_failed_after_progress")
-                // Request new bolus history to fixup bolus ID and delivered amount.
-                getBoluses("ApexService-onBolusFailed")
+            it.uncertain = true
+            it.useFallbackDose = true
+            if (cancelled) {
+                bolusCoordinator.markCancelAcceptedRequiresHistory(it.operationUuid, linkState.generation)
             } else {
-                aapsLogger.debug(LTag.PUMPCOMM, "bolus entirely failed!")
-                it.failed = true
-                if (cancelled) bolusCoordinator.markCancelledConfirmed(it.operationUuid)
-                else bolusCoordinator.rejectBeforeDelivery(it.operationUuid)
-                it.completion.complete(Unit)
-                pump.inProgressBolus = null
+                bolusCoordinator.markTimeoutOrDisconnect(it.operationUuid, linkState.generation, "bolus_failed_after_command_sent")
             }
+            // Missing live progress is not proof of zero delivery after a command was issued.
+            getBoluses("ApexService-onBolusFailed")
         }
     }
 

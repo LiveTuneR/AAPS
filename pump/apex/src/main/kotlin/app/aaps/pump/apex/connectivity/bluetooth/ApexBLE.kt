@@ -110,7 +110,7 @@ class ApexBLE @Inject constructor(
         }
     }
 
-    override suspend fun send(command: DeviceCommand): Boolean = withContext(dispatcher) {
+    override suspend fun send(command: DeviceCommand): ApexTransportWriteOutcome = withContext(dispatcher) {
         transportMutex.withLock { sendInternal(command) }
     }
 
@@ -198,25 +198,28 @@ class ApexBLE @Inject constructor(
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun sendInternal(command: DeviceCommand): Boolean {
+    private suspend fun sendInternal(command: DeviceCommand): ApexTransportWriteOutcome {
         val gatt = bluetoothGatt
         val characteristic = writeCharacteristic
         val generation = activeGeneration
         if (_status != Status.CONNECTED || gatt == null || characteristic == null) {
             aapsLogger.error(LTag.PUMPBTCOMM, "Apex write rejected: transport is not ready")
-            return false
+            return ApexTransportWriteOutcome.NOT_ISSUED
         }
 
         val data = command.serialize()
         val chunkSize = (mtu - 3).coerceAtLeast(20)
         var start = 0
+        var anyChunkIssued = false
         trace.record(
             "ble_write_started",
             activeGeneration,
             fields = mapOf("command" to command::class.simpleName, "bytes" to data.size, "chunkSize" to chunkSize),
         )
         while (start < data.size) {
-            if (gatt !== bluetoothGatt || generation != activeGeneration) return false
+            if (gatt !== bluetoothGatt || generation != activeGeneration) {
+                return if (anyChunkIssued) ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN else ApexTransportWriteOutcome.NOT_ISSUED
+            }
             val end = min(start + chunkSize, data.size)
             val chunk = data.copyOfRange(start, end)
             val ack = CompletableDeferred<Int>()
@@ -246,17 +249,18 @@ class ApexBLE @Inject constructor(
             if (!issued) {
                 writeAck = null
                 failCurrent("write_not_issued")
-                return false
+                return if (anyChunkIssued) ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN else ApexTransportWriteOutcome.NOT_ISSUED
             }
+            anyChunkIssued = true
             val writeStatus = withTimeoutOrNull(WRITE_TIMEOUT_MS) { ack.await() }
             writeAck = null
             if (writeStatus != BluetoothGatt.GATT_SUCCESS) {
                 failCurrent(if (writeStatus == null) "write_timeout" else "write_status_$writeStatus")
-                return false
+                return ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN
             }
             start = end
         }
-        return true
+        return ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT
     }
 
     private fun onPumpData(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {

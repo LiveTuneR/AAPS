@@ -65,9 +65,44 @@ class ApexBolusRestartSafetyTest {
         val value = coordinator()
         val operation = prepare(value)
         value.beginTransportWrite(operation.operationUuid, 198, 1)
-        value.markWriteFailed(operation.operationUuid)
+        value.markDefinitelyNotIssued(operation.operationUuid)
         assertThat(value.safetyGateActive).isFalse()
         assertThat(value.current()).isNull()
+    }
+
+    @Test fun `issued write timeout stays uncertain across restart`() {
+        val first = coordinator()
+        val operation = prepare(first)
+        first.beginTransportWrite(operation.operationUuid, 198, 1)
+        first.markTransportOutcomeUnknown(operation.operationUuid, 1, "write_callback_timeout")
+
+        val restored = coordinator()
+        assertThat(restored.current()!!.state).isEqualTo(ApexBolusState.DELIVERY_UNCERTAIN)
+        assertThat(restored.safetyGateActive).isTrue()
+        assertThat(restored.beginTransportWrite(operation.operationUuid, 198, 2)).isFalse()
+    }
+
+    @Test fun `gatt 133 after issue stays uncertain`() {
+        val value = coordinator()
+        val operation = prepare(value)
+        value.beginTransportWrite(operation.operationUuid, 198, 1)
+        value.markTransportOutcomeUnknown(operation.operationUuid, 1, "write_status_133")
+
+        assertThat(value.current()!!.state).isEqualTo(ApexBolusState.DELIVERY_UNCERTAIN)
+        assertThat(value.safetyGateActive).isTrue()
+    }
+
+    @Test fun `accepted cancel without progress requires history`() {
+        val first = coordinator()
+        val operation = prepare(first)
+        first.beginTransportWrite(operation.operationUuid, 198, 1)
+        first.markAccepted(operation.operationUuid, 1)
+        first.markCancelAcceptedRequiresHistory(operation.operationUuid, 1)
+
+        val restored = coordinator()
+        assertThat(restored.current()!!.state).isEqualTo(ApexBolusState.DELIVERY_UNCERTAIN)
+        assertThat(restored.current()!!.cancelled).isTrue()
+        assertThat(restored.safetyGateActive).isTrue()
     }
 
     @Test fun `invalid before dosing clears gate`() {
