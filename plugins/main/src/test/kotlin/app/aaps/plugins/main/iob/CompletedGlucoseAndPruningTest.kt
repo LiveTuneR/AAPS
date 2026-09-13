@@ -39,7 +39,7 @@ class CompletedGlucoseAndPruningTest : TestBaseWithProfile() {
     @Test fun `prune removes consecutive old rows preserving cut and deep snapshots`() {
         val store = AutosensDataStoreObject()
         val start = 1_000_000L
-        for (i in 0..1000) store.autosensDataTable.put(start + i * 300_000L, AutosensDataObject(aapsLogger, preferences, dateUtil))
+        for (i in 0..1000) store.putAutosensData(start + i * 300_000L, AutosensDataObject(aapsLogger, preferences, dateUtil))
         val snapshot = store.clone()
         val cut = start + 900 * 300_000L
         store.pruneOlderThan(cut)

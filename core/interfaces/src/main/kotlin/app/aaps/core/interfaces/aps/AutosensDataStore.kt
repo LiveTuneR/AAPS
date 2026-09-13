@@ -14,6 +14,8 @@ interface AutosensDataStore {
 
     var bgReadings: List<GV>
     var autosensDataTable: LongSparseArray<AutosensData>
+    /** Snapshot getters never expose owned mutable rows. Use this to publish one changed row. */
+    fun putAutosensData(time: Long, data: AutosensData)
     var bucketedData: MutableList<InMemoryGlucoseValue>?
     var lastUsed5minCalculation: Boolean?
 

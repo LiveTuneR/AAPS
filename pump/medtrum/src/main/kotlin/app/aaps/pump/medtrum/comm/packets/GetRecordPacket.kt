@@ -86,7 +86,7 @@ class GetRecordPacket(injector: HasAndroidInjector, private val recordIndex: Int
             aapsLogger.run {
                 debug(
                     LTag.PUMPCOMM,
-                    "GetRecordPacket HandleResponse: Record header: $recordHeader, unknown: $recordUnknown, type: $recordType, serial: $recordSerial, patchId: $recordPatchId, sequence: $recordSequence"
+                    "GetRecordPacket HandleResponse: Record header: $recordHeader, unknown: $recordUnknown, type: $recordType, serial: [REDACTED], patchId: $recordPatchId, sequence: $recordSequence"
                 )
             }
 

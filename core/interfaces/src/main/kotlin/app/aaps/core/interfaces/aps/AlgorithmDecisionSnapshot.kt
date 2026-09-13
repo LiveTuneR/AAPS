@@ -36,10 +36,19 @@ data class AlgorithmDecisionSnapshot(
     val requestedTbrMinutes: Int? = null,
     val tddU: Double? = null,
     val insulinDivisor: Int? = null,
-    val dynIsfAdjustmentFactor: Double? = null
+    val dynIsfAdjustmentFactor: Double? = null,
+    val autoIsfFactor: Double? = null,
+    val tdd1dU: Double? = null,
+    val tdd7dU: Double? = null,
+    val tddLast24hU: Double? = null,
+    val tddLast4hU: Double? = null,
+    val tddLast8to4hU: Double? = null,
+    val maxIobU: Double? = null,
+    val maxBasalUph: Double? = null,
+    val insulinReqBeforeIobClampU: Double? = null
 ) {
     @Serializable
-    enum class Reason { INPUT_CONSTRAINT, HIGH_TT_BLOCK, ALWAYS, COB, RECENT_CARBS, TT, NO_CONDITION, PREDICTED_LOW, EXCESSIVE_DELTA, IOB, INVALID_INPUT }
+    enum class Reason { INPUT_CONSTRAINT, HIGH_TT_BLOCK, ALWAYS, COB, RECENT_CARBS, TT, NO_CONDITION, PREDICTED_LOW, EXCESSIVE_DELTA, IOB, INVALID_INPUT, AUTO_FULL_LOOP, AUTO_LOOP_DISABLED }
     @Serializable
     enum class IsfBasis { BLENDED_CURRENT_MIN_PREDICTED, CURRENT_BG, MIN_PREDICTED_BG }
 

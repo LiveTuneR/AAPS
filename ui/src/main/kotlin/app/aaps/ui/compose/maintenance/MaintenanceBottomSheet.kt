@@ -67,7 +67,8 @@ fun MaintenanceBottomSheet(
     onToggleLogCloud: (Boolean) -> Unit = {},
     onToggleCsvLocal: (Boolean) -> Unit = {},
     onToggleCsvCloud: (Boolean) -> Unit = {},
-    isDirectoryAccessGranted: Boolean = false
+    isDirectoryAccessGranted: Boolean = false,
+    onTelemetryClick: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -97,7 +98,8 @@ fun MaintenanceBottomSheet(
             onToggleLogCloud = onToggleLogCloud,
             onToggleCsvLocal = onToggleCsvLocal,
             onToggleCsvCloud = onToggleCsvCloud,
-            isDirectoryAccessGranted = isDirectoryAccessGranted
+            isDirectoryAccessGranted = isDirectoryAccessGranted,
+            onTelemetryClick = onTelemetryClick
         )
     }
 }
@@ -127,7 +129,8 @@ internal fun MaintenanceBottomSheetContent(
     onToggleLogCloud: (Boolean) -> Unit = {},
     onToggleCsvLocal: (Boolean) -> Unit = {},
     onToggleCsvCloud: (Boolean) -> Unit = {},
-    isDirectoryAccessGranted: Boolean = false
+    isDirectoryAccessGranted: Boolean = false,
+    onTelemetryClick: () -> Unit = {}
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     MaterialTheme.colorScheme.error
@@ -143,6 +146,14 @@ internal fun MaintenanceBottomSheetContent(
     ) {
         // Section: Log Files
         SectionHeader(stringResource(CoreUiR.string.log_files))
+        MaintenanceItem(
+            text = stringResource(app.aaps.ui.R.string.telemetry_title),
+            description = stringResource(app.aaps.ui.R.string.telemetry_local_archive),
+            icon = Icons.Default.FileDownload,
+            color = primaryColor,
+            onDismiss = onDismiss,
+            onClick = onTelemetryClick
+        )
 
         MaintenanceItem(
             text = stringResource(CoreUiR.string.nav_logsettings),

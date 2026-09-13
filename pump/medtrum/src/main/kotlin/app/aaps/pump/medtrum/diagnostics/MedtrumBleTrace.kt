@@ -24,6 +24,7 @@ import javax.inject.Singleton
 class MedtrumBleTrace @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
     private val dispatcher = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "MedtrumBleTrace").apply { isDaemon = true }
     }.asCoroutineDispatcher()
@@ -33,12 +34,20 @@ class MedtrumBleTrace @Inject constructor(
     private var activeFile: File? = null
 
     fun record(event: String, fields: Map<String, Any?> = emptyMap()) {
+        if (::therapyTelemetry.isInitialized) try {
+            val command=app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
+            val data=JSONObject().put("source","MEDTRUM_DRIVER").put("stage",event)
+                .put("queueRequestId",command?.requestId ?: JSONObject.NULL).put("decisionId",command?.decisionId ?: JSONObject.NULL)
+            fields.forEach { (key,value) -> if (value !is ByteArray) data.put(key,encode(value)) }
+            therapyTelemetry.get().record(if (event=="tx_chunk_accepted") app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_SENT
+                else app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_STATE,data,command?.generation,command?.decisionId)
+        } catch (_: Exception) { /* Observational only. */ }
         scope.launch {
             val data = JSONObject()
                 .put("wallMs", System.currentTimeMillis())
                 .put("elapsedMs", SystemClock.elapsedRealtime())
                 .put("event", event)
-            fields.forEach { (key, value) -> data.put(key, encode(value)) }
+            fields.forEach { (key, value) -> data.put(key,MedtrumTraceRedaction.clean(key,value)) }
             append(data.toString())
         }
     }

@@ -31,8 +31,13 @@ interface Command {
     }
 
     suspend fun execute(): PumpEnactResult = error("Not implemented")
-    suspend fun executeWithCallback() {
-        callback?.result(execute())?.run()
+    suspend fun executeWithCallback(observeResult: (PumpEnactResult) -> Unit = {}) {
+        callback?.let { target ->
+            val result = execute()
+            // An observational sink must not suppress delivery of the actual pump result.
+            try { observeResult(result) } catch (_: Exception) { }
+            target.result(result).run()
+        }
     }
     fun status(): String
     fun log(): String

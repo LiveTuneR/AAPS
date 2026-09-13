@@ -46,12 +46,26 @@ fun MaintenanceDialogs(
     var showConfirmExportCsv by remember { mutableStateOf(false) }
     var showConfirmSendLogs by remember { mutableStateOf(false) }
     var cleanupResultText by remember { mutableStateOf<String?>(null) }
+    var showTelemetry by remember { mutableStateOf(false) }
+    val context=androidx.compose.ui.platform.LocalContext.current
+    val saveTelemetry=androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip")) {
+        maintenanceViewModel.saveTelemetry(context.applicationContext,it)
+    }
 
     // ViewModel state
     val exportState by maintenanceViewModel.exportState.collectAsStateWithLifecycle()
     val cloudDirectoryState by maintenanceViewModel.cloudDirectoryState.collectAsStateWithLifecycle()
     val exportConfig by maintenanceViewModel.exportConfig.collectAsStateWithLifecycle()
     val isDirectoryAccessGranted by maintenanceViewModel.isDirectoryAccessGranted.collectAsStateWithLifecycle()
+
+    LaunchedEffect(maintenanceViewModel) {
+        maintenanceViewModel.telemetrySaveRequest.collect { name ->
+            if (name != null) {
+                saveTelemetry.launch(name)
+                maintenanceViewModel.telemetrySaveLaunched(name)
+            }
+        }
+    }
 
     // Collect maintenance events
     LaunchedEffect(Unit) {
@@ -76,6 +90,7 @@ fun MaintenanceDialogs(
         MaintenanceBottomSheet(
             onDismiss = onMaintenanceSheetDismiss,
             onLogSettingsClick = { showLogSettings = true },
+            onTelemetryClick = { showTelemetry = true },
             onSendLogsClick = { showConfirmSendLogs = true },
             onDeleteLogsClick = { maintenanceViewModel.deleteLogs() },
             onDirectoryClick = {
@@ -103,6 +118,8 @@ fun MaintenanceDialogs(
             onToggleCsvCloud = { maintenanceViewModel.toggleCsvCloud(it) }
         )
     }
+
+    if (showTelemetry) TherapyTelemetrySheet(maintenanceViewModel) { showTelemetry=false }
 
     // Log settings bottom sheet
     if (showLogSettings) {

@@ -65,6 +65,15 @@ fun EnhancedOverviewContent(
         }
     }
     val activityAge = v.activityUpdatedAt?.let { displayNow - it }?.takeIf { it >= 0 }
+    val decisionFresh = v.decisionTimestamp?.let { displayNow-it in 0..660_000L } ?: true
+    val smbState = if (decisionFresh) v.smbState else OverviewSmbState.UNKNOWN
+    @Composable fun age(timestamp: Long?, fallback: String?): String? {
+        if (timestamp==null) return fallback
+        val elapsed=displayNow-timestamp
+        if (timestamp<=0 || elapsed<0) return null
+        return if (elapsed<60_000) stringResource(R.string.apex7_seconds,elapsed/1000)
+        else stringResource(R.string.apex7_minutes,elapsed/60_000)
+    }
     val algorithmTitle = v.algorithmTitle
     fun summary(title: Int) = state.tiles.firstOrNull { it.title == title }?.summary
     val details = state.tiles + DashboardTile(R.string.apex7_target_short, target, listOf(DashboardField(R.string.apex7_target_short, target))) +
@@ -88,7 +97,7 @@ fun EnhancedOverviewContent(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Metric(R.string.apex7_cr_short, v.cr, amber, Icons.Default.Grain, Modifier.weight(1f)) { selected = R.string.apex7_isfcr }
-                            Metric(algorithmTitle, v.autoIsf, cyan, Icons.Default.BarChart, Modifier.weight(1f), "detail-${R.string.apex7_autoisf}") { selected = R.string.apex7_autoisf }
+                            Metric(algorithmTitle, v.autoIsf.takeIf { decisionFresh }, cyan, Icons.Default.BarChart, Modifier.weight(1f), "detail-${R.string.apex7_autoisf}") { selected = R.string.apex7_autoisf }
                         }
                     }
                 }
@@ -126,18 +135,18 @@ fun EnhancedOverviewContent(
                     if (v.siteWarning) stringResource(R.string.apex7_age_warning) else null, v.siteWarning,
                     Modifier.weight(1f), "detail-${R.string.apex7_site}") { selected = R.string.apex7_site }
                 Device(R.string.apex7_sensor, R.drawable.ic_overview_cgm, green, v.sensorAge ?: unknown,
-                    v.bgAge?.let { "BG $it" }, bg.bgInfo?.isOutdated == true, Modifier.weight(1f)) { selected = R.string.apex7_sensor }
+                    age(v.bgTimestamp,v.bgAge)?.let { "BG $it" }, bg.bgInfo?.isOutdated == true, Modifier.weight(1f)) { selected = R.string.apex7_sensor }
             }
             BoxWithConstraints(Modifier.fillMaxWidth().testTag("overview-status-strip")) {
             val rowWidth = maxOf(maxWidth, 360.dp * LocalDensity.current.fontScale)
             Row(Modifier.horizontalScroll(rememberScrollState()).width(rowWidth), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Status(R.string.apex7_smb, when (v.smbState) {
+                Status(R.string.apex7_smb, when (smbState) {
                     OverviewSmbState.ON -> "ON"; OverviewSmbState.WAIT -> "WAIT"; OverviewSmbState.OFF -> "OFF"; OverviewSmbState.UNKNOWN -> "--"
-                }, Icons.Default.Bolt, when (v.smbState) {
+                }, Icons.Default.Bolt, when (smbState) {
                     OverviewSmbState.ON -> green; OverviewSmbState.WAIT -> amber; OverviewSmbState.OFF -> MaterialTheme.colorScheme.error; OverviewSmbState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
                 }, Modifier.weight(1f)) { selected = R.string.apex7_smb }
-                Status(R.string.apex7_loop_short, v.loopAge, Icons.Default.Sync, cyan, Modifier.weight(1f), "detail-${R.string.apex7_loop}") { selected = R.string.apex7_loop }
-                Status(R.string.apex7_sync_short, v.syncAge, Icons.Default.CloudQueue, cyan, Modifier.weight(1f)) { selected = R.string.apex7_pump }
+                Status(R.string.apex7_loop_short, age(v.loopTimestamp,v.loopAge), Icons.Default.Sync, cyan, Modifier.weight(1f), "detail-${R.string.apex7_loop}") { selected = R.string.apex7_loop }
+                Status(R.string.apex7_sync_short, age(v.syncTimestamp,v.syncAge), Icons.Default.CloudQueue, cyan, Modifier.weight(1f)) { selected = R.string.apex7_pump }
                 Status(R.string.apex7_profile_short, v.profile, Icons.Default.Person, violet, Modifier.weight(1.35f), "detail-${R.string.apex7_profile}") { selected = R.string.apex7_profile }
             }
             }

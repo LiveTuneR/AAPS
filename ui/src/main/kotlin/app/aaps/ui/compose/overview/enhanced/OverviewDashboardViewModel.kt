@@ -6,6 +6,14 @@ import app.aaps.core.data.activity.ActivityState
 import app.aaps.core.data.activity.ActivityAccess
 import app.aaps.core.data.diagnostics.LoopHealthStatus
 import app.aaps.core.data.model.TE
+import app.aaps.core.data.model.TT
+import app.aaps.core.data.model.EPS
+import app.aaps.core.data.model.PS
+import app.aaps.core.data.model.CA
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.collectResilient
+import app.aaps.core.interfaces.rx.events.*
+import kotlinx.coroutines.channels.Channel
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.aps.RT
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -24,13 +32,11 @@ import app.aaps.ui.R
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import java.util.Locale
@@ -39,6 +45,11 @@ data class DashboardField(val label: Int, val value: String?)
 data class DashboardTile(val title: Int, val summary: String?, val fields: List<DashboardField>)
 
 enum class OverviewSmbState { ON, WAIT, OFF, UNKNOWN }
+
+fun overviewAdjustmentFactor(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): String? =
+    decision?.let { if (it.algorithm == "AUTO_ISF") it.autoIsfFactor else if (it.dynamicIsf) it.dynIsfAdjustmentFactor else null }
+        ?.takeIf { it.isFinite() && it > 0 }
+        ?.let { String.format(Locale.getDefault(),"%.0f%%",it*100) }
 
 fun overviewSmbState(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): OverviewSmbState = when {
     decision == null -> OverviewSmbState.UNKNOWN
@@ -68,7 +79,11 @@ data class OverviewVitals(
     val profile: String? = null,
     val algorithmTitle: Int = R.string.apex7_smb,
     val activityUpdatedAt: Long? = null,
-    val smbState: OverviewSmbState = OverviewSmbState.UNKNOWN
+    val smbState: OverviewSmbState = OverviewSmbState.UNKNOWN,
+    val bgTimestamp: Long? = null,
+    val loopTimestamp: Long? = null,
+    val syncTimestamp: Long? = null,
+    val decisionTimestamp: Long? = null
 )
 
 data class OverviewDashboardState(val tiles: List<DashboardTile> = emptyList(), val capturedAt: Long? = null, val vitals: OverviewVitals = OverviewVitals())
@@ -84,25 +99,39 @@ class OverviewDashboardViewModel @Inject constructor(
     private val preferences: Preferences,
     private val rh: ResourceHelper,
     private val logger: AAPSLogger,
-    private val activities: ActivityContextRepository
+    private val activities: ActivityContextRepository,
+    private val rxBus: RxBus
 ) : ViewModel() {
     val enabled = preferences.observe(BooleanKey.OverviewEnhanced)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     private val mutableState = MutableStateFlow(OverviewDashboardState())
     val state = mutableState.asStateFlow()
     private var lastLoggedHealth: LoopHealthStatus? = null
+    private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
 
     init {
+        listOf(EventAPSCalculationFinished::class.java,EventLoopUpdateGui::class.java,EventPumpStatusChanged::class.java,
+            EventQueueChanged::class.java,EventAutosensCalculationFinished::class.java,EventRefreshOverview::class.java,
+            EventInitializationChanged::class.java).forEach { eventClass ->
+            rxBus.toFlow(eventClass).collectResilient(viewModelScope,logger,LTag.CORE,streamName="overview-event") { refreshRequests.trySend(Unit) }
+        }
+        fun <T: Any> observe(type: Class<T>) {
+            persistence.observeChanges(type).collectResilient(viewModelScope,logger,LTag.CORE,streamName="overview-history") { refreshRequests.trySend(Unit) }
+        }
+        observe(TT::class.java); observe(EPS::class.java); observe(PS::class.java); observe(TE::class.java); observe(CA::class.java)
+        activities.changes.collectResilient(viewModelScope,logger,LTag.CORE,streamName="overview-activity") { refreshRequests.trySend(Unit) }
         viewModelScope.launch(Dispatchers.IO) {
             preferences.observe(BooleanKey.OverviewEnhanced).collectLatest { enabled ->
-                if (enabled) while (isActive) {
+                if (enabled) {
+                    refreshRequests.trySend(Unit)
+                    for (ignored in refreshRequests) {
                     try { refresh() }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (error: Exception) {
                         mutableState.value = OverviewDashboardState()
                         logger.error(LTag.AUTOSENS, "Overview diagnostics unavailable: ${error.javaClass.simpleName}")
                     }
-                    delay(30_000)
+                    }
                 }
             }
         }
@@ -171,7 +200,7 @@ class OverviewDashboardViewModel @Inject constructor(
         })
         mutableState.value = OverviewDashboardState(listOf(
             tile(R.string.apex7_autoisf, request?.algorithm?.name,
-                R.string.apex7_factor to number(decision?.dynIsfAdjustmentFactor), R.string.apex7_base_isf to baseIsf,
+                R.string.apex7_factor to number(if (decision?.algorithm=="AUTO_ISF") decision.autoIsfFactor else decision?.dynIsfAdjustmentFactor), R.string.apex7_base_isf to baseIsf,
                 R.string.apex7_current_dynamic_isf to currentDynamicIsf, R.string.apex7_dosing_isf to dosingIsf,
                 R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
                 R.string.apex7_isf_basis to decision?.futureIsfBasis?.name,
@@ -247,8 +276,8 @@ class OverviewDashboardViewModel @Inject constructor(
             isf = decision?.currentDynamicIsfMgdl?.takeIf { it > 0 && recent(request?.date) }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
             baseIsf = profile?.getProfileIsfMgdl()?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
             cr = effectiveCr.takeIf { recent(request?.date) },
-            // No structured final AutoISF factor exists yet. Never substitute an autosens ratio.
-            autoIsf = decision?.currentDynamicIsfMgdl?.takeIf { recent(request?.date) && it > 0 }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
+            // Use only the factor belonging to the ISF actually consumed by the algorithm.
+            autoIsf = overviewAdjustmentFactor(decision.takeIf { recent(request?.date) }),
             algorithmTitle = when {
                 request?.algorithm == app.aaps.core.interfaces.aps.APSResult.Algorithm.AUTO_ISF -> R.string.apex7_autoisf
                 decision?.dynamicIsf == true -> R.string.apex7_disf
@@ -258,6 +287,10 @@ class OverviewDashboardViewModel @Inject constructor(
             activityDetail = event?.let { listOfNotNull(it.category.name, compactAge(it.startTime, it.endTime ?: now)).joinToString(" / ") },
             activityUpdatedAt = event?.lastUpdatedAt ?: activity.lastSuccessfulRead,
             smbState = overviewSmbState(decision.takeIf { recent(request?.date) }),
+            bgTimestamp = snapshot.newestRawBgTimestamp,
+            loopTimestamp = snapshot.lastCalculationSuccessTimestamp,
+            syncTimestamp = pump.lastDataTime.value,
+            decisionTimestamp = request?.date,
             pumpConnected = pump.isConnected().takeIf { pumpKnown },
             reservoir = if (pumpKnown) number(pump.reservoirLevel.value.cU)?.let { rh.gs(R.string.apex7_insulin_units, it) } else null,
             battery = if (pumpKnown) pump.batteryLevel.value?.let { "$it%" } else null,

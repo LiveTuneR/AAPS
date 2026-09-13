@@ -48,10 +48,8 @@ jobs:
             :plugins:sync:testFullDebugUnitTest :pump:apex:testFullDebugUnitTest :core:data:test \
             :pump:medtrum:testFullDebugUnitTest :plugins:aps:testFullDebugUnitTest \
             :plugins:smoothing:testFullDebugUnitTest \
-            :implementation:testFullDebugUnitTest --tests '*LogArchiveTest' --tests '*MaintenanceImplTest' \
-            --tests '*TddCalculatorImplTest' --tests '*WizardBolusExecutorImplTest' --tests '*CommandSMBBolusTest' \
-            :shared:impl:testFullDebugUnitTest --tests '*RxBusLoggingTest' \
-            :ui:testFullDebugUnitTest --tests '*EnhancedOverviewContentTest' --tests '*ActivityEventCodecTest' \
+            :implementation:testFullDebugUnitTest :shared:impl:testFullDebugUnitTest \
+            :ui:testFullDebugUnitTest \
             --no-daemon --max-workers=2 --console=plain -I doc/apex7-validation.init.gradle \
             -Pkotlin.compiler.execution.strategy=in-process \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -Xss1m"
@@ -134,7 +132,7 @@ jobs:
           [[ "$actual_cert" = "$expected_cert" ]] || { echo "Signing certificate does not match the supplied normal 3.4.2.3 APK"; exit 1; }
           cp "$apk" "$output"
           sha256sum "$output" > "$output.sha256"
-          printf 'commit=%s\nrun=%s\nstatus=EXPERIMENTAL_NOT_DEVICE_VALIDATED\n' \
+          printf 'commit=%s\nrun=%s\nstatus=EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED\n' \
             "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$output.provenance.txt"
           echo "APK_OUTPUT=$output" >> "$GITHUB_ENV"
 

@@ -24,6 +24,28 @@ class DetermineBasalAutoISFTest : TestBaseWithProfile() {
 
     private val currentTime = 1656358822000L
 
+    @Test fun `structured SMB eligibility and wait follow visited branches without changing dosing serialization`() {
+        fun calculate(allowed: Boolean, ageMs: Long): RT = sut.determine_basal(
+            glucoseStatus(),CurrentTemp(0,0.0,null),iobArray().also { rows -> rows.forEach { it.lastBolusTime=currentTime-ageMs } },
+            profile().copy(enableSMB_with_COB=true),AutosensResult(ratio=1.0),
+            MealData(carbs=40.0,mealCOB=20.0,lastCarbTime=currentTime-1_800_000),allowed,currentTime,false,true,
+            "AAPS",100,0.5,1.0,100,mutableListOf(),mutableListOf())
+        val off=calculate(false,3_600_000)
+        assertThat(off.decision?.conditionEligible).isFalse()
+        val on=calculate(true,3_600_000)
+        assertThat(on.decision?.conditionEligible).isTrue()
+        assertThat(on.decision?.intervalWaiting).isFalse()
+        val waiting=calculate(true,60_000)
+        assertThat(waiting.decision?.intervalWaiting).isTrue()
+        assertThat(waiting.decision?.intervalSeconds).isEqualTo(180.0)
+        assertThat(waiting.units).isNull()
+        listOf(off,on,waiting).forEach { result ->
+            val dosing=result.serialize()
+            result.decision=null
+            assertThat(result.serialize()).isEqualTo(dosing)
+        }
+    }
+
     @Test fun `AutoISF short zero temps withhold equivalent basal for one fifteen twenty nine minutes`() {
         val found = mutableSetOf<Int>()
         for (iobHundredths in 100..650) {

@@ -54,11 +54,13 @@ internal class LegacySensitivityOref1Plugin @Inject constructor(
         siteChanges: List<TE>,
         profileSwitches: List<PS>
     ): AutosensResult {
+        // Adapt the frozen formula to snapshot ownership without copying the full table per row.
+        val table = ads.autosensDataTable
         if (profile == null) {
             aapsLogger.error("No profile")
             return AutosensResult()
         }
-        if (ads.autosensDataTable.size() < 4) {
+        if (table.size() < 4) {
             aapsLogger.debug(LTag.AUTOSENS, "No autosens data available. lastDataTime=" + ads.lastDataTime(dateUtil))
             return AutosensResult()
         }
@@ -80,8 +82,8 @@ internal class LegacySensitivityOref1Plugin @Inject constructor(
         val ratioLimitArray = mutableListOf("", "")
         val hoursDetection = listOf(8.0, 24.0)
         var index = 0
-        while (index < ads.autosensDataTable.size()) {
-            val autosensData = ads.autosensDataTable.valueAt(index)
+        while (index < table.size()) {
+            val autosensData = table.valueAt(index)
             if (autosensData.time < fromTime) {
                 index++
                 continue

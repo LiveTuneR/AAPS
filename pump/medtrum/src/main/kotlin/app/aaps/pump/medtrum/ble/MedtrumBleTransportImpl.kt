@@ -85,6 +85,7 @@ class MedtrumBleTransportImpl @Inject constructor(
 
     // Write/read packet reassembly
     private var writePackets: WriteCommandPackets? = null
+    @Volatile private var writeProvenance: app.aaps.core.interfaces.telemetry.PumpCommandRunContext? = null
     private var writeSequenceNumber = 0
     private var readPacket: ReadDataPacket? = null
     private val readLock = Any()
@@ -146,6 +147,7 @@ class MedtrumBleTransportImpl @Inject constructor(
         isConnected = false
         isConnecting = true
         writePackets = null
+        writeProvenance = null
         readPacket = null
 
         val wizardAddr = wizardSelectedAddress?.also { wizardSelectedAddress = null }
@@ -163,7 +165,7 @@ class MedtrumBleTransportImpl @Inject constructor(
             }
 
             else                                                      -> {
-                aapsLogger.debug(LTag.PUMPBTCOMM, "No cached address, scanning for deviceSN: $deviceSN")
+                aapsLogger.debug(LTag.PUMPBTCOMM, "No cached address, scanning for configured pump")
                 cachedDeviceAddress = null
                 cachedDeviceSN = deviceSN
                 startConnectionScan(deviceSN)
@@ -198,7 +200,7 @@ class MedtrumBleTransportImpl @Inject constructor(
 
     @Synchronized
     override fun sendMessage(message: ByteArray) {
-        aapsLogger.debug(LTag.PUMPBTCOMM, "sendMessage: ${message.contentToString()}")
+        aapsLogger.debug(LTag.PUMPBTCOMM, "sendMessage command=${commandName(message.firstOrNull())} bytes=${message.size}")
         trace.record(
             "tx_message",
             mapOf(
@@ -213,6 +215,7 @@ class MedtrumBleTransportImpl @Inject constructor(
             return
         }
         writePackets = WriteCommandPackets(message, writeSequenceNumber)
+        writeProvenance = app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
         writeSequenceNumber = (writeSequenceNumber + 1) % 256
         val first = writePackets?.getNextPacket()
         if (first != null) {
@@ -257,7 +260,7 @@ class MedtrumBleTransportImpl @Inject constructor(
                 writePackets?.let { packets ->
                     synchronized(packets) {
                         val next = packets.getNextPacket()
-                        if (next != null) writeCharacteristicInternal(uartWriteChar, next)
+                        if (next != null) writeCharacteristicInternal(uartWriteChar, next, writeProvenance)
                     }
                 }
             } else {
@@ -418,20 +421,25 @@ class MedtrumBleTransportImpl @Inject constructor(
 
     @Suppress("DEPRECATION")
     @Synchronized
-    private fun writeCharacteristicInternal(characteristic: BluetoothGattCharacteristic, data: ByteArray) {
+    private fun writeCharacteristicInternal(characteristic: BluetoothGattCharacteristic, data: ByteArray,
+                                            provenance: app.aaps.core.interfaces.telemetry.PumpCommandRunContext? = app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()) {
         handler.postDelayed({
                                 if (bluetoothAdapter == null || bluetoothGatt == null) {
                                     handleNotInitialized()
                                 } else {
                                     characteristic.value = data
                                     characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                                    aapsLogger.debug(LTag.PUMPBTCOMM, "writeCharacteristic: ${data.contentToString()}")
+                                    aapsLogger.debug(LTag.PUMPBTCOMM, "writeCharacteristic bytes=${data.size}")
                                     trace.record(
                                         "tx_chunk",
                                         mapOf("uuid" to characteristic.uuid, "length" to data.size, "data" to data),
                                     )
                                     if (bluetoothGatt?.writeCharacteristic(characteristic) != true) {
                                         medtrumCallback?.onSendMessageError("Failed to write characteristic", true)
+                                    } else {
+                                        trace.record("tx_chunk_accepted",mapOf("length" to data.size,"transportAccepted" to true,
+                                            "queueRequestId" to provenance?.requestId,"decisionId" to provenance?.decisionId,
+                                            "calculationGeneration" to provenance?.generation))
                                     }
                                 }
                             }, WRITE_DELAY_MILLIS)
@@ -451,13 +459,13 @@ class MedtrumBleTransportImpl @Inject constructor(
     @Synchronized
     private fun startConnectionScan(deviceSN: Long) {
         if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) return
-        aapsLogger.debug(LTag.PUMPBTCOMM, "startConnectionScan for SN: $deviceSN")
+        aapsLogger.debug(LTag.PUMPBTCOMM, "startConnectionScan for configured pump")
         connectionScanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val mfData = result.scanRecord?.getManufacturerSpecificData(MANUFACTURER_ID)?.let { ManufacturerData(it) }
-                aapsLogger.debug(LTag.PUMPBTCOMM, "ConnectionScan found SN: ${mfData?.getDeviceSN()}")
+                aapsLogger.debug(LTag.PUMPBTCOMM, "ConnectionScan manufacturerDataPresent=${mfData != null}")
                 if (mfData?.getDeviceSN() == deviceSN) {
-                    aapsLogger.debug(LTag.PUMPBTCOMM, "Found target device! SN: ${mfData.getDeviceSN()}")
+                    aapsLogger.debug(LTag.PUMPBTCOMM, "Found configured pump")
                     stopConnectionScan()
                     cachedDeviceAddress = result.device.address
                     connectGatt(result.device)

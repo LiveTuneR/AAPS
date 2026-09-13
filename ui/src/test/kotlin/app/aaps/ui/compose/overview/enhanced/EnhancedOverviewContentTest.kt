@@ -41,7 +41,7 @@ class EnhancedOverviewContentTest {
             DashboardTile(title, null, listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null)))
         }.map { tile -> tile.copy(summary = if (missingAll) null else when (tile.title) { R.string.apex7_iob -> "1,6 Е"; R.string.apex7_cob -> "22 г"; else -> null }) }, now,
             if (missingAll) OverviewVitals() else OverviewVitals(
-                units = if (english) "mmol/L" else "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = "2,4", algorithmTitle = R.string.apex7_disf,
+                units = if (english) "mmol/L" else "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = "90%", algorithmTitle = R.string.apex7_disf,
                 activity = if (missingActivity) null else if (english) "light" else "лёгкая", activityDetail = if (missingActivity) null else if (english) "Walking / 24 min" else "Ходьба · 24 мин",
                 activityUpdatedAt = if (missingActivity) null else now - 32_000L, smbState = smb,
                 pumpConnected = !disconnected, reservoir = "142 Е", battery = "87%", siteAge = "2 д 10 ч", siteWarning = warning,
@@ -145,6 +145,7 @@ class EnhancedOverviewContentTest {
         render()
         compose.onNodeWithTag("activity-updated", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("dISF").assertIsDisplayed()
+        compose.onNodeWithText("90%").assertIsDisplayed()
         val statuses = listOf(R.string.apex7_smb, R.string.apex7_loop, R.string.apex7_sync_short, R.string.apex7_profile)
             .map { compose.onNodeWithTag("detail-$it").fetchSemanticsNode().boundsInRoot }
         assertTrue(statuses.all { kotlin.math.abs(it.top - statuses.first().top) < 1f })

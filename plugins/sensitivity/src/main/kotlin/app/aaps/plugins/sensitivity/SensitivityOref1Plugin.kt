@@ -52,11 +52,12 @@ class SensitivityOref1Plugin @Inject constructor(
         siteChanges: List<TE>,
         profileSwitches: List<PS>
     ): AutosensResult {
+        val table = ads.autosensDataTable
         if (profile == null) {
             aapsLogger.error("No profile")
             return AutosensResult()
         }
-        if (ads.autosensDataTable.size() < 4) {
+        if (table.size() < 4) {
             aapsLogger.debug(LTag.AUTOSENS, "No autosens data available. lastDataTime=" + ads.lastDataTime(dateUtil))
             return AutosensResult()
         }
@@ -78,12 +79,12 @@ class SensitivityOref1Plugin @Inject constructor(
         val ratioLimitArray = mutableListOf("", "")
         val hoursDetection = listOf(8.0, 24.0)
         val scanStart = System.nanoTime()
-        val tableSize = ads.autosensDataTable.size()
-        val firstRelevantIndex = autosensLowerBound(tableSize, fromTime) { ads.autosensDataTable.keyAt(it) }
+        val tableSize = table.size()
+        val firstRelevantIndex = autosensLowerBound(tableSize, fromTime) { table.keyAt(it) }
         var index = firstRelevantIndex
         var rowsProcessed = 0
-        while (index < ads.autosensDataTable.size()) {
-            val autosensData = ads.autosensDataTable.valueAt(index)
+        while (index < table.size()) {
+            val autosensData = table.valueAt(index)
             if (autosensData.time < fromTime) {
                 index++
                 continue

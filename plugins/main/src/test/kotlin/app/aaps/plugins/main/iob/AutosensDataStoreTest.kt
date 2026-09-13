@@ -1523,7 +1523,7 @@ class AutosensDataStoreTest : TestBaseWithProfile() {
         assertThat(ads.getLastAutosensData("test", aapsLogger, dateUtil)?.time).isEqualTo(now - 10)
 
         // data is there, return it
-        ads.autosensDataTable.append(now - 1, AutosensDataObject(aapsLogger, preferences, dateUtil).apply { time = now - 1 })
+        ads.putAutosensData(now - 1, AutosensDataObject(aapsLogger, preferences, dateUtil).apply { time = now - 1 })
         assertThat(ads.getLastAutosensData("test", aapsLogger, dateUtil)?.time).isEqualTo(now - 1)
         // and latest value should be saved
         assertThat(ads.storedLastAutosensResult?.time).isEqualTo(now - 1)
@@ -1531,7 +1531,7 @@ class AutosensDataStoreTest : TestBaseWithProfile() {
         // data is old, return last stored
         ads.storedLastAutosensResult = AutosensDataObject(aapsLogger, preferences, dateUtil).apply { time = now - 1 }
         ads.autosensDataTable = LongSparseArray<AutosensData>()
-        ads.autosensDataTable.append(now - T.mins(20).msecs(), AutosensDataObject(aapsLogger, preferences, dateUtil).apply { time = now - T.mins(20).msecs() })
+        ads.putAutosensData(now - T.mins(20).msecs(), AutosensDataObject(aapsLogger, preferences, dateUtil).apply { time = now - T.mins(20).msecs() })
         assertThat(ads.getLastAutosensData("test", aapsLogger, dateUtil)?.time).isEqualTo(now - 1)
 
         // stored fallback itself too old (> 11 min): must NOT be handed out, even though a (stale) table entry exists
@@ -1553,7 +1553,7 @@ class AutosensDataStoreTest : TestBaseWithProfile() {
             extraDeviation.add(3.0)
             autosensResult.ratio = 1.1
         }
-        source.autosensDataTable.put(now, row)
+        source.putAutosensData(now, row)
         source.bgReadings = listOf(GV(timestamp = now, value = 123.0, raw = null, noise = null, trendArrow = TrendArrow.FLAT, sourceSensor = SourceSensor.UNKNOWN))
         source.bucketedData = mutableListOf(app.aaps.core.data.iob.InMemoryGlucoseValue(timestamp = now, value = 123.0, smoothed = 122.0))
         val published = source.clone()

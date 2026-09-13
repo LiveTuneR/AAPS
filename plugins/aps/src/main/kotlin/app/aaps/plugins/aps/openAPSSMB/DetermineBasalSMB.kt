@@ -1163,6 +1163,7 @@ class DetermineBasalSMB @Inject constructor(
                 if (dynIsfMode) round((min(minPredBG, eventualBG) - target_bg) / future_sens, 2)
                 else round((min(minPredBG, eventualBG) - target_bg) / sens, 2)
             rT.decision = rT.decision?.copy(insulinReqIsfMgdl = if (dynIsfMode) future_sens else sens)
+            rT.decision = rT.decision?.copy(insulinReqBeforeIobClampU = insulinReq)
             // if that would put us over max_iob, then reduce accordingly
             if (insulinReq > max_iob - iob_data.iob) {
                 rT.decision = rT.decision?.copy(iobLimited = true)

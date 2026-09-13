@@ -29,7 +29,7 @@ interface CalculationWorkflow {
         }
     }
 
-    fun stopCalculation(job: String, from: String)
+    fun stopCalculation(job: String, from: String, invalidateFrom: Long? = null)
 
     /**
      * Block the caller until the data-producing (autosens/IOB/COB) stage of [job] has finished,
@@ -65,7 +65,9 @@ interface CalculationWorkflow {
         reason: String,
         end: Long,
         bgDataReload: Boolean,
-        triggeredByNewBG: Boolean
+        triggeredByNewBG: Boolean,
+        invalidateFrom: Long? = null,
+        rawBgTimestamp: Long? = null
     )
 
     /**

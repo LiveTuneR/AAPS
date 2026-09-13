@@ -484,7 +484,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
         aapsLogger.debug(LTag.APS, ">>> Invoking determine_basal SMB <<<")
         aapsLogger.debug(LTag.APS, "Glucose status:     $effectiveGlucoseStatus")
         aapsLogger.debug(LTag.APS, "Current temp:       $currentTemp")
-        aapsLogger.debug(LTag.APS, "IOB data:           ${iobArray.joinToString()}")
+        aapsLogger.debug(LTag.APS, "IOB forecast count=${iobArray.size} currentIob=${iobArray.firstOrNull()?.iob}")
         aapsLogger.debug(LTag.APS, "Profile:            $oapsProfile")
         aapsLogger.debug(LTag.APS, "Autosens data:      $autosensResult")
         aapsLogger.debug(LTag.APS, "Meal data:          $mealData")
@@ -507,7 +507,10 @@ open class OpenAPSSMBPlugin @Inject constructor(
             it.decision = it.decision?.copy(
                 eventualBgMgdl = it.eventualBG, iobU = it.IOB, cobG = it.COB,
                 requestedSmbU = it.units, requestedTbrUph = it.rate, requestedTbrMinutes = it.duration,
-                dynIsfAdjustmentFactor = if (effectiveDynIsfMode) preferences.get(IntKey.ApsDynIsfAdjustmentFactor) / 100.0 else null
+                dynIsfAdjustmentFactor = if (effectiveDynIsfMode) preferences.get(IntKey.ApsDynIsfAdjustmentFactor) / 100.0 else null,
+                tdd1dU=dynIsfResult.tdd1D,tdd7dU=dynIsfResult.tdd7D,tddLast24hU=dynIsfResult.tddLast24H,
+                tddLast4hU=dynIsfResult.tddLast4H,tddLast8to4hU=dynIsfResult.tddLast8to4H,
+                maxIobU=oapsProfile.max_iob,maxBasalUph=oapsProfile.max_basal
             )
             it.decision?.let { decision -> aapsLogger.info(LTag.APS, "AlgorithmDecision ${decision.toJson()}") }
             val determineBasalResult = apsResultProvider.get().with(it)
@@ -521,7 +524,7 @@ open class OpenAPSSMBPlugin @Inject constructor(
             determineBasalResult.mealData = mealData
             lastAPSResult = determineBasalResult
             lastAPSRun = now
-            aapsLogger.debug(LTag.APS, "Result: $it")
+            aapsLogger.debug(LTag.APS, "Result at=$now rate=${it.rate} duration=${it.duration} smb=${it.units} insulinReq=${it.insulinReq}")
             rxBus.send(EventAPSCalculationFinished())
         }
 

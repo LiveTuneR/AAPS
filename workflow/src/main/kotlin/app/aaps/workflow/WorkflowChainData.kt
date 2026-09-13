@@ -6,6 +6,9 @@ import app.aaps.core.interfaces.workflow.CalculationWorkflow.Companion.HISTORY_C
 import app.aaps.core.interfaces.workflow.CalculationWorkflow.Companion.MAIN_CALCULATION
 import app.aaps.core.interfaces.workflow.CalculationWorkflow.Companion.UPDATE_PREDICTIONS
 import java.util.concurrent.atomic.AtomicLong
+import app.aaps.core.data.workflow.LatestPendingCalculation
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -62,11 +65,21 @@ class WorkflowChainData @Inject constructor(
     @Volatile private var historyChain: HistoryChain? = null
     @Volatile private var predictionsChain: PredictionsChain? = null
     private val generator = AtomicLong()
+    internal var mainScheduler: LatestPendingCalculation? = null
+    private val mainCalculationMutex = Mutex()
+
+    internal suspend fun <T> withMainCalculation(block: suspend () -> T): T = mainCalculationMutex.withLock { block() }
+
+    @Synchronized
+    fun claimBgIfCurrent(job: String?, generation: Long, timestamp: Long, watermark: Long, therapy: Boolean = false): Boolean {
+        if (activeGeneration(job) != generation) return false
+        return mainScheduler?.claimBg(generation, timestamp, watermark, therapy) ?: (timestamp > watermark)
+    }
 
     @Synchronized
     fun invalidate(job: String) {
         when (job) {
-            MAIN_CALCULATION -> { mainChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); mainChain = null }
+            MAIN_CALCULATION -> { mainScheduler?.invalidate(); mainChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); mainChain = null }
             HISTORY_CALCULATION -> { historyChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); historyChain = null }
             UPDATE_PREDICTIONS -> predictionsChain = null
         }
@@ -83,7 +96,10 @@ class WorkflowChainData @Inject constructor(
     // must be one operation, not a check followed by an unprotected ADS assignment.
     @Synchronized
     fun publishIfCurrent(job: String?, generation: Long, stopped: () -> Boolean, publish: () -> Unit): Boolean {
-        if (stopped() || activeGeneration(job) != generation) return false
+        if (stopped() || activeGeneration(job) != generation || (job == MAIN_CALCULATION && mainScheduler?.isCurrent(generation) == false)) {
+            if (job == MAIN_CALCULATION) mainScheduler?.rejectStale()
+            return false
+        }
         publish()
         return true
     }
@@ -96,9 +112,10 @@ class WorkflowChainData @Inject constructor(
     @Synchronized
     fun startMain(
         prepare: PrepareGraphDataWorker.PrepareGraphData,
-        post: PostCalculationWorker.PostCalculationData
+        post: PostCalculationWorker.PostCalculationData,
+        scheduledGeneration: Long? = null
     ): Long {
-        val gen = generator.incrementAndGet()
+        val gen = scheduledGeneration ?: generator.incrementAndGet()
         mainChain = MainChain(gen, prepare, post)
         prepare.iobCobCalculator.loopHealth?.started(MAIN_CALCULATION, gen, System.currentTimeMillis())
         return gen

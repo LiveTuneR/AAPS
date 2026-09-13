@@ -171,6 +171,21 @@ class LoopPlugin @Inject constructor(
     // double-apply or mis-order TBR/SMB commands. Not reentrant: the SMB fallback re-invoke is
     // deferred (postDelayed + appScope.launch) and runs after the current run releases the lock.
     private val invokeMutex = Mutex()
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
+
+    private suspend fun telemetry(type: app.aaps.core.interfaces.telemetry.TherapyEventType, data: () -> org.json.JSONObject) {
+        if (!::therapyTelemetry.isInitialized) return
+        val run = currentCoroutineContext()[app.aaps.core.interfaces.workflow.CalculationRunContext]
+        try { therapyTelemetry.get().record(type,data(),run?.generation,run?.decisionId) }
+        catch (error: Exception) { aapsLogger.error(LTag.APS,"Telemetry hook failed type=${error.javaClass.simpleName}") }
+    }
+
+    private suspend fun calculationCurrent(stage: String): Boolean {
+        val run = currentCoroutineContext()[app.aaps.core.interfaces.workflow.CalculationRunContext]
+        if (run?.isCurrent?.invoke() != false) return true
+        aapsLogger.info(LTag.APS,"TherapyDecision stage=$stage generation=${run.generation} reason=STALE_GENERATION")
+        return false
+    }
 
     @OptIn(FlowPreview::class)
     override suspend fun onStart() {
@@ -194,20 +209,8 @@ class LoopPlugin @Inject constructor(
                 delay(60_000)
             }
         }
-        // TempTarget changes
-        persistenceLayer.observeChanges(TT::class.java)
-            // Skip db change of ending previous TT
-            .debounce(10_000L)
-            // try/catch keeps this app-lifetime subscription alive: an uncaught throw in onEach would
-            // permanently cancel the collection (invoke() is try/finally, not try/catch, so it propagates).
-            .onEach {
-                try {
-                    invoke("TempTargetChange", true)
-                } catch (e: Exception) {
-                    aapsLogger.error(LTag.APS, "invoke on TempTarget change failed", e)
-                }
-            }
-            .launchIn(appScope)
+        // Temp targets are ordered with other therapy changes by IobCobCalculator's MAIN scheduler.
+        // Do not launch an independent APS calculation against an invalidated ADS here.
         // Pump-state changes (suspend/resume, typically detected on a status read): reconcile the running
         // mode promptly instead of waiting for the next loop/keepalive tick (~5 min). EventPumpStatusChanged
         // is fired centrally by the command queue after every command, so it is pump-agnostic and arrives
@@ -502,10 +505,13 @@ class LoopPlugin @Inject constructor(
         return false
     }
 
-    override suspend fun invoke(initiator: String, allowNotification: Boolean, tempBasalFallback: Boolean): Unit = withContext(Dispatchers.Default) {
+    override suspend fun invoke(initiator: String, allowNotification: Boolean, tempBasalFallback: Boolean): Unit = withContext(Dispatchers.Default +
+        (currentCoroutineContext()[app.aaps.core.interfaces.workflow.CalculationRunContext]
+            ?: app.aaps.core.interfaces.workflow.CalculationRunContext(-1,null,java.util.UUID.randomUUID().toString()) { true })) {
         // Restores master's @Synchronized contract: serialize loop runs so they cannot overlap.
         invokeMutex.lock()
         try {
+            if (!calculationCurrent("INVOKE_REJECTED")) return@withContext
             aapsLogger.debug(LTag.APS, "invoke from $initiator")
             if (runningMode() == RM.Mode.DISABLED_LOOP) {
                 val message = rh.gs(app.aaps.core.ui.R.string.loop_disabled_by_user)
@@ -533,6 +539,7 @@ class LoopPlugin @Inject constructor(
             if (ch.fromPump(pump.baseBasalRate) < 0.01) return@withContext
             val usedAPS = activePlugin.activeAPS ?: return@withContext
             if (usedAPS.isEnabled()) {
+                if (!calculationCurrent("APS_REJECTED")) return@withContext
                 usedAPS.invoke(initiator, tempBasalFallback)
                 apsResult = usedAPS.lastAPSResult
             }
@@ -544,6 +551,13 @@ class LoopPlugin @Inject constructor(
             }
 
             // Store calculations to DB
+            if (!calculationCurrent("RESULT_REJECTED")) return@withContext
+            telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.APS_INPUT) {
+                app.aaps.core.interfaces.telemetry.ApsTelemetryFields.inputs(apsResult)
+                    .put("profilePercentage",profile.percentage).put("diaHours",profile.iCfg.dia)
+                    .put("insulinType",profile.iCfg.insulinLabel).put("peakMinutes",profile.iCfg.peak) }
+            telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.APS_DECISION) {
+                app.aaps.core.interfaces.telemetry.ApsTelemetryFields.decision(apsResult) }
             persistenceLayer.insertOrUpdateApsResult(apsResult)
 
             // Prepare for pumps using % basals
@@ -570,6 +584,11 @@ class LoopPlugin @Inject constructor(
             prevCarbsreq = lastRun?.constraintsProcessed?.carbsReq ?: prevCarbsreq
             aapsLogger.info(LTag.APS, "TherapyDecision stage=CONSTRAINED calculation=${apsResult.date} at=${dateUtil.now()} smbRequestedU=${apsResult.smb} smbConstrainedU=${resultAfterConstraints.smb} tbrRequestedUph=${apsResult.rate} tbrConstrainedUph=${resultAfterConstraints.rate} durationMinutes=${resultAfterConstraints.duration}")
             if (lastRun == null) lastRun = LastRun()
+            telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.CONSTRAINT) { org.json.JSONObject()
+                .put("smbRequested",apsResult.smb).put("smbConstrained",resultAfterConstraints.smb).put("tbrRequested",apsResult.rate)
+                .put("tbrConstrained",resultAfterConstraints.rate).put("durationMinutes",resultAfterConstraints.duration)
+                .put("constraints",org.json.JSONArray().put(resultAfterConstraints.rateConstraint?.getReasons() ?: "")
+                    .put(resultAfterConstraints.smbConstraint?.getReasons() ?: "")) }
             lastRun?.let { lastRun ->
                 lastRun.request = apsResult
                 lastRun.constraintsProcessed = resultAfterConstraints
@@ -787,11 +806,17 @@ class LoopPlugin @Inject constructor(
     // invokeMutex remains held by invoke; constraints and APS calculation stay cancellable.
     internal suspend fun enactConstrainedDecision(lastRun: LastRun, request: APSResult, profile: Profile, allowNotification: Boolean) {
         currentCoroutineContext().ensureActive()
+        if (!calculationCurrent("ENACTMENT_REJECTED")) return
         withContext(NonCancellable) {
+            telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.TBR_REQUEST) { org.json.JSONObject()
+                .put("decisionTimestamp",request.date).put("rate",request.rate).put("durationMinutes",request.duration).put("applyAt",dateUtil.now()) }
             aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_ENTER calculation=${request.date} at=${dateUtil.now()}")
             val tbr = applyTBRRequest(request, profile)
             lastRun.tbrSetByPump = tbr
             lastRun.lastTBRRequest = lastRun.lastAPSRun
+            telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_RESULT) { org.json.JSONObject().put("commandType","TBR")
+                .put("resultAt",dateUtil.now()).put("success",tbr.success).put("enacted",tbr.enacted).put("queued",tbr.queued)
+                .put("rate",tbr.absolute).put("durationMinutes",tbr.duration).put("ambiguous",org.json.JSONObject.NULL) }
             aapsLogger.info(LTag.APS, "TherapyDecision stage=TBR_APPLY_RESULT calculation=${request.date} success=${tbr.success} enacted=${tbr.enacted} queued=${tbr.queued}")
             if (tbr.enacted || tbr.success) {
                 lastRun.lastTBREnact = dateUtil.now()
@@ -799,11 +824,17 @@ class LoopPlugin @Inject constructor(
                 request.deliverAt = lastRun.lastTBREnact
                 rxBus.send(EventLoopUpdateGui())
                 if (request.isBolusRequested) {
+                    telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.SMB_REQUEST) { org.json.JSONObject()
+                        .put("decisionTimestamp",request.date).put("smbRequested",request.smb).put("applyAt",dateUtil.now()) }
                     aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_ENTER calculation=${request.date} requestedU=${request.smb}")
                     val smb = applySMBRequest(request)
                     // Failed outcomes must replace QUEUED too, never leave an unknown pending result.
                     lastRun.smbSetByPump = smb
                     lastRun.lastSMBRequest = lastRun.lastAPSRun
+                    telemetry(app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_RESULT) { org.json.JSONObject().put("commandType","SMB")
+                        .put("resultAt",dateUtil.now()).put("success",smb.success).put("enacted",smb.enacted).put("queued",smb.queued)
+                        .put("smbDelivered",if (smb.success || smb.enacted || smb.bolusDelivered > 0) smb.bolusDelivered else org.json.JSONObject.NULL)
+                        .put("ambiguous",org.json.JSONObject.NULL) }
                     aapsLogger.info(LTag.APS, "TherapyDecision stage=SMB_APPLY_RESULT calculation=${request.date} success=${smb.success} enacted=${smb.enacted} queued=${smb.queued} reportedDeliveredU=${smb.bolusDelivered}")
                     if (smb.enacted || smb.success) lastRun.lastSMBEnact = dateUtil.now()
                     else handler?.postDelayed({ appScope.launch { invoke("tempBasalFallback", allowNotification, true) } }, 1000)

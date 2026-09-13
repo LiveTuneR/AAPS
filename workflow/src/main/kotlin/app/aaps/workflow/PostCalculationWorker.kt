@@ -29,6 +29,8 @@ import app.aaps.core.objects.workflow.LoggingWorker
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import app.aaps.core.interfaces.workflow.CalculationRunContext
 import java.util.Calendar
 import kotlin.math.ceil
 import kotlin.math.max
@@ -56,13 +58,15 @@ class PostCalculationWorker @AssistedInject constructor(
     private val profileUtil: ProfileUtil,
     private val preferences: Preferences
 ) : LoggingWorker(context, params, Dispatchers.Default, aapsLogger, fabricPrivacy) {
+    @javax.inject.Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
 
     class PostCalculationData(
         val overviewData: OverviewData,
         val cache: OverviewDataCache,
         val signals: CalculationSignalsEmitter,
         val triggeredByNewBG: Boolean,
-        val runLoopAndWidgetPhase: Boolean
+        val runLoopAndWidgetPhase: Boolean,
+        val therapyRecalculation: Boolean = false
     )
 
     override suspend fun doWorkAndLog(): Result {
@@ -72,7 +76,7 @@ class PostCalculationWorker @AssistedInject constructor(
         ) ?: return Result.failure(workDataOf("Error" to "missing or stale input data"))
 
         if (data.runLoopAndWidgetPhase) {
-            invokeLoop()
+            invokeLoop(data.therapyRecalculation)
             if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
             widgetUpdater.update("WorkFlow")
             if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
@@ -90,14 +94,23 @@ class PostCalculationWorker @AssistedInject constructor(
      * Triggered once autosens calculation has completed so the Loop has current data to work with.
      * A replacement DB chain can finish work started by NewBG; claim the BG, not its trigger flag.
      */
-    private suspend fun invokeLoop() {
+    private suspend fun invokeLoop(therapyRecalculation: Boolean) {
         val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
         val store = iobCobCalculator.ads
         val raw = store.bgReadings.firstOrNull()?.timestamp
         val bucket = store.lastBg()?.timestamp
         val pass = store.lastBucketPass
-        fun evidence(invoked: Boolean, reason: String) = aapsLogger.info(LTag.APS,
-            "CgmDecision stage=LOOP_GATE generation=$generation rawBgTimestamp=$raw bucketBgTimestamp=$bucket referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${store.bucketReferenceTime} loopInvoked=$invoked reason=$reason lastClaimedBg=${loop.lastBgTriggeredRun} at=${System.currentTimeMillis()}")
+        fun evidence(invoked: Boolean, reason: String) {
+            aapsLogger.info(LTag.APS,
+                "CgmDecision stage=LOOP_GATE generation=$generation rawBgTimestamp=$raw bucketBgTimestamp=$bucket referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${store.bucketReferenceTime} loopInvoked=$invoked reason=$reason lastClaimedBg=${loop.lastBgTriggeredRun} at=${System.currentTimeMillis()}")
+            if (::therapyTelemetry.isInitialized) try {
+                therapyTelemetry.get().record(app.aaps.core.interfaces.telemetry.TherapyEventType.CALCULATION,org.json.JSONObject()
+                    .put("stage","LOOP_GATE").put("rawBgTimestamp",raw ?: org.json.JSONObject.NULL).put("bucketBgTimestamp",bucket ?: org.json.JSONObject.NULL)
+                    .put("actualBgTimestamp",store.actualBg()?.timestamp ?: org.json.JSONObject.NULL)
+                    .put("referenceTimeUsed",pass?.referenceTimeUsed ?: org.json.JSONObject.NULL).put("referenceTimeAfterPass",store.bucketReferenceTime)
+                    .put("loopInvoked",invoked).put("reason",reason).put("lastClaimedBg",loop.lastBgTriggeredRun),generation)
+            } catch (error: Exception) { aapsLogger.error(LTag.APS,"Loop gate telemetry failed type=${error.javaClass.simpleName}") }
+        }
         if (isStopped) { evidence(false, "WORKER_STOPPED"); return }
         val glucoseValue = store.actualBg() ?: run { evidence(false, "NO_FRESH_ACTUAL_BG"); return }
         synchronized(loop) {
@@ -105,13 +118,19 @@ class PostCalculationWorker @AssistedInject constructor(
                     inputData.getString(WorkflowChainData.JOB_KEY),
                     inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
                 ) == null) { evidence(false, "STALE_GENERATION_OR_STOPPED"); return }
-            if (glucoseValue.timestamp <= loop.lastBgTriggeredRun) { evidence(false, "DUPLICATE_OR_OLDER_BG"); return }
+            if (glucoseValue.timestamp < loop.lastBgTriggeredRun || (!therapyRecalculation && glucoseValue.timestamp == loop.lastBgTriggeredRun)) { evidence(false, "DUPLICATE_OR_OLDER_BG"); return }
+            if (workflowChainData.mainScheduler != null && !workflowChainData.claimBgIfCurrent(
+                    inputData.getString(WorkflowChainData.JOB_KEY), generation, glucoseValue.timestamp, loop.lastBgTriggeredRun, therapyRecalculation
+                )) { evidence(false, "STALE_OR_DURABLY_CLAIMED_BG"); return }
             loop.lastBgTriggeredRun = glucoseValue.timestamp
         }
-        evidence(true, "NEW_BG_DISPATCHED")
+        evidence(true, if (therapyRecalculation) "ORDERED_THERAPY_CHANGE" else "NEW_BG_DISPATCHED")
         aapsLogger.info(LTag.APS, "WorkflowDecision stage=BG_CLAIMED generation=$generation bgTimestamp=${glucoseValue.timestamp} at=${System.currentTimeMillis()}")
         try {
-            loop.invoke("Calculation for $glucoseValue", true)
+            withContext(CalculationRunContext(generation,raw,java.util.UUID.randomUUID().toString()) {
+                !isStopped && workflowChainData.postFor(inputData.getString(WorkflowChainData.JOB_KEY),generation) != null &&
+                    workflowChainData.mainScheduler?.isCurrent(generation) != false
+            }) { loop.invoke("Calculation for $glucoseValue", true) }
             aapsLogger.info(LTag.APS, "WorkflowDecision stage=INVOKE_RETURNED generation=$generation bgTimestamp=${glucoseValue.timestamp} resultTimestamp=${loop.lastRun?.request?.date} at=${System.currentTimeMillis()}")
         } catch (error: Exception) {
             aapsLogger.info(LTag.APS, "WorkflowDecision stage=INVOKE_INTERRUPTED generation=$generation bgTimestamp=${glucoseValue.timestamp} type=${error.javaClass.simpleName} at=${System.currentTimeMillis()}")

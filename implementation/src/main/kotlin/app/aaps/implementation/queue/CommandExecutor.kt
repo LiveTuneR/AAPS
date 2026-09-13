@@ -75,6 +75,7 @@ class CommandExecutor @Inject constructor(
     private val bolusProgressData: BolusProgressData,
     @ApplicationContext private val context: Context
 ) {
+    @Inject lateinit var commandTelemetry: app.aaps.implementation.telemetry.CommandTelemetry
 
     // A single dedicated serial thread: guarantees strict command ordering and isolates long blocking
     // BLE I/O from the shared Dispatchers.Default pool that backs @ApplicationScope.
@@ -227,10 +228,15 @@ class CommandExecutor @Inject constructor(
                             rxBus.send(EventQueueChanged())
                             rxBus.send(EventPumpStatusChanged(cmd.status()))
                             try {
-                                cmd.executeWithCallback()
+                                if (::commandTelemetry.isInitialized) commandTelemetry.dispatched(cmd)
+                                kotlinx.coroutines.withContext(if (::commandTelemetry.isInitialized) commandTelemetry.context(cmd) else kotlin.coroutines.EmptyCoroutineContext) {
+                                    cmd.executeWithCallback { result -> if (::commandTelemetry.isInitialized) commandTelemetry.result(cmd,result) }
+                                }
                             } catch (e: CancellationException) {
+                                if (::commandTelemetry.isInitialized) commandTelemetry.failed(cmd,e.javaClass.simpleName)
                                 throw e // honor coroutine cancellation (app shutdown)
                             } catch (e: Exception) {
+                                if (::commandTelemetry.isInitialized) commandTelemetry.failed(cmd,e.javaClass.simpleName)
                                 // A pump-driver throw must not kill the loop. Complete the caller with a
                                 // failure result and carry on so the remaining queue + disconnect run.
                                 aapsLogger.error(LTag.PUMPQUEUE, "Command threw during execution: " + cmd.log(), e)

@@ -19,12 +19,12 @@ class HistorySchedulingTest : TestBaseWithProfile() {
         val plugin = IobCobCalculatorPlugin(aapsLogger, mock(), mock(), preferences, rh, profileFunction, activePlugin,
             fabricPrivacy, dateUtil, persistence, mock(), workflow, decimalFormatter, processedTbrEbData, mock(), javax.inject.Provider { mock() })
         val affected = java.time.Instant.parse("2026-09-12T13:42:17Z").toEpochMilli()
-        val method = plugin.javaClass.getDeclaredMethod("newHistoryData", Long::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+        val method = plugin.javaClass.declaredMethods.single { it.name == "newHistoryData" }
         method.isAccessible = true
-        method.invoke(plugin, affected, false, false)
+        method.invoke(plugin, affected, false, false, true, null)
         verify(persistence).clearCachedTddData(app.aaps.core.interfaces.utils.MidnightTime.calc(affected))
-        verify(workflow).stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "onEventNewHistoryData")
-        verify(workflow).runCalculation(any(), any(), any(), any(), any(), eq("DBChange"), any(), eq(false), eq(false))
+        verify(workflow).stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "onEventNewHistoryData", affected - 300_000)
+        verify(workflow).runCalculation(any(), any(), any(), any(), any(), eq("DBChange"), any(), eq(false), eq(false), eq(affected - 300_000), isNull())
         verifyNoMoreInteractions(persistence)
     }
 
@@ -42,7 +42,7 @@ class HistorySchedulingTest : TestBaseWithProfile() {
         val affected = java.time.Instant.parse("2026-09-12T13:42:17Z").toEpochMilli()
         plugin.scheduleHistoryDataChange(affected, false, false)
         actions.single().run()
-        verify(workflow).runCalculation(any(), any(), any(), any(), any(), eq("DBChange"), any(), eq(false), eq(false))
+        verify(workflow).runCalculation(any(), any(), any(), any(), any(), eq("DBChange"), any(), eq(false), eq(false), eq(affected - 300_000), isNull())
         verify(persistence).clearCachedTddData(app.aaps.core.interfaces.utils.MidnightTime.calc(affected))
         verifyNoMoreInteractions(persistence)
         plugin.onStop()
@@ -73,11 +73,11 @@ class HistorySchedulingTest : TestBaseWithProfile() {
     }
 
     @Test
-    fun `history exception releases debounce state and next event can run`() = runTest {
+    fun `history failure retries without new event and retains earliest invalidation across new BG`() = runTest {
         val persistence = mock<PersistenceLayer>()
         val workflow = mock<CalculationWorkflow>()
         val plugin = IobCobCalculatorPlugin(aapsLogger, mock(), mock(), preferences, rh, profileFunction, activePlugin,
-            fabricPrivacy, dateUtil, persistence, mock(), workflow, decimalFormatter, processedTbrEbData, mock(), mock())
+            fabricPrivacy, dateUtil, persistence, mock(), workflow, decimalFormatter, processedTbrEbData, mock(), javax.inject.Provider { mock() })
         val executor = mock<ScheduledExecutorService>()
         val pending = mutableListOf<Runnable>()
         whenever(executor.schedule(any<Runnable>(), any<Long>(), any<TimeUnit>())).thenAnswer {
@@ -86,16 +86,18 @@ class HistorySchedulingTest : TestBaseWithProfile() {
         }
         plugin.javaClass.getDeclaredField("historyWorker").apply { isAccessible = true }.set(plugin, executor)
         whenever(persistence.clearCachedTddData(any())).thenThrow(IllegalStateException("synthetic"))
-        plugin.scheduleHistoryDataChange(1_000_000, true, true)
+        plugin.scheduleHistoryDataChange(1_000_000, true, false)
         pending.removeAt(0).run()
         for (name in listOf("scheduledData", "scheduledHistoryPost")) {
-            assertNull(plugin.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(plugin))
+            assertNotNull(plugin.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(plugin))
         }
-        plugin.scheduleHistoryDataChange(2_000_000, true, true)
+        plugin.scheduleHistoryDataChange(2_000_000, true, true,therapyChange=false,newestBgTimestamp=2_000_000)
         assertEquals(1, pending.size)
+        org.mockito.kotlin.doAnswer { Unit }.whenever(persistence).clearCachedTddData(any())
         pending.removeAt(0).run()
         verify(executor, times(2)).schedule(any<Runnable>(), any<Long>(), any<TimeUnit>())
-        verify(workflow, never()).runCalculation(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        verify(workflow).runCalculation(any(), any(), any(), any(), any(), any(), any(), eq(true), eq(false), eq(700_000L),eq(2_000_000L))
+        assertNull(plugin.javaClass.getDeclaredField("scheduledData").apply { isAccessible=true }.get(plugin))
         plugin.onStop()
     }
 }

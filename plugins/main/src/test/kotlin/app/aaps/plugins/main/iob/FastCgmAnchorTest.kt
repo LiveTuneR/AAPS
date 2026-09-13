@@ -8,6 +8,7 @@ import app.aaps.shared.tests.TestBaseWithProfile
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.time.Instant
+import org.mockito.kotlin.*
 
 class FastCgmAnchorTest : TestBaseWithProfile() {
     private val start = Instant.parse("2026-09-12T12:01:17Z").toEpochMilli()
@@ -63,12 +64,12 @@ class FastCgmAnchorTest : TestBaseWithProfile() {
 
     @Test fun `failed bucketing also clears live pass anchor`() {
         val source = AutosensDataStoreObject().apply { referenceTime = start }
-        source.bgReadings = object : AbstractList<GV>() {
-            override val size: Int get() = throw IllegalStateException("synthetic interrupted load")
-            override fun get(index: Int): GV = throw IllegalStateException("synthetic interrupted load")
-        }
-        assertThrows(IllegalStateException::class.java) { source.createBucketedData(aapsLogger, dateUtil) }
+        source.bgReadings = readings(start,60_000)
+        val logger = mock<app.aaps.core.interfaces.logging.AAPSLogger>()
+        doThrow(IllegalStateException("synthetic interrupted pass")).whenever(logger).debug(any<String>())
+        assertThrows(IllegalStateException::class.java) { source.createBucketedData(logger, dateUtil) }
         assertEquals(-1L, source.referenceTime)
+        assertEquals(false, source.lastBucketPass?.completed)
     }
 
     @Test fun `exact and near five minute data preserve order values and phase`() {

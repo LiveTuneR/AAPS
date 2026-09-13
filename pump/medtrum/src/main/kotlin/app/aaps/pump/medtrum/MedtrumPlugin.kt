@@ -117,6 +117,13 @@ class MedtrumPlugin @Inject constructor(
     private var scope: CoroutineScope? = null
     private var medtrumService: MedtrumService? = null
 
+    override fun readOnlyDiagnostics() = app.aaps.core.data.diagnostics.PumpDiagnosticState(
+        linkState=medtrumPump.connectionState.name, generation=null, queuedCommands=commandQueue.size(),
+        pendingCommand=commandQueue.performing()?.commandType?.name, pendingAgeMs=null, progressAgeMs=null,
+        firmware=medtrumPump.swVersion.takeIf { it.isNotBlank() },protocol=null,
+        maskedSerial=medtrumPump.pumpSN.takeIf { it!=0L }?.toString(16)?.let { "***${it.takeLast(3)}" }
+    )
+
     override suspend fun onStart() {
         super.onStart()
         aapsLogger.debug(LTag.PUMP, "MedtrumPlugin onStart()")

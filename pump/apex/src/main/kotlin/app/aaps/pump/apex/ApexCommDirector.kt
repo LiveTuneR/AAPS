@@ -509,6 +509,7 @@ class ApexCommDirector @Inject constructor(
                 continue
             }
             lastSendUptime = SystemClock.uptimeMillis()
+            trace.record("command_sent",activeGeneration,request.operationId,commandFields(request.command,"transportAccepted" to true))
 
             val timeout = if (single) Configuration.PUMP_RESPONSE_TIMEOUT else COMPLEX_RESPONSE_TIMEOUT_MS
             val response = withTimeoutOrNull(timeout) { request.result.await() }
