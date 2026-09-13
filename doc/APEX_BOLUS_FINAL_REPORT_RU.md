@@ -2,6 +2,14 @@
 
 Статус: `EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED`.
 
+## Автоматически подтверждено
+
+- Accepted run: `34774277312`, commit `6a7d377d9c4707dd8a34219f2dc71325b979c6f1`.
+- Тесты: `2802`, failures `0`, errors `0`, skipped `0`.
+- Phone APK SHA-256: `ebc78035e1db3507c91f8973a756388ca7fc2accd9f5452aa16ba212c5d32457`.
+- Wear APK SHA-256: `2e632e4535f820d4c45199d48546883d63216185ad04372559e2f8ded5eeff94`.
+- Оба APK: V2 signer SHA-256 `1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084`.
+
 ## Реализовано
 
 - Durable FSM разделяет `Completed` и подтверждение постоянной историей. Журнал сохраняется до первого BLE write и fail-closed восстанавливается после restart, включая повреждённый файл.
