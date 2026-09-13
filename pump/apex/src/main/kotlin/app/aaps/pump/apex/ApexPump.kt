@@ -254,6 +254,7 @@ class ApexPump @Inject constructor(
     )
 
     data class InProgressBolus(
+        val operationUuid: String,
         var requestedDose: Double = 0.0,
         var requestedSteps: Int = 0,
         var currentDose: Double = 0.0,
@@ -261,6 +262,7 @@ class ApexPump @Inject constructor(
         var cancelled: Boolean = false,
         var detailedBolusInfo: DetailedBolusInfo,
         var failed: Boolean = false,
+        var uncertain: Boolean = false,
         var lockHistory: Boolean = true,
         var useFallbackDose: Boolean = false,
         val completion: CompletableDeferred<Unit> = CompletableDeferred(),

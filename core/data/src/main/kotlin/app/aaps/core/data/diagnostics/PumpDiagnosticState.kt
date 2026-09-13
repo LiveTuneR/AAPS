@@ -9,5 +9,13 @@ data class PumpDiagnosticState(
     val progressAgeMs: Long?,
     val firmware: String?,
     val protocol: String?,
-    val maskedSerial: String?
+    val maskedSerial: String?,
+    val bolusReconciliationRequired: Boolean = false,
+    val bolusOperationId: String? = null,
+    val bolusState: String? = null,
+    val bolusRequestedU: Double? = null,
+    val bolusLiveCompletedU: Double? = null,
+    val bolusHistoryConfirmedU: Double? = null,
+    val bolusOperationCreatedUtc: Long? = null,
+    val bolusLastReconciliationUtc: Long? = null,
 )

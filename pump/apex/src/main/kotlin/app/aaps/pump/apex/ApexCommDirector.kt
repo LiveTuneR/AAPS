@@ -21,6 +21,7 @@ import app.aaps.pump.apex.connectivity.commands.pump.StatusV1
 import app.aaps.pump.apex.connectivity.commands.pump.StatusV2
 import app.aaps.pump.apex.connectivity.commands.pump.TDDEntry
 import app.aaps.pump.apex.connectivity.commands.pump.Version
+import app.aaps.pump.apex.bolus.ApexBolusCoordinator
 import app.aaps.pump.apex.diagnostics.ApexTrace
 import app.aaps.pump.apex.interfaces.ApexBluetoothCallback
 import app.aaps.pump.apex.interfaces.ApexDeviceInfo
@@ -51,6 +52,7 @@ class ApexCommDirector @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val apexDeviceInfo: ApexDeviceInfo,
     private val trace: ApexTrace,
+    private val bolusCoordinator: ApexBolusCoordinator? = null,
 ) : ApexBluetoothCallback {
 
     private enum class CommandSafety { READ_ONLY, IDEMPOTENT, RECONCILE_REQUIRED }
@@ -100,6 +102,7 @@ class ApexCommDirector @Inject constructor(
         val safety: CommandSafety,
         val priority: RequestPriority,
         val slotPool: RequestSlotPool,
+        val bolusOperationUuid: String? = null,
         val issued: CompletableDeferred<Boolean> = CompletableDeferred(),
     )
 
@@ -202,9 +205,15 @@ class ApexCommDirector @Inject constructor(
         submit(GetValue(apexDeviceInfo, value))
 
     suspend fun execute(command: DeviceCommand): CommandResponse? =
-        submit(command)?.singleOrNull() as? CommandResponse
+        if (command is Bolus) {
+            trace.record("bolus_direct_write_blocked", activeGeneration, fields = mapOf("reason" to "missing_durable_operation"))
+            null
+        } else submit(command)?.singleOrNull() as? CommandResponse
 
-    private suspend fun submit(command: DeviceCommand): List<PumpObjectModel>? {
+    suspend fun executeBolus(command: Bolus, operationUuid: String): CommandResponse? =
+        submit(command, operationUuid)?.singleOrNull() as? CommandResponse
+
+    private suspend fun submit(command: DeviceCommand, bolusOperationUuid: String? = null): List<PumpObjectModel>? {
         val deferred = CompletableDeferred<List<PumpObjectModel>?>()
         val operationId = trace.nextOperationId()
         val safety = classify(command)
@@ -214,7 +223,7 @@ class ApexCommDirector @Inject constructor(
             RequestPriority.START_BOLUS  -> RequestSlotPool.START_BOLUS
             RequestPriority.NORMAL       -> RequestSlotPool.NORMAL
         }
-        val request = Request(command, deferred, operationId, safety, priority, slotPool)
+        val request = Request(command, deferred, operationId, safety, priority, slotPool, bolusOperationUuid)
         val slotAcquired = withTimeoutOrNull(Configuration.REQUEST_ISSUE_TIMEOUT) {
             slots(request).acquire()
             true
@@ -501,7 +510,22 @@ class ApexCommDirector @Inject constructor(
                     "requiredGapMs" to commandGap.requiredMs,
                 ),
             )
+            if (request.command is Bolus) {
+                val operationUuid = request.bolusOperationUuid
+                val authorized = operationUuid != null && (bolusCoordinator?.beginTransportWrite(
+                    operationUuid,
+                    request.command.dose,
+                    activeGeneration,
+                ) ?: true)
+                if (!authorized) {
+                    trace.record("bolus_safety_gate_blocked_transport", activeGeneration, request.operationId)
+                    request.result.complete(null)
+                    clearPending(current)
+                    continue
+                }
+            }
             if (!apexBluetooth.send(request.command)) {
+                request.bolusOperationUuid?.let { bolusCoordinator?.markWriteFailed(it) }
                 trace.record("command_write_failed", activeGeneration, request.operationId)
                 request.result.complete(null)
                 clearPending(current)

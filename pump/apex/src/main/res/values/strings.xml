@@ -149,4 +149,14 @@
     <string name="setting_enable_experimental_control">Enable experimental pump control</string>
     <string name="setting_enable_experimental_control_summary">Allows therapy commands only for a known legacy firmware/protocol pair</string>
     <string name="diagnostic_control_blocked">Apex control is blocked: enable experimental control, select Auto firmware, and wait for firmware detection</string>
+    <string name="bolus_reconciliation_required">Previous Apex bolus delivery is uncertain. New insulin delivery is blocked pending reconciliation.</string>
+    <string name="bolus_blocked_commands">Blocked: manual, Wizard, QuickWizard, Wear/client, SMB, correction and extended bolus. Reads, reconnect, suspend and reconciliation remain available.</string>
+    <string name="diagnostic_bolus_state">Bolus reconciliation</string>
+    <string name="diagnostic_bolus_operation">Operation UUID</string>
+    <string name="diagnostic_bolus_requested">Requested</string>
+    <string name="diagnostic_bolus_live">Live completed</string>
+    <string name="diagnostic_bolus_history">Persistent history</string>
+    <string name="diagnostic_bolus_age">Operation age</string>
+    <string name="diagnostic_bolus_last_reconcile">Last reconciliation</string>
+    <string name="diagnostic_not_found">NOT FOUND</string>
 </resources>

@@ -12,4 +12,12 @@
     <string name="telemetry_exporting">Подготовка архива</string>
     <string name="telemetry_export_failed">Не удалось экспортировать телеметрию</string>
     <string name="telemetry_export_saved">Архив телеметрии сохранён</string>
+    <string name="apex7_bolus_uncertain">БОЛЮС НЕ ОПРЕДЕЛЁН</string>
+    <string name="apex7_bolus_unreconciled">Предыдущий болюс помпы не сверен</string>
+    <string name="apex7_bolus_state">Сверка болюса</string>
+    <string name="apex7_bolus_requested">Запрошенный болюс</string>
+    <string name="apex7_bolus_live">Завершено по live</string>
+    <string name="apex7_bolus_history">Подтверждено историей</string>
+    <string name="apex7_bolus_operation_age">Возраст операции</string>
+    <string name="apex7_bolus_last_reconcile">Последняя сверка</string>
 </resources>

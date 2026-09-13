@@ -40,6 +40,7 @@ import app.aaps.pump.apex.ApexCommDirector
 import app.aaps.pump.apex.ApexCompatibility
 import app.aaps.pump.apex.ApexPump
 import app.aaps.pump.apex.ApexPumpPlugin
+import app.aaps.pump.apex.bolus.ApexBolusCoordinator
 import app.aaps.pump.apex.R
 import app.aaps.pump.apex.connectivity.FirmwareVersion
 import app.aaps.pump.apex.diagnostics.ApexTrace
@@ -56,6 +57,7 @@ class ApexComposeContent(
     private val pump: ApexPump,
     private val commDirector: ApexCommDirector,
     private val trace: ApexTrace,
+    private val bolusCoordinator: ApexBolusCoordinator,
     private val preferences: Preferences,
 ) : ComposablePluginContent {
 
@@ -72,6 +74,7 @@ class ApexComposeContent(
         val lastDataTime by pump.lastDataTimeFlow.collectAsStateWithLifecycle()
         val reservoir by pump.reservoirFlow.collectAsStateWithLifecycle()
         val battery by pump.batteryFlow.collectAsStateWithLifecycle()
+        val unresolvedBolus by bolusCoordinator.active.collectAsStateWithLifecycle()
         var diagnosticTick by remember { mutableIntStateOf(0) }
         LaunchedEffect(Unit) {
             while (true) {
@@ -144,8 +147,24 @@ class ApexComposeContent(
             StatusRow(stringResource(R.string.diagnostic_queue), snapshot.queuedCommands.toString())
             StatusRow(
                 stringResource(R.string.diagnostic_control),
-                stringResource(if (controlAllowed) R.string.diagnostic_control_enabled else R.string.diagnostic_control_disabled),
+                stringResource(
+                    when {
+                        unresolvedBolus != null -> R.string.bolus_reconciliation_required
+                        controlAllowed -> R.string.diagnostic_control_enabled
+                        else -> R.string.diagnostic_control_disabled
+                    },
+                ),
             )
+            unresolvedBolus?.let { operation ->
+                StatusRow(stringResource(R.string.diagnostic_bolus_state), operation.state.name)
+                StatusRow(stringResource(R.string.diagnostic_bolus_operation), operation.operationUuid.take(8))
+                StatusRow(stringResource(R.string.diagnostic_bolus_requested), String.format("%.3f U / %d", operation.requestedUnits, operation.encodedSteps))
+                StatusRow(stringResource(R.string.diagnostic_bolus_live), operation.completedSteps?.let { String.format("%.3f U", it * 0.025) } ?: "-")
+                StatusRow(stringResource(R.string.diagnostic_bolus_history), operation.matchedPerformedSteps?.let { String.format("%.3f U", it * 0.025) } ?: stringResource(R.string.diagnostic_not_found))
+                StatusRow(stringResource(R.string.diagnostic_bolus_age), formatDuration(System.currentTimeMillis() - operation.createdUtc))
+                StatusRow(stringResource(R.string.diagnostic_bolus_last_reconcile), formatTimestamp(operation.lastReconciliationUtc ?: 0L))
+                Text(stringResource(R.string.bolus_blocked_commands))
+            }
             HorizontalDivider()
             StatusRow(
                 stringResource(R.string.diagnostic_firmware),
@@ -175,4 +194,6 @@ class ApexComposeContent(
 
     private fun formatTimestamp(timestamp: Long): String =
         if (timestamp <= 0L) "-" else DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(timestamp))
+
+    private fun formatDuration(durationMs: Long): String = "${durationMs.coerceAtLeast(0L) / 1_000}s"
 }

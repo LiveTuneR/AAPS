@@ -31,6 +31,10 @@ import app.aaps.core.utils.toHex
 import app.aaps.pump.apex.connectivity.bluetooth.ApexBLE
 import app.aaps.pump.apex.connectivity.FirmwareVersion
 import app.aaps.pump.apex.connectivity.ProtocolVersion
+import app.aaps.pump.apex.bolus.ApexBolusCoordinator
+import app.aaps.pump.apex.bolus.ApexBolusState
+import app.aaps.pump.apex.bolus.ApexHistoryCandidate
+import app.aaps.pump.apex.bolus.ApexReconciliationResult
 import app.aaps.pump.apex.connectivity.commands.device.Bolus
 import app.aaps.pump.apex.connectivity.commands.device.CancelBolus
 import app.aaps.pump.apex.connectivity.commands.device.CancelTemporaryBasal
@@ -59,6 +63,7 @@ import app.aaps.pump.apex.connectivity.commands.pump.StatusV2
 import app.aaps.pump.apex.connectivity.commands.pump.TDDEntry
 import app.aaps.pump.apex.connectivity.commands.pump.Version
 import app.aaps.pump.apex.diagnostics.ApexTrace
+import app.aaps.pump.apex.diagnostics.ApexTraceSanitizer
 import app.aaps.pump.apex.events.EventApexPumpDataChanged
 import app.aaps.pump.apex.interfaces.ApexDeviceInfo
 import app.aaps.pump.apex.utils.keys.ApexBooleanKey
@@ -103,6 +108,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     @Inject lateinit var bolusProgressData: BolusProgressData
     @Inject lateinit var notificationManager: NotificationManager
     @Inject lateinit var trace: ApexTrace
+    @Inject lateinit var bolusCoordinator: ApexBolusCoordinator
 
     companion object {
         const val COMMAND_RESPONSE_TIMEOUT = 5000L
@@ -158,6 +164,9 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         pump.isInitialized = false
         trace.capturePreviousExit()
         trace.record("service_created")
+        bolusCoordinator.current()?.let {
+            trace.record("bolus_safety_gate_enabled", fields = mapOf("operationUuid" to it.operationUuid, "state" to it.state.name, "reason" to "restored_after_process_restart"))
+        }
 
         pump.serialNumber = apexDeviceInfo.serialNumber
         preferences.observe(ApexStringKey.SerialNumber).drop(1).collectResilient(serviceScope, aapsLogger, LTag.PUMP) {
@@ -183,6 +192,12 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
 
     override fun onDestroy() {
         aapsLogger.debug(LTag.PUMP, "Service destroyed")
+        pump.inProgressBolus?.let {
+            bolusCoordinator.markTimeoutOrDisconnect(it.operationUuid, linkState.generation, "service_destroyed")
+            it.uncertain = true
+            it.completion.complete(Unit)
+        }
+        pump.inProgressBolus = null
         trace.record("service_destroyed")
         commDirector.stop()
         commDirector.setCallback(null)
@@ -345,6 +360,11 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     suspend fun bolus(dbi: DetailedBolusInfo, caller: String): ApexPump.InProgressBolus? {
         aapsLogger.debug(LTag.PUMPCOMM, "bolus - $caller")
         if (!isExperimentalControlAllowed("Bolus", caller)) return null
+        if (bolusCoordinator.safetyGateActive) {
+            trace.record("bolus_safety_gate_enabled", generation = linkState.generation, fields = mapOf("reason" to "previous_bolus_unresolved", "caller" to caller))
+            aapsLogger.error(LTag.PUMP, "Previous Apex bolus delivery is uncertain; new insulin delivery is blocked pending reconciliation")
+            return null
+        }
         if (dbi.insulin > pump.maxBolus) {
             aapsLogger.error(LTag.PUMP, "[bolus caller=$caller] Requested ${dbi.insulin}U is greater than maximum set ${pump.maxBolus}")
             return null
@@ -376,7 +396,22 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
 
         if (!checkPump("ApexService-bolus", optimize = true)) return null
 
+        val operation = bolusCoordinator.prepare(
+            pumpIdentityHash = ApexTraceSanitizer.anonymize(apexDeviceInfo.serialNumber),
+            firmware = pump.firmwareVersion?.let { "${it.firmwareMajor}.${it.firmwareMinor}" },
+            protocol = pump.firmwareVersion?.let { "${it.protocolMajor}.${it.protocolMinor}" },
+            requestedTimestamp = dbi.timestamp,
+            temporaryId = temporaryId,
+            bolusType = dbi.bolusType.name,
+            requestedUnits = dbi.insulin,
+            encodedSteps = doseRaw,
+            caller = caller,
+            queueCommandIdentity = app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()?.requestId,
+            commandGeneration = app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()?.generation,
+        ) ?: return null
+
         val inProgress = ApexPump.InProgressBolus(
+            operationUuid = operation.operationUuid,
             requestedDose = dbi.insulin,
             requestedSteps = doseRaw,
             temporaryId = temporaryId,
@@ -398,6 +433,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         }
         if (!syncResult) {
             trace.record("bolus_temp_record_failed", generation = linkState.generation)
+            bolusCoordinator.markWriteFailed(operation.operationUuid)
             return null
         }
         pump.inProgressBolus = inProgress
@@ -410,15 +446,23 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                 R.string.action_setting_bolus,
             dbi.insulin,
         ))
-        val response = executeWithResponse(Bolus(apexDeviceInfo, doseRaw))
+        val response = commDirector.executeBolus(Bolus(apexDeviceInfo, doseRaw), operation.operationUuid)?.also { processObject(it) }
         status.removeAction(action)
 
         if (response == null) {
             aapsLogger.error(LTag.PUMPCOMM, "[bolus caller=$caller] Timed out while trying to communicate with the pump")
-            inProgress.failed = true
+            val durable = bolusCoordinator.current()
+            if (durable?.state == ApexBolusState.PREPARED) {
+                bolusCoordinator.markWriteFailed(operation.operationUuid)
+                rejectBolusStart(inProgress)
+                return null
+            }
+            bolusCoordinator.markTimeoutOrDisconnect(operation.operationUuid, linkState.generation, "command_timeout_after_write")
+            inProgress.uncertain = true
             inProgress.useFallbackDose = true
             inProgress.lockHistory = false
             inProgress.completion.complete(Unit)
+            if (pump.inProgressBolus === inProgress) pump.inProgressBolus = null
             trace.record(
                 "bolus_start_uncertain",
                 generation = linkState.generation,
@@ -430,15 +474,19 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         if (response.code == CommandResponse.Code.Invalid) {
             aapsLogger.error(LTag.PUMPCOMM, "[caller=$caller] Cannot begin bolus while in special mode")
             createSpecialModeAlarm()
+            bolusCoordinator.rejectBeforeDelivery(operation.operationUuid)
             rejectBolusStart(inProgress)
             return null
         }
 
         if (response.code != CommandResponse.Code.Accepted) {
             aapsLogger.error(LTag.PUMPCOMM, "[caller=$caller] Failed to begin bolus: ${response.code.name}")
+            bolusCoordinator.rejectBeforeDelivery(operation.operationUuid)
             rejectBolusStart(inProgress)
             return null
         }
+
+        bolusCoordinator.markAccepted(operation.operationUuid, linkState.generation)
 
         // Pump sets boluses in steps of 0.025U/s for boluses <=1U, 0.05U/s for boluses >1U.
         // Add 15s as time for getting bolus info.
@@ -456,10 +504,12 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             if (!completed) {
                 aapsLogger.error(LTag.PUMPCOMM, "Bolus completion timeout; reconciling from pump history")
                 activeBolus.useFallbackDose = true
+                activeBolus.uncertain = true
+                bolusCoordinator.markTimeoutOrDisconnect(activeBolus.operationUuid, linkState.generation, "completion_timeout")
                 getBoluses("ApexService-bolus-timeout")
                 if (pump.inProgressBolus === activeBolus) {
-                    activeBolus.failed = true
                     activeBolus.completion.complete(Unit)
+                    pump.inProgressBolus = null
                 }
             }
         }
@@ -491,6 +541,10 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     suspend fun extendedBolus(dose: Double, durationMinutes: Int, caller: String): Boolean {
         aapsLogger.debug(LTag.PUMPCOMM, "extendedBolus - $caller")
         if (!isExperimentalControlAllowed("ExtendedBolus", caller)) return false
+        if (bolusCoordinator.safetyGateActive) {
+            trace.record("bolus_safety_gate_enabled", generation = linkState.generation, fields = mapOf("reason" to "extended_bolus_blocked"))
+            return false
+        }
         val doseRaw = (dose / 0.025).roundToInt()
 
         val durationRaw = durationMinutes / 15
@@ -521,6 +575,11 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     suspend fun temporaryBasal(dose: Double, durationMinutes: Int, type: PumpSync.TemporaryBasalType? = null, caller: String): Boolean {
         aapsLogger.debug(LTag.PUMPCOMM, "temporaryBasal - $caller")
         if (!isExperimentalControlAllowed("TemporaryBasal", caller)) return false
+        val scheduledRate = pump.basal?.rate ?: 0.0
+        if (bolusCoordinator.safetyGateActive && dose > scheduledRate + DOSE_EPSILON_U) {
+            trace.record("bolus_safety_gate_enabled", generation = linkState.generation, fields = mapOf("reason" to "insulin_increasing_tbr_blocked", "requestedRate" to dose, "scheduledRate" to scheduledRate))
+            return false
+        }
         if (dose > pump.maxBasal) {
             aapsLogger.error(LTag.PUMP, "[temporaryBasal caller=$caller] Requested ${dose}U is greater than maximum set ${pump.maxBasal}U")
             return false
@@ -819,15 +878,106 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         }
 
         status.addAction(ApexDriverStatus.Action.GettingBoluses, R.string.action_getting_boluses)
-        val response = getValue((if (isFullHistory) GetValue.Value.BolusHistory else GetValue.Value.LatestBoluses))
-        status.removeAction(ApexDriverStatus.Action.GettingBoluses)
-
-        if (response == null) {
-            aapsLogger.error(LTag.PUMPCOMM, "[getBoluses full=$isFullHistory caller=$caller] Timed out while trying to communicate with the pump")
-            return false
+        try {
+            var query = if (isFullHistory) GetValue.Value.BolusHistory else GetValue.Value.LatestBoluses
+            repeat(if (isFullHistory) 1 else ApexBolusCoordinator.MAX_LATEST_ATTEMPTS + 1) { attempt ->
+                val result = queryBolusHistory(query, caller) ?: return false
+                when (result) {
+                    ApexReconciliationResult.NeedLatestRetry -> {
+                        if (attempt < ApexBolusCoordinator.MAX_LATEST_ATTEMPTS - 1) delay(1_500L)
+                    }
+                    ApexReconciliationResult.NeedFullHistory -> query = GetValue.Value.BolusHistory
+                    else -> return true
+                }
+            }
+            return true
+        } finally {
+            status.removeAction(ApexDriverStatus.Action.GettingBoluses)
         }
+    }
 
-        return true
+    private suspend fun queryBolusHistory(query: GetValue.Value, caller: String): ApexReconciliationResult? {
+        val objects = commDirector.request(query)
+        if (objects == null) {
+            aapsLogger.error(LTag.PUMPCOMM, "[getBoluses query=${query.name} caller=$caller] Timed out while trying to communicate with the pump")
+            return null
+        }
+        val entries = objects.filterIsInstance<BolusEntry>().filter { it.extendedDose == 0 }
+        val candidates = entries.mapIndexed { position, entry ->
+            ApexHistoryCandidate(
+                index = entry.index,
+                timestamp = entry.dateTime.millis,
+                requestedSteps = entry.standardDose,
+                performedSteps = entry.standardPerformed,
+                rawTimestampHex = entry.command.objectData.copyOfRange(2, minOf(8, entry.command.objectData.size)).toHex(),
+                rawObjectLength = entry.command.objectData.size,
+                queryType = query.name,
+                resultPosition = position,
+            )
+        }
+        val pumpIdentity = ApexTraceSanitizer.anonymize(apexDeviceInfo.serialNumber)
+        val reconciliation = bolusCoordinator.reconcile(pumpIdentity, query.name, candidates, linkState.generation)
+        val matched = (reconciliation as? ApexReconciliationResult.Matched)?.candidate
+        entries.forEach { entry -> onBolusEntry(entry, matched?.let { it.timestamp == entry.dateTime.millis && it.index == entry.index } == true) }
+        when (reconciliation) {
+            is ApexReconciliationResult.Matched -> finalizeReconciledBolus(reconciliation)
+            is ApexReconciliationResult.StillUncertain,
+            ApexReconciliationResult.DifferentPump -> releaseRuntimeBolusAsUncertain()
+            else -> Unit
+        }
+        return reconciliation
+    }
+
+    private suspend fun finalizeReconciledBolus(result: ApexReconciliationResult.Matched) {
+        val operation = result.operation
+        val candidate = result.candidate
+        val delivered = decodeDoseSteps(candidate.performedSteps)
+        val type = runCatching { BS.Type.valueOf(operation.bolusType) }.getOrNull()
+        val synced = pumpSync.syncBolusWithTempId(
+            timestamp = candidate.timestamp,
+            temporaryId = operation.temporaryId,
+            amount = PumpInsulin(delivered),
+            pumpId = candidate.timestamp,
+            pumpType = PumpType.APEX_TRUCARE_III,
+            pumpSerial = apexDeviceInfo.serialNumber,
+            type = type,
+        )
+        if (!synced) {
+            pumpSync.syncBolusWithPumpId(
+                timestamp = candidate.timestamp,
+                pumpId = candidate.timestamp,
+                amount = PumpInsulin(delivered),
+                pumpType = PumpType.APEX_TRUCARE_III,
+                pumpSerial = apexDeviceInfo.serialNumber,
+                type = type,
+            )
+        }
+        val deltaSteps = candidate.performedSteps - operation.encodedSteps
+        trace.record(
+            "bolus_delivery_mismatch",
+            generation = linkState.generation,
+            fields = mapOf(
+                "operationUuid" to operation.operationUuid,
+                "requestedSteps" to operation.encodedSteps,
+                "performedSteps" to candidate.performedSteps,
+                "deltaSteps" to deltaSteps,
+                "requestedU" to operation.requestedUnits,
+                "deliveredU" to delivered,
+                "deltaU" to decodeDoseSteps(deltaSteps),
+            ),
+        )
+        pump.inProgressBolus?.takeIf { it.operationUuid == operation.operationUuid }?.completion?.complete(Unit)
+        if (pump.inProgressBolus?.operationUuid == operation.operationUuid) pump.inProgressBolus = null
+        getStatus("ApexService-updateAfterBolus")
+    }
+
+    private fun releaseRuntimeBolusAsUncertain() {
+        pump.inProgressBolus?.let {
+            it.uncertain = true
+            it.lockHistory = false
+            it.completion.complete(Unit)
+        }
+        pump.inProgressBolus = null
     }
 
     suspend fun getStatus(caller: String, optimize: Boolean = false, force: Boolean = false): Boolean {
@@ -932,6 +1082,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         aapsLogger.debug(LTag.PUMPCOMM, "bolus progress $dose")
         pump.inProgressBolus?.let {
             it.currentDose = dose
+            bolusCoordinator.markProgress(it.operationUuid, encodeDoseSteps(dose), linkState.generation)
             val isSMB = it.detailedBolusInfo.bolusType == BS.Type.SMB
 
             status.updateOrAddAction(
@@ -962,6 +1113,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         pump.inProgressBolus?.let {
             it.currentDose = dose
             it.lockHistory = false
+            bolusCoordinator.markLiveCompleted(it.operationUuid, encodeDoseSteps(dose), linkState.generation)
 
             status.removeAction(
                 if (it.detailedBolusInfo.bolusType == BS.Type.SMB)
@@ -998,12 +1150,15 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             }
 
             if (it.currentDose >= 0.025) {
-                it.failed = true
+                it.uncertain = true
+                bolusCoordinator.markTimeoutOrDisconnect(it.operationUuid, linkState.generation, "bolus_failed_after_progress")
                 // Request new bolus history to fixup bolus ID and delivered amount.
                 getBoluses("ApexService-onBolusFailed")
             } else {
                 aapsLogger.debug(LTag.PUMPCOMM, "bolus entirely failed!")
                 it.failed = true
+                if (cancelled) bolusCoordinator.markCancelledConfirmed(it.operationUuid)
+                else bolusCoordinator.rejectBeforeDelivery(it.operationUuid)
                 it.completion.complete(Unit)
                 pump.inProgressBolus = null
             }
@@ -1207,7 +1362,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         )
     }
 
-    private suspend fun onBolusEntry(entry: BolusEntry) {
+    private suspend fun onBolusEntry(entry: BolusEntry, matchedActiveOperation: Boolean = false) {
         // Extended bolus entries do not have duration stored, do not use them.
         if (entry.extendedDose > 0) return
 
@@ -1223,7 +1378,9 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                 "pumpPerformedSteps" to entry.standardPerformed,
                 "pumpRequestedU" to historyRequestedU,
                 "pumpPerformedU" to historyPerformedU,
-                "activeRequestedSteps" to pump.inProgressBolus?.requestedSteps,
+                "activeRequestedSteps" to bolusCoordinator.current()?.encodedSteps,
+                "rawTimestampBytes" to entry.command.objectData.copyOfRange(2, minOf(8, entry.command.objectData.size)).toHex(),
+                "rawObjectLength" to entry.command.objectData.size,
             ),
         )
 
@@ -1233,78 +1390,8 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             rxBus.send(EventApexPumpDataChanged())
         }
 
-        // Find the bolus in history and sync it.
-        // Pump may round up boluses, use 0.11 for failsafe.
-        pump.inProgressBolus?.let {
-            val delta = abs(entry.dateTime.millis - it.temporaryId)
-            // Pump saves all boluses like they were issued on the 59th second of minute.
-            // Considering that in the condition.
-            if (delta <= 1000 || (delta in 57001..62999)) {
-                aapsLogger.debug(LTag.PUMP, "Syncing current bolus [$historyRequestedU U -> $historyPerformedU U]")
-                val deltaU = abs(historyRequestedU - if (it.useFallbackDose) it.requestedDose else it.currentDose)
-                if (!(it.cancelled || it.failed) && deltaU > 0.11) {
-                    aapsLogger.debug(LTag.PUMP, "Not this bolus: $delta > 0.11")
-                    return
-                }
-
-                val syncResult = pumpSync.syncBolusWithTempId(
-                    timestamp = entry.dateTime.millis,
-                    temporaryId = it.temporaryId,
-                    amount = PumpInsulin(historyPerformedU),
-                    pumpId = entry.dateTime.millis,
-                    pumpType = PumpType.APEX_TRUCARE_III,
-                    pumpSerial = apexDeviceInfo.serialNumber,
-                    type = it.detailedBolusInfo.bolusType,
-                )
-                val performedDeltaSteps = entry.standardPerformed - it.requestedSteps
-                trace.record(
-                    "bolus_history_reconciled",
-                    generation = linkState.generation,
-                    fields = mapOf(
-                        "sentSteps" to it.requestedSteps,
-                        "pumpRequestedSteps" to entry.standardDose,
-                        "pumpPerformedSteps" to entry.standardPerformed,
-                        "performedDeltaSteps" to performedDeltaSteps,
-                    ),
-                )
-                if (!(it.cancelled || it.failed) && performedDeltaSteps != 0) {
-                    aapsLogger.warn(
-                        LTag.PUMP,
-                        "Apex bolus delivery differs from requested dose: sent=${it.requestedSteps} steps, " +
-                            "pumpRequested=${entry.standardDose} steps, pumpPerformed=${entry.standardPerformed} steps",
-                    )
-                    trace.record(
-                        "bolus_delivery_mismatch",
-                        generation = linkState.generation,
-                        fields = mapOf(
-                            "sentSteps" to it.requestedSteps,
-                            "pumpRequestedSteps" to entry.standardDose,
-                            "pumpPerformedSteps" to entry.standardPerformed,
-                            "performedDeltaSteps" to performedDeltaSteps,
-                        ),
-                    )
-                }
-                aapsLogger.debug(LTag.PUMP, "Final bolus [$historyRequestedU U -> $historyPerformedU U] sync succeeded? $syncResult")
-                if (!syncResult) {
-                    pumpSync.syncBolusWithPumpId(
-                        timestamp = entry.dateTime.millis,
-                        pumpId = entry.dateTime.millis,
-                        amount = PumpInsulin(historyPerformedU),
-                        pumpType = PumpType.APEX_TRUCARE_III,
-                        pumpSerial = apexDeviceInfo.serialNumber,
-                        type = it.detailedBolusInfo.bolusType,
-                    )
-                }
-                it.completion.complete(Unit)
-                if (pump.inProgressBolus === it) pump.inProgressBolus = null
-
-                getStatus("ApexService-updateAfterBolus")
-                return
-            }
-            if (entry.index < 2) return
-        }
-
-        // Otherwise, just sync the bolus with the DB
+        // The matched entry is finalized exactly once through its durable temporary ID.
+        if (matchedActiveOperation) return
         pumpSync.syncBolusWithPumpId(
             timestamp = entry.dateTime.millis,
             pumpId = entry.dateTime.millis,
@@ -1477,8 +1564,14 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     private fun handleDisconnect() {
         aapsLogger.debug(LTag.PUMPCOMM, "onDisconnect")
         pump.isInitialized = false
-        pump.inProgressBolus?.lockHistory = false
-        pump.inProgressBolus?.useFallbackDose = true
+        pump.inProgressBolus?.let {
+            it.lockHistory = false
+            it.useFallbackDose = true
+            it.uncertain = true
+            bolusCoordinator.markTimeoutOrDisconnect(it.operationUuid, linkState.generation, "ble_disconnect")
+            it.completion.complete(Unit)
+        }
+        pump.inProgressBolus = null
         heartbeatJob?.cancel()
         lastConnectedTimestamp = System.currentTimeMillis()
 

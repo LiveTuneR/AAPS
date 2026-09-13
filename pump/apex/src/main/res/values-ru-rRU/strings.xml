@@ -134,4 +134,14 @@
     <string name="setting_enable_experimental_control">Разрешить экспериментальное управление помпой</string>
     <string name="setting_enable_experimental_control_summary">Разрешает команды терапии только для известной пары прошивки и протокола</string>
     <string name="diagnostic_control_blocked">Управление Apex заблокировано: включите экспериментальное управление, выберите версию «Авто» и дождитесь определения прошивки</string>
+    <string name="bolus_reconciliation_required">Доставка предыдущего болюса Apex не определена. Новый инсулин заблокирован до сверки.</string>
+    <string name="bolus_blocked_commands">Заблокированы: ручной болюс, Wizard, QuickWizard, Wear/client, SMB, коррекция и расширенный болюс. Чтение, переподключение, приостановка и сверка доступны.</string>
+    <string name="diagnostic_bolus_state">Сверка болюса</string>
+    <string name="diagnostic_bolus_operation">UUID операции</string>
+    <string name="diagnostic_bolus_requested">Запрошено</string>
+    <string name="diagnostic_bolus_live">Завершено по live</string>
+    <string name="diagnostic_bolus_history">Постоянная история</string>
+    <string name="diagnostic_bolus_age">Возраст операции</string>
+    <string name="diagnostic_bolus_last_reconcile">Последняя сверка</string>
+    <string name="diagnostic_not_found">НЕ НАЙДЕНО</string>
 </resources>

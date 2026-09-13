@@ -165,4 +165,37 @@ class TherapyTelemetryStoreTest {
         assertTrue(cleaned.toString().length<1024)
         assertTrue(cleaned.isNull("wearGraph"))
     }
+
+    @Test fun `sensor phase offset does not create an initial window gap`() {
+        var now = start + 43_000L
+        val store = TherapyTelemetryStore(File(directory, "phase"), "head", { now })
+        repeat(31) { minute -> now = start + 43_000L + minute * 60_000L; store.append("CGM", bg(now)) }
+        val manifest = store.export(File(directory, "phase.zip"), start, now, 60_000L)
+        assertEquals(31, manifest.getInt("actualCgmCount"))
+        assertEquals(31, manifest.getInt("expectedCgmCount"))
+        assertEquals(0, manifest.getJSONArray("missingIntervals").length())
+        assertTrue(manifest.getBoolean("coverageVerified"))
+        store.close()
+    }
+
+    @Test fun `old integrity event does not poison a later export`() {
+        var now = start
+        val store = TherapyTelemetryStore(File(directory, "ranged"), "head", { now })
+        store.integrity("RECORD_LOSS", start, start + 1_000L, 1, "old")
+        now = start + 86_400_000L
+        store.append("CGM", bg(now))
+        val manifest = store.export(File(directory, "later.zip"), now, now, 60_000L)
+        assertEquals(0, manifest.getJSONArray("overlappingIntegrityEvents").length())
+        assertTrue(manifest.getBoolean("coverageVerified"))
+        store.close()
+    }
+
+    @Test fun `uncommitted admission survives restart as bounded loss`() {
+        val file = File(directory, "admission.jsonl")
+        TelemetryAdmissionLedger(file).admit(start + 1_000L, "CGM")
+        val recovered = TelemetryAdmissionLedger(file).pendingLoss()
+        assertNotNull(recovered)
+        assertEquals(start + 1_000L, recovered!!.firstUtc)
+        assertEquals(1L, recovered.count)
+    }
 }

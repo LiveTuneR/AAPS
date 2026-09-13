@@ -70,6 +70,9 @@ jobs:
             ui/build/test-results/**/*.xml
             ui/build/reports/apex7-screenshots/*.png
             ui/build/reports/tests/**
+            doc/APEX7_BOLUS_BASELINE.md
+            doc/APEX_BOLUS_DEVICE_ACCEPTANCE_RU.md
+            pump/apex/src/test/resources/apex/incidents/*.json
           retention-days: 14
 
       - name: Decode signing key
@@ -110,7 +113,7 @@ jobs:
 
       - name: Build signed APK
         run: |
-          ./gradlew :app:assembleFullRelease --no-daemon --max-workers=2 --console=plain \
+          ./gradlew :app:assembleFullRelease :wear:assembleFullRelease --no-daemon --max-workers=2 --console=plain \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseParallelGC -Xss1m" \
             -Pandroid.injected.signing.store.file="$KEYSTORE_FILE" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
@@ -121,20 +124,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk=$(find app/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
-          [[ -n "$apk" ]] || { echo "APK was not produced"; exit 1; }
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           short_sha=${GITHUB_SHA:0:7}
-          output="aaps-4.0-apex-$short_sha.apk"
-          "$apksigner" verify --verbose --print-certs "$apk" | tee "$output.signature.txt"
           expected_cert=1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084
-          actual_cert=$(awk '/certificate SHA-256 digest:/ { print $NF }' "$output.signature.txt" | sort -u)
-          [[ "$actual_cert" = "$expected_cert" ]] || { echo "Signing certificate does not match the supplied normal 3.4.2.3 APK"; exit 1; }
-          cp "$apk" "$output"
-          sha256sum "$output" > "$output.sha256"
-          printf 'commit=%s\nrun=%s\nstatus=EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED\n' \
-            "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$output.provenance.txt"
-          echo "APK_OUTPUT=$output" >> "$GITHUB_ENV"
+          app_apk=$(find app/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
+          wear_apk=$(find wear/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
+          [[ -n "$app_apk" && -n "$wear_apk" ]] || { echo "Phone or Wear APK was not produced"; exit 1; }
+          for spec in "phone:$app_apk:aaps-4.0-apex-$short_sha.apk" "wear:$wear_apk:aaps-4.0-apex-wear-$short_sha.apk"; do
+            kind=${spec%%:*}; rest=${spec#*:}; apk=${rest%%:*}; output=${rest#*:}
+            "$apksigner" verify --verbose --print-certs "$apk" | tee "$output.signature.txt"
+            actual_cert=$(awk '/certificate SHA-256 digest:/ { print $NF }' "$output.signature.txt" | sort -u)
+            [[ "$actual_cert" = "$expected_cert" ]] || { echo "$kind signing certificate mismatch"; exit 1; }
+            cp "$apk" "$output"
+            sha256sum "$output" > "$output.sha256"
+            printf 'artifact=%s\ncommit=%s\nrun=%s\nstatus=EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED\n' \
+              "$kind" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$output.provenance.txt"
+          done
+          echo "APK_OUTPUT=aaps-4.0-apex-$short_sha.apk" >> "$GITHUB_ENV"
+          echo "WEAR_OUTPUT=aaps-4.0-apex-wear-$short_sha.apk" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -144,6 +151,10 @@ jobs:
             ${{ env.APK_OUTPUT }}.sha256
             ${{ env.APK_OUTPUT }}.provenance.txt
             ${{ env.APK_OUTPUT }}.signature.txt
+            ${{ env.WEAR_OUTPUT }}
+            ${{ env.WEAR_OUTPUT }}.sha256
+            ${{ env.WEAR_OUTPUT }}.provenance.txt
+            ${{ env.WEAR_OUTPUT }}.signature.txt
           if-no-files-found: error
           retention-days: 14
 

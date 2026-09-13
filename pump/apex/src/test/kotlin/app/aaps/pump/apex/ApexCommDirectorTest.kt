@@ -31,6 +31,22 @@ import java.util.concurrent.CopyOnWriteArrayList
 class ApexCommDirectorTest : TestBase() {
 
     @Test
+    fun `direct bolus without durable operation is blocked below plugin layer`() = runTest {
+        val fixture = fixture(autoRespondToWrites = true)
+        try {
+            fixture.director.connect()
+            runCurrent()
+            fixture.transport.connected(1)
+            runCurrent()
+            assertThat(fixture.director.execute(Bolus(fixture.info, 40))).isNull()
+            assertThat(fixture.transport.sent).isEmpty()
+        } finally {
+            fixture.director.shutdown()
+            runCurrent()
+        }
+    }
+
+    @Test
     fun `late transport callbacks cannot leave backoff or stopped state`() = runTest {
         val fixture = fixture()
         val director = fixture.director
@@ -75,7 +91,7 @@ class ApexCommDirectorTest : TestBase() {
             repeat(Configuration.COMM_BUFFERS_CAPACITY) {
                 backgroundScope.launch { director.request(GetValue.Value.StatusV2) }
             }
-            backgroundScope.launch { director.execute(Bolus(fixture.info, 230)) }
+            backgroundScope.launch { director.executeBolus(Bolus(fixture.info, 230), "test-operation") }
             backgroundScope.launch { director.execute(CancelBolus(fixture.info)) }
             runCurrent()
             assertThat(director.diagnosticSnapshot().queuedCommands)

@@ -6,6 +6,7 @@ import android.os.SystemClock
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.logging.LoggerUtils
 import app.aaps.core.interfaces.telemetry.TherapyEventType
 import app.aaps.core.interfaces.telemetry.TherapyTelemetry
 import app.aaps.core.interfaces.telemetry.TherapyTelemetryHealth
@@ -30,13 +31,15 @@ import kotlin.coroutines.resumeWithException
 class TherapyTelemetryImpl @Inject constructor(
     private val context: Context,
     private val config: Config,
-    private val logger: AAPSLogger
+    private val logger: AAPSLogger,
+    private val loggerUtils: LoggerUtils,
 ) : TherapyTelemetry {
     private val _health = MutableStateFlow(TherapyTelemetryHealth())
     override val health = _health.asStateFlow()
     private val started = AtomicBoolean()
     private val drops = AtomicLong()
     private val crashMarker by lazy { TherapyCrashMarker(File(context.filesDir,"therapy-crash-v1")) }
+    private val admissionLedger by lazy { TelemetryAdmissionLedger(File(context.filesDir,"therapy-telemetry-admission-v1.jsonl")) }
     private val writer = ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,ArrayBlockingQueue(4096),
         { action -> Thread(action,"TherapyTelemetry").apply { isDaemon = true } }, ThreadPoolExecutor.AbortPolicy())
     private val store by lazy { TherapyTelemetryStore(File(context.filesDir,"therapy-telemetry-v1"),config.HEAD,
@@ -44,12 +47,18 @@ class TherapyTelemetryImpl @Inject constructor(
 
     override fun start() {
         if (!started.compareAndSet(false,true)) return
-        record(TherapyEventType.PROCESS_START,JSONObject().put("appVersion",config.VERSION_NAME).put("model",Build.MODEL)
-            .put("androidApi",Build.VERSION.SDK_INT).put("buildSha",config.HEAD))
         writer.execute {
-            try { crashMarker.recover { store.append(TherapyEventType.ERROR.name,TelemetrySanitizer.clean(it)) } }
+            try {
+                admissionLedger.pendingLoss()?.let { loss ->
+                    store.integrity("RECORD_LOSS", loss.firstUtc, loss.lastUtc, loss.count, "accepted_not_committed_after_restart")
+                    admissionLedger.acknowledgeLoss(loss.throughSequence)
+                }
+                crashMarker.recover { store.append(TherapyEventType.ERROR.name,TelemetrySanitizer.clean(it)) }
+            }
             catch (error: Exception) { failed(error) }
         }
+        record(TherapyEventType.PROCESS_START,JSONObject().put("appVersion",config.VERSION_NAME).put("model",Build.MODEL)
+            .put("androidApi",Build.VERSION.SDK_INT).put("buildSha",config.HEAD))
         val previous=Thread.getDefaultUncaughtExceptionHandler()
         if (previous!=null) Thread.setDefaultUncaughtExceptionHandler { thread,error ->
             try { crashMarker.write(error,System.currentTimeMillis()) } catch (_: Throwable) { /* Preserve original termination even under OOM/disk failure. */ }
@@ -63,10 +72,12 @@ class TherapyTelemetryImpl @Inject constructor(
             val observedUtc = System.currentTimeMillis()
             val observedMonotonic = SystemClock.elapsedRealtimeNanos()
             val observedZone = ZoneId.systemDefault()
+            val admission = admissionLedger.admit(observedUtc, type.name)
             writer.execute {
                 try {
                     flushDrops()
                     val accepted = store.append(type.name,copied,generation,correlationId,observedUtc,observedMonotonic,observedZone)
+                    admissionLedger.commit(admission.sequence)
                     refreshHealth()
                     if (!accepted) logger.error(LTag.CORE,"TELEMETRY_STORAGE_PRESSURE writerDrops=${store.writerDrops}")
                 } catch (error: Exception) { failed(error) }
@@ -89,8 +100,19 @@ class TherapyTelemetryImpl @Inject constructor(
             var output: File? = null
             try {
                 flushDrops()
-                output = File.createTempFile("aaps-therapy-", ".zip",context.cacheDir)
-                store.export(output,startUtc,endUtc,expectedCgmIntervalMs)
+                output = File(context.cacheDir, "AAPS_APEX_DEVICE_TEST_${System.currentTimeMillis()}_${config.HEAD.take(7)}.zip")
+                val supportFiles = buildList {
+                    File(loggerUtils.logDirectory).listFiles()?.filter { it.isFile && it.lastModified() >= startUtc && it.lastModified() <= endUtc + 86_400_000L }?.let(::addAll)
+                    File(context.filesDir, "apex/bolus-operations.json").takeIf(File::isFile)?.let(::add)
+                    File(context.filesDir, "apex-diagnostics").listFiles()?.filter { it.isFile && it.lastModified() >= startUtc }?.let(::addAll)
+                }
+                store.export(
+                    output, startUtc, endUtc, expectedCgmIntervalMs, supportFiles,
+                    JSONObject().put("sourceSha", config.HEAD).put("appVersion", config.VERSION_NAME)
+                        .put("phoneModel", Build.MODEL).put("androidApi", Build.VERSION.SDK_INT)
+                        .put("sessionStartUtc", startUtc).put("sessionEndUtc", endUtc)
+                        .put("status", "EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED"),
+                )
                 refreshHealth()
                 if (continuation.isActive) continuation.resume(output) else output.delete()
             } catch (error: Exception) {
