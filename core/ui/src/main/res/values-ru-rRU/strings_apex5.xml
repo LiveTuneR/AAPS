@@ -21,7 +21,7 @@
     <string comment="below &quot;in range&quot;" name="below">Ниже целевых</string>
     <string name="bg_mgdl">%1$d мг/дл</string>
     <string name="bg_mmol">%1$.1f ммоль/л</string>
-    <string comment="Short label for Blood Glucose Impact graph series" name="bgi_shortname">-БГИ</string>
+    <string comment="Short label for Blood Glucose Impact graph series" name="bgi_shortname">ВЛИЯНИЕ ИНС.</string>
     <string name="ble_permissions_missing">Разрешения Bluetooth не предоставлены. Пожалуйста, предоставьте их в настройках приложения.</string>
     <string name="ble_scan_scanning">Сканирование устройств…</string>
     <string name="ble_scan_select_pump">Выберите свой помпа из списка ниже</string>
@@ -64,7 +64,7 @@
     <string name="clear_cloud_settings_message">Это переключит на локальное хранилище и очистит авторизацию. Продолжить?</string>
     <string name="clientcontrol_action_activate_scene">Активировать сцену %1$s</string>
     <string name="clientcontrol_action_cancel_temp_target">Отменить временную цель</string>
-    <string name="clientcontrol_action_deactivate_scene">Конечная сцена</string>
+    <string name="clientcontrol_action_deactivate_scene">Завершить сцену</string>
     <string name="clientcontrol_action_deliver_bolus">Ввести болюс</string>
     <string name="clientcontrol_action_set_temp_target">Установить временную цель</string>
     <string name="clientcontrol_action_update_settings">Обновить настройки</string>
@@ -130,7 +130,7 @@
     <string name="delete_logs">Удалить записи журнала</string>
     <string name="description_maintenance">Предоставляет возможности для обслуживания (например. отправку логов, удаление логов).</string>
     <string name="detailed_14_days">Подробно 14 дней</string>
-    <string name="deviation_shortname">ОТКЛН</string>
+    <string name="deviation_shortname">ОТКЛОНЕНИЯ</string>
     <string name="device_maintenance">Обслуживание устройства</string>
     <string name="devslope_shortname">ЛИНОТКЛН</string>
     <string name="discard">Завершить пользование</string>
@@ -371,7 +371,7 @@
     <string name="scene_conflict_active_running_mode">Активный режим бега будет заменен</string>
     <string name="scene_conflict_active_scene">Активная сцена \"%1$s\" завершится первой.</string>
     <string name="scene_conflict_active_tt">Активная временная цель будет заменена.</string>
-    <string name="scene_deactivate">Конечная сцена</string>
+    <string name="scene_deactivate">Завершить сцену</string>
     <string name="scene_desc">Предварительные настройки ситуации — активируйте несколько действий одновременно</string>
     <string name="scene_duration_indefinite">Бессрочно (завершение вручную)</string>
     <string name="scene_editor_disabled">Отключено</string>
@@ -556,7 +556,7 @@
     <string name="uploader_short">ЗАГРУЗ</string>
     <string name="user_entry">Запись пользователя</string>
     <string name="value_with_unit" comment="A numeric value followed by its unit, when no dedicated value template exists. %1$s = value, %2$s = unit. Example: 120 mg/dl">%1$s %2$s</string>
-    <string name="variable_sensitivity_shortname">ПЕРЕМЧУВСТВ</string>
+    <string name="variable_sensitivity_shortname">ЧУВСТВ.</string>
     <string comment="above 13.9" name="veryHigh">Очень высокий</string>
     <string comment="below 3.1" name="veryLow">Очень низкий</string>
     <string name="waiting_for_pump">Ждем помпу…</string>
