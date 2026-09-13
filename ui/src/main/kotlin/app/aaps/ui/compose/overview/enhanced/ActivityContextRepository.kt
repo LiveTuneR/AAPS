@@ -17,6 +17,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 import java.time.Instant
 
 /** Private on-device cache; there is intentionally no exported broadcast receiver or therapy consumer. */
@@ -48,13 +49,13 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
 
     suspend fun refresh(now: Long = System.currentTimeMillis()) {
         val started = SystemClock.elapsedRealtime()
-        val status = HealthConnectClient.getSdkStatus(context)
-        if (status != HealthConnectClient.SDK_AVAILABLE) {
-            sourceHealth(ActivityAccess.HEALTH_CONNECT_UNAVAILABLE, latencyMs = SystemClock.elapsedRealtime() - started)
-            return
-        }
-        val client = HealthConnectClient.getOrCreate(context)
         try {
+            val status = HealthConnectClient.getSdkStatus(context)
+            if (status != HealthConnectClient.SDK_AVAILABLE) {
+                sourceHealth(ActivityAccess.HEALTH_CONNECT_UNAVAILABLE, latencyMs = SystemClock.elapsedRealtime() - started)
+                return
+            }
+            val client = HealthConnectClient.getOrCreate(context)
             val granted = client.permissionController.getGrantedPermissions()
             if (!granted.containsAll(requiredPermissions)) {
                 sourceHealth(ActivityAccess.PERMISSION_REQUIRED, latencyMs = SystemClock.elapsedRealtime() - started)
@@ -72,6 +73,8 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
                 now,
                 SystemClock.elapsedRealtime() - started,
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: SecurityException) {
             sourceHealth(ActivityAccess.PERMISSION_REQUIRED, latencyMs = SystemClock.elapsedRealtime() - started)
         } catch (_: Exception) {
@@ -130,7 +133,9 @@ private fun ExerciseSessionRecord.toActivityEvent(
     val originPackage = metadata.dataOrigin.packageName
     val source = if (originPackage.contains("shealth", ignoreCase = true) || originPackage.contains("samsung", ignoreCase = true))
         ActivitySource.SAMSUNG_HEALTH else ActivitySource.PHONE
-    val samples = heartRateRecords.filter { it.endTime >= startTime && it.startTime <= endTime }
+    val samples = heartRateRecords.filter {
+        it.metadata.dataOrigin.packageName == originPackage && it.endTime >= startTime && it.startTime <= endTime
+    }
         .flatMap(HeartRateRecord::samples).sortedBy { it.time }
     val device = metadata.device?.let { listOfNotNull(it.manufacturer, it.model).joinToString(" ").ifBlank { null } }
     return ActivityEvent(
@@ -151,7 +156,9 @@ private fun ExerciseSessionRecord.toActivityEvent(
         lastUpdatedAt = metadata.lastModifiedTime.toEpochMilli(),
         sourceDevice = device,
         sourcePackage = originPackage,
-        steps = stepRecords.filter { it.endTime >= startTime && it.startTime <= endTime }.sumOf(StepsRecord::count).takeIf { it > 0 },
+        steps = stepRecords.filter {
+            it.metadata.dataOrigin.packageName == originPackage && it.endTime >= startTime && it.startTime <= endTime
+        }.sumOf(StepsRecord::count).takeIf { it > 0 },
         heartRate = samples.map { it.beatsPerMinute.toDouble() }.average().takeIf(Double::isFinite),
         latestHeartRate = samples.lastOrNull()?.beatsPerMinute?.toDouble(),
     )
