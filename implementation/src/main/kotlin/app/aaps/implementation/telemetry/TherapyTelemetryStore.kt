@@ -288,7 +288,10 @@ internal class TherapyTelemetryStore(
             if (integrityLedger.exists()) integrityLedger.useLines { lines -> lines.forEach { line ->
                 runCatching { JSONObject(line) }.getOrNull()?.takeIf { it.optLong("toUtc") >= from && it.optLong("fromUtc") <= to }?.let {
                     overlappingIntegrity.put(it); gaps.put(JSONObject(it.toString()).put("reason", it.optString("type")))
-                    File(temp,"errors.jsonl").appendText(it.toString() + "\n")
+                    val exported = JSONObject().put("schemaVersion", 1)
+                        .put("type", if (it.optString("type") == "STORAGE_PRESSURE") "TELEMETRY_STORAGE_PRESSURE" else "TELEMETRY_INTEGRITY")
+                        .put("source", "TIME_RANGED_INTEGRITY_LEDGER").put("data", it)
+                    File(temp,"errors.jsonl").appendText(exported.toString() + "\n")
                 }
             } }
             if (corrupt > 0) gaps.put(JSONObject().put("reason","UNREADABLE_SEGMENT_IN_RANGE").put("count",corrupt))
