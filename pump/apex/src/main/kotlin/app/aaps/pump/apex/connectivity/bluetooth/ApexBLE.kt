@@ -110,8 +110,8 @@ class ApexBLE @Inject constructor(
         }
     }
 
-    override suspend fun send(command: DeviceCommand): ApexTransportWriteOutcome = withContext(dispatcher) {
-        transportMutex.withLock { sendInternal(command) }
+    override suspend fun send(command: DeviceCommand, onFirstWriteIssued: (() -> Unit)?): ApexTransportWriteOutcome = withContext(dispatcher) {
+        transportMutex.withLock { sendInternal(command, onFirstWriteIssued) }
     }
 
     @SuppressLint("MissingPermission")
@@ -198,7 +198,7 @@ class ApexBLE @Inject constructor(
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun sendInternal(command: DeviceCommand): ApexTransportWriteOutcome {
+    private suspend fun sendInternal(command: DeviceCommand, onFirstWriteIssued: (() -> Unit)?): ApexTransportWriteOutcome {
         val gatt = bluetoothGatt
         val characteristic = writeCharacteristic
         val generation = activeGeneration
@@ -251,6 +251,7 @@ class ApexBLE @Inject constructor(
                 failCurrent("write_not_issued")
                 return rejectedWriteOutcome(anyChunkIssued)
             }
+            if (!anyChunkIssued) onFirstWriteIssued?.invoke()
             anyChunkIssued = true
             val writeStatus = withTimeoutOrNull(WRITE_TIMEOUT_MS) { ack.await() }
             writeAck = null

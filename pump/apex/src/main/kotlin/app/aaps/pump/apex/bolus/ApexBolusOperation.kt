@@ -14,6 +14,7 @@ enum class ApexBolusState {
     DEFINITELY_NOT_DELIVERED,
     CANCELLED_CONFIRMED,
     PARTIALLY_DELIVERED_CONFIRMED,
+    OPERATOR_CONFIRMED_NOT_DELIVERED,
     DELIVERY_UNCERTAIN,
     RECONCILIATION_REQUIRED;
 
@@ -24,11 +25,12 @@ enum class ApexBolusState {
             DEFINITELY_NOT_DELIVERED,
             CANCELLED_CONFIRMED,
             PARTIALLY_DELIVERED_CONFIRMED,
+            OPERATOR_CONFIRMED_NOT_DELIVERED,
         )
 }
 
 data class ApexBolusOperation(
-    val schemaVersion: Int = 1,
+    var schemaVersion: Int = 2,
     val operationUuid: String,
     val pumpIdentityHash: String,
     val firmware: String?,
@@ -46,6 +48,11 @@ data class ApexBolusOperation(
     var state: ApexBolusState = ApexBolusState.PREPARED,
     var commandSentUtc: Long? = null,
     var commandSentElapsed: Long? = null,
+    var transportWriteAttempted: Boolean? = false,
+    var transportWriteIssued: Boolean? = false,
+    var transportOutcome: String? = "NOT_ATTEMPTED",
+    var writeStartedUtc: Long? = null,
+    var writeCallbackUtc: Long? = null,
     var acceptedUtc: Long? = null,
     var acceptedObserved: Boolean = false,
     var highestProgressSteps: Int = 0,
@@ -54,13 +61,26 @@ data class ApexBolusOperation(
     var cancelled: Boolean = false,
     var timedOut: Boolean = false,
     var lastReconciliationUtc: Long? = null,
+    var latestHistoryCheckedUtc: Long? = null,
+    var fullHistoryCheckedUtc: Long? = null,
+    var latestHistoryResult: String? = null,
+    var fullHistoryResult: String? = null,
+    var reconciliationReason: String? = null,
     var reconciliationAttempts: Int = 0,
+    var automaticAttempts: Int = 0,
+    var manualAttempts: Int = 0,
+    var lastAttemptUtc: Long? = null,
+    var nextAutomaticAttemptUtc: Long? = null,
     var latestHistoryAttempts: Int = 0,
     var fullHistoryAttempts: Int = 0,
     var matchedPumpHistoryId: Long? = null,
     var matchedPumpHistoryTime: Long? = null,
     var matchedRequestedSteps: Int? = null,
     var matchedPerformedSteps: Int? = null,
+    var legacyMigrated: Boolean = false,
+    var operatorConfirmedNotDeliveredUtc: Long? = null,
+    var operatorConfirmation: Boolean = false,
+    var operatorConfirmationBuildSha: String? = null,
 ) {
     val unresolved: Boolean get() = !state.terminal
 
@@ -83,6 +103,11 @@ data class ApexBolusOperation(
         .put("state", state.name)
         .put("commandSentUtc", commandSentUtc)
         .put("commandSentElapsed", commandSentElapsed)
+        .put("transportWriteAttempted", transportWriteAttempted)
+        .put("transportWriteIssued", transportWriteIssued)
+        .put("transportOutcome", transportOutcome)
+        .put("writeStartedUtc", writeStartedUtc)
+        .put("writeCallbackUtc", writeCallbackUtc)
         .put("acceptedUtc", acceptedUtc)
         .put("acceptedObserved", acceptedObserved)
         .put("highestProgressSteps", highestProgressSteps)
@@ -91,13 +116,26 @@ data class ApexBolusOperation(
         .put("cancelled", cancelled)
         .put("timedOut", timedOut)
         .put("lastReconciliationUtc", lastReconciliationUtc)
+        .put("latestHistoryCheckedUtc", latestHistoryCheckedUtc)
+        .put("fullHistoryCheckedUtc", fullHistoryCheckedUtc)
+        .put("latestHistoryResult", latestHistoryResult)
+        .put("fullHistoryResult", fullHistoryResult)
+        .put("reconciliationReason", reconciliationReason)
         .put("reconciliationAttempts", reconciliationAttempts)
+        .put("automaticAttempts", automaticAttempts)
+        .put("manualAttempts", manualAttempts)
+        .put("lastAttemptUtc", lastAttemptUtc)
+        .put("nextAutomaticAttemptUtc", nextAutomaticAttemptUtc)
         .put("latestHistoryAttempts", latestHistoryAttempts)
         .put("fullHistoryAttempts", fullHistoryAttempts)
         .put("matchedPumpHistoryId", matchedPumpHistoryId)
         .put("matchedPumpHistoryTime", matchedPumpHistoryTime)
         .put("matchedRequestedSteps", matchedRequestedSteps)
         .put("matchedPerformedSteps", matchedPerformedSteps)
+        .put("legacyMigrated", legacyMigrated)
+        .put("operatorConfirmedNotDeliveredUtc", operatorConfirmedNotDeliveredUtc)
+        .put("operatorConfirmation", operatorConfirmation)
+        .put("operatorConfirmationBuildSha", operatorConfirmationBuildSha)
 
     companion object {
         fun fromJson(json: JSONObject) = ApexBolusOperation(
@@ -119,6 +157,11 @@ data class ApexBolusOperation(
             state = runCatching { ApexBolusState.valueOf(json.getString("state")) }.getOrDefault(ApexBolusState.RECONCILIATION_REQUIRED),
             commandSentUtc = json.optLongOrNull("commandSentUtc"),
             commandSentElapsed = json.optLongOrNull("commandSentElapsed"),
+            transportWriteAttempted = json.optBooleanOrNull("transportWriteAttempted"),
+            transportWriteIssued = json.optBooleanOrNull("transportWriteIssued"),
+            transportOutcome = json.optString("transportOutcome").takeIf(String::isNotBlank),
+            writeStartedUtc = json.optLongOrNull("writeStartedUtc"),
+            writeCallbackUtc = json.optLongOrNull("writeCallbackUtc"),
             acceptedUtc = json.optLongOrNull("acceptedUtc"),
             acceptedObserved = json.optBoolean("acceptedObserved"),
             highestProgressSteps = json.optInt("highestProgressSteps"),
@@ -127,13 +170,26 @@ data class ApexBolusOperation(
             cancelled = json.optBoolean("cancelled"),
             timedOut = json.optBoolean("timedOut"),
             lastReconciliationUtc = json.optLongOrNull("lastReconciliationUtc"),
+            latestHistoryCheckedUtc = json.optLongOrNull("latestHistoryCheckedUtc"),
+            fullHistoryCheckedUtc = json.optLongOrNull("fullHistoryCheckedUtc"),
+            latestHistoryResult = json.optString("latestHistoryResult").takeIf(String::isNotBlank),
+            fullHistoryResult = json.optString("fullHistoryResult").takeIf(String::isNotBlank),
+            reconciliationReason = json.optString("reconciliationReason").takeIf(String::isNotBlank),
             reconciliationAttempts = json.optInt("reconciliationAttempts"),
+            automaticAttempts = json.optInt("automaticAttempts"),
+            manualAttempts = json.optInt("manualAttempts"),
+            lastAttemptUtc = json.optLongOrNull("lastAttemptUtc"),
+            nextAutomaticAttemptUtc = json.optLongOrNull("nextAutomaticAttemptUtc"),
             latestHistoryAttempts = json.optInt("latestHistoryAttempts"),
             fullHistoryAttempts = json.optInt("fullHistoryAttempts"),
             matchedPumpHistoryId = json.optLongOrNull("matchedPumpHistoryId"),
             matchedPumpHistoryTime = json.optLongOrNull("matchedPumpHistoryTime"),
             matchedRequestedSteps = json.optIntOrNull("matchedRequestedSteps"),
             matchedPerformedSteps = json.optIntOrNull("matchedPerformedSteps"),
+            legacyMigrated = json.optBoolean("legacyMigrated"),
+            operatorConfirmedNotDeliveredUtc = json.optLongOrNull("operatorConfirmedNotDeliveredUtc"),
+            operatorConfirmation = json.optBoolean("operatorConfirmation"),
+            operatorConfirmationBuildSha = json.optString("operatorConfirmationBuildSha").takeIf(String::isNotBlank),
         )
     }
 }
@@ -169,3 +225,4 @@ sealed interface ApexReconciliationResult {
 
 private fun JSONObject.optLongOrNull(key: String): Long? = if (isNull(key) || !has(key)) null else optLong(key)
 private fun JSONObject.optIntOrNull(key: String): Int? = if (isNull(key) || !has(key)) null else optInt(key)
+private fun JSONObject.optBooleanOrNull(key: String): Boolean? = if (isNull(key) || !has(key)) null else optBoolean(key)

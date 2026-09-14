@@ -48,6 +48,7 @@ import app.aaps.pump.apex.misc.BatteryType
 import app.aaps.pump.apex.compose.ApexComposeContent
 import app.aaps.pump.apex.bolus.ApexBolusCoordinator
 import app.aaps.pump.apex.diagnostics.ApexTrace
+import app.aaps.pump.apex.diagnostics.ApexTherapyAttemptTracker
 import app.aaps.pump.apex.utils.keys.ApexBooleanKey
 import app.aaps.pump.apex.utils.keys.ApexDoubleKey
 import app.aaps.pump.apex.utils.keys.ApexStringKey
@@ -82,6 +83,7 @@ class ApexPumpPlugin @Inject constructor(
     private val commDirector: ApexCommDirector,
     private val trace: ApexTrace,
     private val bolusCoordinator: ApexBolusCoordinator,
+    private val therapyAttemptTracker: ApexTherapyAttemptTracker,
 ): PumpPluginBase(
     PluginDescription()
         .mainType(PluginType.PUMP)
@@ -158,6 +160,7 @@ class ApexPumpPlugin @Inject constructor(
         val snapshot = commDirector.diagnosticSnapshot()
         val version = pump.firmwareVersion
         val unresolved = bolusCoordinator.current()
+        val therapyAttempt = therapyAttemptTracker.current()
         return app.aaps.core.data.diagnostics.PumpDiagnosticState(
             snapshot.state, snapshot.generation, snapshot.queuedCommands, snapshot.pendingCommand,
             snapshot.pendingAgeMs, snapshot.progressAgeMs,
@@ -172,6 +175,17 @@ class ApexPumpPlugin @Inject constructor(
             bolusHistoryConfirmedU = unresolved?.matchedPerformedSteps?.let(ApexService::decodeDoseSteps),
             bolusOperationCreatedUtc = unresolved?.createdUtc,
             bolusLastReconciliationUtc = unresolved?.lastReconciliationUtc,
+            bolusTransportWriteIssued = unresolved?.transportWriteIssued,
+            bolusLatestHistoryResult = unresolved?.latestHistoryResult,
+            bolusFullHistoryResult = unresolved?.fullHistoryResult,
+            bolusReconciliationReason = unresolved?.reconciliationReason,
+            lastTherapyAttemptUtc = therapyAttempt?.timestamp,
+            lastTherapyRequestType = therapyAttempt?.requestType,
+            lastTherapyRequestedAmount = therapyAttempt?.requestedAmount,
+            lastTherapyDurationMinutes = therapyAttempt?.durationMinutes,
+            lastTherapyResult = therapyAttempt?.result,
+            lastTherapyFailureLayer = therapyAttempt?.failureLayer,
+            lastTherapyReason = therapyAttempt?.reason,
         )
     }
     override fun serialNumber() = preferences.get(ApexStringKey.LastConnectedSerialNumber)
@@ -222,6 +236,11 @@ class ApexPumpPlugin @Inject constructor(
     suspend fun refreshForUi() {
         service?.getStatus("ApexComposeContent", force = true)
     }
+
+    suspend fun reconcileBolusForUi(): Boolean = service?.reconcileBolusForUi() ?: false
+
+    suspend fun operatorConfirmBolusNotDelivered(operationUuid: String): Boolean =
+        service?.operatorConfirmBolusNotDelivered(operationUuid) ?: false
 
     fun getJSONStatus(profile: Profile, profileName: String, version: String): JSONObject {
         val now = System.currentTimeMillis()

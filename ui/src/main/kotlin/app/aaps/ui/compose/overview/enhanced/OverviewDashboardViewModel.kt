@@ -263,6 +263,7 @@ class OverviewDashboardViewModel @Inject constructor(
             "REJECTED_BEFORE_DELIVERY", "DEFINITELY_NOT_DELIVERED" -> R.string.apex7_bolus_state_not_delivered
             "CANCELLED_CONFIRMED" -> R.string.apex7_bolus_state_cancelled
             "PARTIALLY_DELIVERED_CONFIRMED" -> R.string.apex7_bolus_state_partial
+            "OPERATOR_CONFIRMED_NOT_DELIVERED" -> R.string.apex7_bolus_state_not_delivered
             "DELIVERY_UNCERTAIN" -> R.string.apex7_bolus_state_uncertain
             "RECONCILIATION_REQUIRED" -> R.string.apex7_bolus_state_reconciliation
             else -> R.string.apex7_status_unknown
@@ -309,6 +310,11 @@ class OverviewDashboardViewModel @Inject constructor(
         val baseIsf = isf(profile?.getProfileIsfMgdl())
         val currentDynamicIsf = isf(decision?.currentDynamicIsfMgdl)
         val dosingIsf = isf(decision?.insulinReqIsfMgdl)
+        val autoIsfActive = decision?.algorithm == "AUTO_ISF"
+        val factorLabel = if (autoIsfActive) R.string.apex7_factor else R.string.apex7_disf_factor
+        val factorValue = if (autoIsfActive) number(decision?.autoIsfFactor) else decision?.dynIsfAdjustmentFactor?.let {
+            String.format(Locale.getDefault(), "%.0f%%", it * 100.0)
+        }
         val effectiveCr = number(request?.oapsProfile?.carb_ratio ?: request?.oapsProfileAutoIsf?.carb_ratio)
         val healthText = rh.gs(when (health) {
             LoopHealthStatus.UNKNOWN -> R.string.apex7_status_unknown
@@ -324,7 +330,7 @@ class OverviewDashboardViewModel @Inject constructor(
                 request != null -> rh.gs(R.string.apex7_smb)
                 else -> null
             },
-                R.string.apex7_factor to number(if (decision?.algorithm=="AUTO_ISF") decision.autoIsfFactor else decision?.dynIsfAdjustmentFactor), R.string.apex7_base_isf to baseIsf,
+                factorLabel to factorValue, R.string.apex7_base_isf to baseIsf,
                 R.string.apex7_current_dynamic_isf to currentDynamicIsf, R.string.apex7_dosing_isf to dosingIsf,
                 R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
                 R.string.apex7_isf_basis to isfBasis(decision?.futureIsfBasis),
@@ -384,6 +390,7 @@ class OverviewDashboardViewModel @Inject constructor(
                 },
                 R.string.apex7_smb_reported_delivered to lastRun?.smbSetByPump?.takeIf { !it.queued }?.let { number(it.bolusDelivered) },
                 R.string.apex7_smb_confirmed_history to number(lastSmb?.amount),
+                R.string.apex7_pump_confirmed_history to number(pumpDiagnostics?.bolusHistoryConfirmedU),
                 R.string.apex7_last_smb to time(lastSmb?.timestamp), R.string.apex7_time to time(result?.date),
                 R.string.apex7_reason to rh.gs(R.string.apex7_bolus_unreconciled).takeIf { pumpDiagnostics?.bolusReconciliationRequired == true }),
             DashboardTile(R.string.apex7_pump, if (pumpDiagnostics?.bolusReconciliationRequired == true) rh.gs(R.string.apex7_bolus_uncertain) else if (pumpDiagnostics != null) rh.gs(R.string.apex7_pump_model_apex) else null, buildList {
@@ -398,6 +405,14 @@ class OverviewDashboardViewModel @Inject constructor(
                     if(d.bolusReconciliationRequired) {
                         addField(R.string.apex7_bolus_state,bolusState(d.bolusState)); addField(R.string.apex7_bolus_requested,number(d.bolusRequestedU))
                         addField(R.string.apex7_bolus_live,number(d.bolusLiveCompletedU) ?: rh.gs(R.string.apex7_no_data)); addField(R.string.apex7_bolus_history,number(d.bolusHistoryConfirmedU) ?: rh.gs(R.string.apex7_no_data))
+                        addField(R.string.apex7_bolus_transport, rh.gs(when (d.bolusTransportWriteIssued) {
+                            true -> R.string.apex7_sent
+                            false -> R.string.apex7_not_sent
+                            null -> R.string.apex7_unknown_outcome
+                        }))
+                        addField(R.string.apex7_bolus_latest_history, d.bolusLatestHistoryResult ?: rh.gs(R.string.apex7_no_data))
+                        addField(R.string.apex7_bolus_full_history, d.bolusFullHistoryResult ?: rh.gs(R.string.apex7_no_data))
+                        addField(R.string.apex7_bolus_reconciliation_reason, d.bolusReconciliationReason ?: rh.gs(R.string.apex7_no_data))
                         addField(R.string.apex7_bolus_operation_age,age(d.bolusOperationCreatedUtc,now)); addField(R.string.apex7_bolus_last_reconcile,time(d.bolusLastReconciliationUtc) ?: rh.gs(R.string.apex7_no_data))
                         addField(R.string.apex7_bolus_gate,rh.gs(R.string.apex7_enabled_state))
                     }
@@ -417,7 +432,21 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_generation to snapshot.activeWorkflowGeneration?.toString(), R.string.apex7_job to snapshot.currentWorkflowJob,
                 R.string.apex7_duration to milliseconds(snapshot.calculationDuration(now)), R.string.apex7_anchor to time(snapshot.referenceTime),
                 R.string.apex7_phase to snapshot.currentSensorPhaseOffsetMs?.toString(), R.string.apex7_skipped to snapshot.supersededAdsPublishSkipCount.toString(),
-                R.string.apex7_metadata to snapshot.duplicateGlucoseMetadataEventCount.toString(), R.string.apex7_changes to snapshot.therapyRelevantGlucoseUpdateCount.toString())
+                R.string.apex7_metadata to snapshot.duplicateGlucoseMetadataEventCount.toString(), R.string.apex7_changes to snapshot.therapyRelevantGlucoseUpdateCount.toString(),
+                R.string.apex7_last_therapy_attempt to time(pumpDiagnostics?.lastTherapyAttemptUtc),
+                R.string.apex7_therapy_request to pumpDiagnostics?.let { d ->
+                    if (d.lastTherapyRequestType == "TBR" && d.lastTherapyRequestedAmount != null && d.lastTherapyDurationMinutes != null)
+                        rh.gs(R.string.apex7_tbr_request, d.lastTherapyRequestedAmount, d.lastTherapyDurationMinutes)
+                    else d.lastTherapyRequestType
+                },
+                R.string.apex7_therapy_result to pumpDiagnostics?.lastTherapyResult?.let { result -> rh.gs(when (result) {
+                    "REJECTED" -> R.string.apex7_therapy_rejected
+                    "FAILED" -> R.string.apex7_therapy_failed
+                    "ACCEPTED" -> R.string.apex7_therapy_accepted
+                    else -> R.string.apex7_status_unknown
+                }) },
+                R.string.apex7_failure_layer to pumpDiagnostics?.lastTherapyFailureLayer,
+                R.string.apex7_reason to if (pumpDiagnostics?.lastTherapyReason == "previous_apex_delivery_unconfirmed") rh.gs(R.string.apex7_bolus_unreconciled) else pumpDiagnostics?.lastTherapyReason)
         ), now, OverviewVitals(
             units = units.asText,
             isf = decision?.currentDynamicIsfMgdl?.takeIf { it > 0 && recent(request?.date) }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },

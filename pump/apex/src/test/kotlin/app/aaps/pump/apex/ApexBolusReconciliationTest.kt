@@ -107,9 +107,56 @@ class ApexBolusReconciliationTest {
         assertThat(coordinator.safetyGateActive).isTrue()
     }
 
+    @Test fun `full history no match enables audited operator resolution`() {
+        val operation = prepared(0.1, 4, incidentTime)
+        coordinator.beginTransportWrite(operation.operationUuid, 4, 7)
+        coordinator.markTransportWriteIssued(operation.operationUuid, 7)
+        coordinator.markTransportOutcomeUnknown(operation.operationUuid, 7, "disconnect_after_write")
+
+        coordinator.reconcile(pump, "BolusHistory", emptyList(), 8)
+        assertThat(coordinator.canOperatorResolve(operation.operationUuid)).isTrue()
+        assertThat(coordinator.operatorConfirmNotDelivered(operation.operationUuid, pump, "deadbeef")).isTrue()
+        assertThat(coordinator.safetyGateActive).isFalse()
+
+        val audit = coordinator.operation(operation.operationUuid)!!
+        assertThat(audit.state).isEqualTo(ApexBolusState.OPERATOR_CONFIRMED_NOT_DELIVERED)
+        assertThat(audit.operatorConfirmation).isTrue()
+        assertThat(audit.operatorConfirmationBuildSha).isEqualTo("deadbeef")
+        assertThat(audit.fullHistoryResult).isEqualTo("NOT_FOUND")
+
+        val restored = restoredCoordinator()
+        assertThat(restored.safetyGateActive).isFalse()
+        assertThat(restored.operation(operation.operationUuid)!!.state).isEqualTo(ApexBolusState.OPERATOR_CONFIRMED_NOT_DELIVERED)
+    }
+
+    @Test fun `manual resolution is unavailable before successful full history`() {
+        val operation = prepared(0.1, 4, incidentTime)
+        coordinator.beginTransportWrite(operation.operationUuid, 4, 7)
+        coordinator.markTransportWriteIssued(operation.operationUuid, 7)
+        coordinator.markTransportOutcomeUnknown(operation.operationUuid, 7, "disconnect_after_write")
+
+        assertThat(coordinator.operatorConfirmNotDelivered(operation.operationUuid, pump, "deadbeef")).isFalse()
+        assertThat(coordinator.safetyGateActive).isTrue()
+    }
+
+    @Test fun `automatic reconciliation uses bounded backoff while manual remains available`() {
+        prepared(0.1, 4, incidentTime)
+        assertThat(coordinator.beginReconciliationAttempt(manual = false, onConnect = false, now = 1_000L)).isTrue()
+        assertThat(coordinator.beginReconciliationAttempt(manual = false, onConnect = false, now = 1_001L)).isFalse()
+        assertThat(coordinator.beginReconciliationAttempt(manual = true, onConnect = false, now = 1_002L)).isTrue()
+        assertThat(coordinator.current()!!.automaticAttempts).isEqualTo(1)
+        assertThat(coordinator.current()!!.manualAttempts).isEqualTo(1)
+    }
+
     private fun prepared(units: Double, steps: Int, timestamp: Long) = requireNotNull(coordinator.prepare(
         pump, "1.1", "4.12", timestamp, timestamp, "NORMAL", units, steps, "test", "queue-1", 1,
     ))
+
+    private fun restoredCoordinator(): ApexBolusCoordinator {
+        val context = mock<Context>()
+        whenever(context.filesDir).thenReturn(directory.toFile())
+        return ApexBolusCoordinator(context, mock<ApexTrace>())
+    }
 
     private fun candidate(index: Int, timestamp: Long, requested: Int, performed: Int) = ApexHistoryCandidate(
         index, timestamp, requested, performed, "260913113059", 16, "LatestBoluses", index,

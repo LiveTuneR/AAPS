@@ -525,7 +525,12 @@ class ApexCommDirector @Inject constructor(
                     continue
                 }
             }
-            val transportOutcome = apexBluetooth.send(request.command)
+            val transportOutcome = apexBluetooth.send(request.command) {
+                request.bolusOperationUuid?.let { bolusCoordinator?.markTransportWriteIssued(it, activeGeneration) }
+            }
+            request.bolusOperationUuid?.let {
+                bolusCoordinator?.markTransportWriteCompleted(it, activeGeneration, transportOutcome.name)
+            }
             if (transportOutcome != ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT) {
                 request.bolusOperationUuid?.let { operationUuid ->
                     when (transportOutcome) {

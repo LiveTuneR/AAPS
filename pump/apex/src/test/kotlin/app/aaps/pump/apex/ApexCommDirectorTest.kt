@@ -354,7 +354,8 @@ class ApexCommDirectorTest : TestBase() {
         override fun disconnect() = Unit
         override fun shutdown() = Unit
 
-        override suspend fun send(command: DeviceCommand): ApexTransportWriteOutcome {
+        override suspend fun send(command: DeviceCommand, onFirstWriteIssued: (() -> Unit)?): ApexTransportWriteOutcome {
+            onFirstWriteIssued?.invoke()
             sent += command
             if (autoRespondToWrites && command !is GetValue) response(generation)
             return ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT

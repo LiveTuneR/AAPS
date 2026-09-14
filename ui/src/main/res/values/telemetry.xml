@@ -12,8 +12,8 @@
     <string name="telemetry_exporting">Preparing archive</string>
     <string name="telemetry_export_failed">Telemetry export failed</string>
     <string name="telemetry_export_saved">Telemetry archive saved</string>
-    <string name="apex7_bolus_uncertain">BOLUS UNCERTAIN</string>
-    <string name="apex7_bolus_unreconciled">Previous pump bolus not reconciled</string>
+    <string name="apex7_bolus_uncertain">Reconciliation required</string>
+    <string name="apex7_bolus_unreconciled">Previous Apex delivery is not confirmed</string>
     <string name="apex7_bolus_state">Bolus reconciliation</string>
     <string name="apex7_bolus_requested">Requested bolus</string>
     <string name="apex7_bolus_live">Live completed</string>

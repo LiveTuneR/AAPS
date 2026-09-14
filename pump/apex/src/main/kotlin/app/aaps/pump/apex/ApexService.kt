@@ -64,6 +64,7 @@ import app.aaps.pump.apex.connectivity.commands.pump.TDDEntry
 import app.aaps.pump.apex.connectivity.commands.pump.Version
 import app.aaps.pump.apex.diagnostics.ApexTrace
 import app.aaps.pump.apex.diagnostics.ApexTraceSanitizer
+import app.aaps.pump.apex.diagnostics.ApexTherapyAttemptTracker
 import app.aaps.pump.apex.events.EventApexPumpDataChanged
 import app.aaps.pump.apex.interfaces.ApexDeviceInfo
 import app.aaps.pump.apex.utils.keys.ApexBooleanKey
@@ -109,6 +110,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
     @Inject lateinit var notificationManager: NotificationManager
     @Inject lateinit var trace: ApexTrace
     @Inject lateinit var bolusCoordinator: ApexBolusCoordinator
+    @Inject lateinit var therapyAttemptTracker: ApexTherapyAttemptTracker
 
     companion object {
         const val COMMAND_RESPONSE_TIMEOUT = 5000L
@@ -361,6 +363,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         aapsLogger.debug(LTag.PUMPCOMM, "bolus - $caller")
         if (!isExperimentalControlAllowed("Bolus", caller)) return null
         if (bolusCoordinator.safetyGateActive) {
+            therapyAttemptTracker.record("BOLUS", dbi.insulin, result = "REJECTED", failureLayer = "APEX_RECONCILIATION_GATE", reason = "previous_apex_delivery_unconfirmed")
             trace.record("bolus_safety_gate_enabled", generation = linkState.generation, fields = mapOf("reason" to "previous_bolus_unresolved", "caller" to caller))
             aapsLogger.error(LTag.PUMP, "Previous Apex bolus delivery is uncertain; new insulin delivery is blocked pending reconciliation")
             return null
@@ -577,10 +580,12 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         if (!isExperimentalControlAllowed("TemporaryBasal", caller)) return false
         val scheduledRate = pump.basal?.rate ?: 0.0
         if (bolusCoordinator.safetyGateActive && dose > scheduledRate + DOSE_EPSILON_U) {
+            therapyAttemptTracker.record("TBR", dose, durationMinutes, "REJECTED", "APEX_RECONCILIATION_GATE", "previous_apex_delivery_unconfirmed")
             trace.record("bolus_safety_gate_enabled", generation = linkState.generation, fields = mapOf("reason" to "insulin_increasing_tbr_blocked", "requestedRate" to dose, "scheduledRate" to scheduledRate))
             return false
         }
         if (dose > pump.maxBasal) {
+            therapyAttemptTracker.record("TBR", dose, durationMinutes, "REJECTED", "PUMP_LIMIT", "requested_rate_above_max_basal")
             aapsLogger.error(LTag.PUMP, "[temporaryBasal caller=$caller] Requested ${dose}U is greater than maximum set ${pump.maxBasal}U")
             return false
         }
@@ -590,7 +595,10 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         val durationRaw = durationMinutes / 15
         if (durationMinutes % 15 > 0) aapsLogger.warn(LTag.PUMPCOMM, "[temporaryBasal caller=$caller] Bolus duration is not aligned to 15 minute steps! Rounded down.")
 
-        if (!checkPump("ApexService-temporaryBasal", optimize = true)) return false
+        if (!checkPump("ApexService-temporaryBasal", optimize = true)) {
+            therapyAttemptTracker.record("TBR", dose, durationMinutes, "REJECTED", "CONNECTION", "pump_not_ready")
+            return false
+        }
 
         status.addAction(
             ApexDriverStatus.Action.SettingTBR,
@@ -600,11 +608,13 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         status.removeAction(ApexDriverStatus.Action.SettingTBR)
 
         if (response == null) {
+            therapyAttemptTracker.record("TBR", dose, durationMinutes, "FAILED", "TRANSPORT", "command_timeout")
             aapsLogger.error(LTag.PUMPCOMM, "[temporaryBasal caller=$caller] Timed out while trying to communicate with the pump")
             return false
         }
 
         if (response.code != CommandResponse.Code.Accepted) {
+            therapyAttemptTracker.record("TBR", dose, durationMinutes, "REJECTED", "PUMP_RESPONSE", response.code.name)
             aapsLogger.error(LTag.PUMPCOMM, "[caller=$caller] Failed to start temporary basal: ${response.code.name}")
             return false
         }
@@ -628,6 +638,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
 
         aapsLogger.debug(LTag.PUMP, "Started TBR ${dose}U for ${durationMinutes}min by $caller")
         getStatus("ApexService-temporaryBasal")
+        therapyAttemptTracker.record("TBR", dose, durationMinutes, "ACCEPTED")
         return true
     }
 
@@ -869,11 +880,23 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         return true
     }
 
-    suspend fun getBoluses(caller: String, isFullHistory: Boolean = false): Boolean {
+    suspend fun getBoluses(
+        caller: String,
+        isFullHistory: Boolean = false,
+        manualReconciliation: Boolean = false,
+        onConnect: Boolean = false,
+    ): Boolean {
         aapsLogger.debug(LTag.PUMPCOMM, "getBoluses - $caller")
 
         if (pump.inProgressBolus?.lockHistory == true) {
             aapsLogger.info(LTag.PUMPCOMM, "Pump history is locked. Bolus is in progress.")
+            return true
+        }
+
+        if (bolusCoordinator.current() != null &&
+            !bolusCoordinator.beginReconciliationAttempt(manualReconciliation, onConnect)
+        ) {
+            aapsLogger.debug(LTag.PUMPCOMM, "Apex bolus reconciliation is in bounded backoff")
             return true
         }
 
@@ -900,6 +923,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
         val objects = commDirector.request(query)
         if (objects == null) {
             aapsLogger.error(LTag.PUMPCOMM, "[getBoluses query=${query.name} caller=$caller] Timed out while trying to communicate with the pump")
+            bolusCoordinator.recordHistoryFailure(query.name, "history_query_timeout", linkState.generation)
             return null
         }
         val entries = objects.filterIsInstance<BolusEntry>().filter { it.extendedDose == 0 }
@@ -926,6 +950,36 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
             else -> Unit
         }
         return reconciliation
+    }
+
+    suspend fun reconcileBolusForUi(): Boolean {
+        if (bolusCoordinator.current() == null) return true
+        if (!checkPump("ApexComposeContent-reconcile", optimize = false)) {
+            bolusCoordinator.recordHistoryFailure("LatestBoluses", "reconnect_failed", linkState.generation)
+            return false
+        }
+        return getBoluses("ApexComposeContent-reconcile", manualReconciliation = true)
+    }
+
+    suspend fun operatorConfirmBolusNotDelivered(operationUuid: String): Boolean {
+        val operation = bolusCoordinator.operation(operationUuid) ?: return false
+        val pumpIdentity = ApexTraceSanitizer.anonymize(apexDeviceInfo.serialNumber)
+        if (!bolusCoordinator.canOperatorResolve(operationUuid) || operation.pumpIdentityHash != pumpIdentity) return false
+        val type = runCatching { BS.Type.valueOf(operation.bolusType) }.getOrNull()
+        runCatching {
+            pumpSync.syncBolusWithTempId(
+                timestamp = operation.requestedTimestamp,
+                amount = PumpInsulin(0.0),
+                temporaryId = operation.temporaryId,
+                type = type,
+                pumpId = null,
+                pumpType = PumpType.APEX_TRUCARE_III,
+                pumpSerial = apexDeviceInfo.serialNumber,
+            )
+        }.onFailure { error ->
+            trace.record("bolus_operator_local_record_reconcile_failed", fields = mapOf("operationUuid" to operationUuid, "errorType" to error.javaClass.simpleName))
+        }
+        return bolusCoordinator.operatorConfirmNotDelivered(operationUuid, pumpIdentity, config.BUILD_VERSION)
     }
 
     private suspend fun finalizeReconciledBolus(result: ApexReconciliationResult.Matched) {
@@ -1511,7 +1565,7 @@ class ApexService: DaggerService(), ApexCommDirector.Callback {
                 aapsLogger.error(LTag.PUMPCOMM, "Failed to get basal profiles - disconnecting.")
                 return ApexCommDirector.HandshakeResult.RETRYABLE_FAILURE
             }
-            if (!getBoluses("BLE-onConnect")) {
+            if (!getBoluses("BLE-onConnect", onConnect = true)) {
                 aapsLogger.error(LTag.PUMPCOMM, "Failed to get boluses - disconnecting.")
                 return ApexCommDirector.HandshakeResult.RETRYABLE_FAILURE
             }

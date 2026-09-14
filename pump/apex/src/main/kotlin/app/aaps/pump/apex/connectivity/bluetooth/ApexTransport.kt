@@ -8,7 +8,7 @@ interface ApexTransport {
     fun connect(generation: Long)
     fun disconnect()
     fun shutdown()
-    suspend fun send(command: DeviceCommand): ApexTransportWriteOutcome
+    suspend fun send(command: DeviceCommand, onFirstWriteIssued: (() -> Unit)? = null): ApexTransportWriteOutcome
 }
 
 enum class ApexTransportWriteOutcome {

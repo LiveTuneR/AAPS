@@ -125,6 +125,11 @@ class ApexTrace @Inject constructor(
                 file.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
             }
+            File(context.filesDir, "apex/bolus-operations.json").takeIf(File::exists)?.let { journal ->
+                zip.putNextEntry(ZipEntry("bolus-operations-v2.json"))
+                journal.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
         }
         exportDirectory.listFiles { file -> file.extension == "zip" }
             ?.sortedByDescending(File::lastModified)
