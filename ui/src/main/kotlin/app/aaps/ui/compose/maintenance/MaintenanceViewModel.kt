@@ -72,9 +72,64 @@ class MaintenanceViewModel @Inject constructor(
     private val overviewDataCache: OverviewDataCache,
     private val nsClient: NsClient
 ) : ViewModel() {
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
+    val telemetryHealth get() = therapyTelemetry.get().health
+    private val _telemetryBusy = MutableStateFlow(false)
+    val telemetryBusy = _telemetryBusy.asStateFlow()
+    private var telemetryExport: java.io.File? = null
+    private val _telemetrySaveRequest = MutableStateFlow<String?>(null)
+    val telemetrySaveRequest = _telemetrySaveRequest.asStateFlow()
+
+    fun telemetrySaveLaunched(name: String) {
+        _telemetrySaveRequest.compareAndSet(name, null)
+    }
+
+    fun setTelemetryRetention(days: Int) = therapyTelemetry.get().setRetentionDays(days)
+
+    fun exportTelemetry(days: Int, intervalMs: Long?) {
+        if (_telemetryBusy.value) return
+        require(days in 1..14)
+        _telemetryBusy.value=true
+        viewModelScope.launch {
+            try {
+                val end=System.currentTimeMillis()
+                telemetryExport?.delete()
+                telemetryExport=therapyTelemetry.get().export(end-days*86_400_000L,end,intervalMs)
+                _telemetrySaveRequest.value = "aaps-therapy-$end.zip"
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { _telemetryBusy.value=false; throw cancelled }
+            catch (error: Exception) {
+                _telemetryBusy.value=false
+                aapsLogger.error(LTag.CORE,"Telemetry export failed type=${error.javaClass.simpleName}")
+                _events.emit(MaintenanceEvent.Error(rh.gs(app.aaps.ui.R.string.telemetry_export_failed)))
+            }
+        }
+    }
+
+    fun saveTelemetry(context: android.content.Context, uri: android.net.Uri?) {
+        _telemetrySaveRequest.value = null
+        val file=telemetryExport ?: run { _telemetryBusy.value=false; return }
+        telemetryExport=null
+        viewModelScope.launch {
+            try {
+                if (uri!=null) {
+                    withContext(Dispatchers.IO) {
+                        requireNotNull(context.contentResolver.openOutputStream(uri,"wt")).use { output -> file.inputStream().use { it.copyTo(output) } }
+                    }
+                    _events.emit(MaintenanceEvent.Snackbar(rh.gs(app.aaps.ui.R.string.telemetry_export_saved)))
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { _events.emit(MaintenanceEvent.Error(rh.gs(app.aaps.ui.R.string.telemetry_export_failed))) }
+            finally { file.delete(); _telemetryBusy.value=false }
+        }
+    }
 
     private val _events = MutableSharedFlow<MaintenanceEvent>()
     val events: SharedFlow<MaintenanceEvent> = _events
+
+    override fun onCleared() {
+        telemetryExport?.delete()
+        super.onCleared()
+    }
 
     // Export configuration (cloud awareness)
     private val _exportConfig = MutableStateFlow<ExportConfig?>(null)

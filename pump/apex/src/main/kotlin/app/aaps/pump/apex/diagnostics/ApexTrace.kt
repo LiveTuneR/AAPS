@@ -26,6 +26,7 @@ import javax.inject.Singleton
 class ApexTrace @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
     private val dispatcher = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ApexTrace").apply { isDaemon = true }
     }.asCoroutineDispatcher()
@@ -34,6 +35,7 @@ class ApexTrace @Inject constructor(
     private val traceDirectory = File(context.filesDir, "apex-diagnostics")
     private val exportDirectory = File(context.cacheDir, "apex-diagnostics")
     private var activeFile: File? = null
+    private val commandOrigins = linkedMapOf<Long,app.aaps.core.interfaces.telemetry.PumpCommandRunContext>()
 
     fun nextOperationId(): Long = operationSequence.incrementAndGet()
 
@@ -43,6 +45,28 @@ class ApexTrace @Inject constructor(
         operationId: Long? = null,
         fields: Map<String, Any?> = emptyMap(),
     ) {
+        if (::therapyTelemetry.isInitialized) try {
+            val command=synchronized(commandOrigins) {
+                val current=app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
+                if (operationId!=null && current!=null) commandOrigins[operationId]=current
+                val origin=current ?: commandOrigins[operationId]
+                if (event in setOf("command_completed","command_timeout","command_write_failed")) commandOrigins.remove(operationId)
+                while (commandOrigins.size>256) commandOrigins.remove(commandOrigins.keys.first())
+                origin
+            }
+            val record=JSONObject().put("source","APEX_DRIVER").put("stage",event).put("linkGeneration",generation ?: JSONObject.NULL)
+                .put("driverOperationId",operationId ?: JSONObject.NULL).put("queueRequestId",command?.requestId ?: JSONObject.NULL)
+                .put("decisionId",command?.decisionId ?: JSONObject.NULL)
+            fields.forEach { (key,value) -> record.put(key,ApexTraceSanitizer.sanitize(key,value,MAX_FIELD_LENGTH)) }
+            val type=when {
+                event=="command_sent" -> app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_SENT
+                event=="command_queued" -> app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_QUEUE
+                event.endsWith("history_reconciled") -> app.aaps.core.interfaces.telemetry.TherapyEventType.HISTORY_RECONCILIATION
+                event.endsWith("timeout") || event.endsWith("failed") || event=="watchdog_stall" -> app.aaps.core.interfaces.telemetry.TherapyEventType.ERROR
+                else -> app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_STATE
+            }
+            therapyTelemetry.get().record(type,record,command?.generation,command?.decisionId ?: operationId?.let { "apex-operation:$it" })
+        } catch (_: Exception) { /* Diagnostic export cannot interrupt a pump conversation. */ }
         scope.launch {
             val data = JSONObject()
                 .put("wallMs", System.currentTimeMillis())
@@ -99,6 +123,11 @@ class ApexTrace @Inject constructor(
             traceFiles().forEach { file ->
                 zip.putNextEntry(ZipEntry(file.name))
                 file.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+            File(context.filesDir, "apex/bolus-operations.json").takeIf(File::exists)?.let { journal ->
+                zip.putNextEntry(ZipEntry("bolus-operations-v2.json"))
+                journal.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
             }
         }

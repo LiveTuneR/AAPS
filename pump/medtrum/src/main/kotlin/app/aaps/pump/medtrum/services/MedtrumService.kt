@@ -88,6 +88,19 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
 
     @Inject lateinit var injector: HasAndroidInjector
     @Inject lateinit var aapsLogger: AAPSLogger
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
+
+    private fun commandEvidence(packet: MedtrumPacket,stage: String,success: Boolean? = null) {
+        if (!::therapyTelemetry.isInitialized) return
+        try {
+            val command=app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
+            therapyTelemetry.get().record(app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_STATE,org.json.JSONObject()
+                .put("source","MEDTRUM_SERVICE").put("stage",stage).put("commandType",packet.javaClass.simpleName)
+                .put("queueRequestId",command?.requestId ?: org.json.JSONObject.NULL).put("success",success ?: org.json.JSONObject.NULL)
+                .put("timeout",lastCommandTimedOut).put("transportSubmitted",lastCommandTransmitted)
+                .put("reason",lastCommandFailureReason ?: org.json.JSONObject.NULL),command?.generation,command?.decisionId ?: command?.requestId)
+        } catch (_: Exception) { /* No diagnostic failure may affect delivery. */ }
+    }
     @Inject lateinit var aapsSchedulers: AapsSchedulers
     @Inject lateinit var rxBus: RxBus
     @Inject lateinit var preferences: Preferences
@@ -1024,12 +1037,14 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
             mPacket = packet
             lastCommandTransmitted = true
             bleTransport.sendMessage(requestOverride ?: packet.getRequest())
+            commandEvidence(packet,"TRANSPORT_SUBMITTED")
             result = currentState.waitForResponse(timeout)
             SystemClock.sleep(100)
         } else {
             lastCommandFailureReason = "Service not ready: $currentState"
             aapsLogger.error(LTag.PUMPCOMM, "Send packet attempt when in state: $currentState")
         }
+        commandEvidence(packet,"RESPONSE_FINISHED",result)
         return result
     }
 

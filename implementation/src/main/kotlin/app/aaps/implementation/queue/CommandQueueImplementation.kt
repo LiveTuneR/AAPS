@@ -114,6 +114,7 @@ class CommandQueueImplementation @Inject constructor(
     override var waitingForDisconnect = false
 
     @Volatile var performing: Command? = null
+    @Inject lateinit var commandTelemetry: app.aaps.implementation.telemetry.CommandTelemetry
 
     // Upper bound for a single pump profile push. A normal connection failure resolves the command
     // (and the awaited deferred) on its own; this only guards the pathological lost-callback case so a
@@ -260,6 +261,7 @@ class CommandQueueImplementation @Inject constructor(
             for (i in queue.indices.reversed()) {
                 if (queue[i].commandType == type) {
                     queue[i].cancel(app.aaps.core.ui.R.string.command_replaced)
+                    if (::commandTelemetry.isInitialized) commandTelemetry.dropped(queue[i],"SUPERSEDED_BEFORE_EXECUTION")
                     queue.removeAt(i)
                 }
             }
@@ -298,6 +300,7 @@ class CommandQueueImplementation @Inject constructor(
     private fun add(command: Command) {
         aapsLogger.debug(LTag.PUMPQUEUE, "Adding: " + command.javaClass.simpleName + " - " + command.log())
         synchronized(queue) { queue.add(command) }
+        if (::commandTelemetry.isInitialized) commandTelemetry.queued(command,queue.size)
     }
 
     @Synchronized
@@ -314,6 +317,7 @@ class CommandQueueImplementation @Inject constructor(
                 // executed. Report failure (success = false) so a waiting bolus caller is not told
                 // a dose was delivered. (Supersession via removeAll keeps the default success = true.)
                 queue[i].cancel(app.aaps.core.ui.R.string.connectiontimedout, success = false)
+                if (::commandTelemetry.isInitialized) commandTelemetry.dropped(queue[i],"CONNECTION_TIMEOUT")
             }
             queue.clear()
         }
@@ -324,6 +328,7 @@ class CommandQueueImplementation @Inject constructor(
         performing = null
         synchronized(queue) {
             for (i in queue.indices) {
+                if (::commandTelemetry.isInitialized) commandTelemetry.dropped(queue[i],"QUEUE_COMPLETED_NOOP")
                 queue[i].callback?.result(
                     pumpEnactResultProvider.get().success(true).enacted(false).comment(commentResId)
                 )?.run()
@@ -762,7 +767,9 @@ class CommandQueueImplementation @Inject constructor(
         synchronized(queue) {
             for (i in queue.indices.reversed()) {
                 val command = queue[i]
-                if (command is CustomCommand && targetType.isInstance(command.commandType)) {
+                if (command is CommandCustomCommand && targetType.isInstance(command.customCommand)) {
+                    command.cancel(app.aaps.core.ui.R.string.command_replaced)
+                    if (::commandTelemetry.isInitialized) commandTelemetry.dropped(command,"CUSTOM_COMMAND_SUPERSEDED")
                     queue.removeAt(i)
                 }
             }

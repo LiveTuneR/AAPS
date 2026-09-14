@@ -76,6 +76,7 @@ class BuiltInSearchables @Inject constructor(
                     else null
                 },
                 BooleanKey.OverviewKeepScreenOn,
+                BooleanKey.OverviewEnhanced,
                 StringKey.GeneralPatientName,
             ),
             icon = Icons.Default.Settings

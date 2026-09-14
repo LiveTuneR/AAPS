@@ -75,25 +75,30 @@ class DetermineBasalAutoISF @Inject constructor(
     //if (profile.out_units === "mmol/L") round(value / 18, 1).toFixed(1);
     //else Math.round(value);
 
-    fun enable_smb(profile: OapsProfileAutoIsf, microBolusAllowed: Boolean, meal_data: MealData, target_bg: Double): Boolean {
+    fun enable_smb(profile: OapsProfileAutoIsf, microBolusAllowed: Boolean, meal_data: MealData, target_bg: Double,
+                   evidence: (Boolean, app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason) -> Unit = { _,_ -> }): Boolean {
         // disable SMB when a high temptarget is set
         if (!microBolusAllowed) {
             consoleError.add("SMB disabled (!microBolusAllowed)")
+            evidence(false,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.INPUT_CONSTRAINT)
             return false
         } else if (!profile.allowSMB_with_high_temptarget && profile.temptargetSet && target_bg > 100) {
             consoleError.add("SMB disabled due to high temptarget of $target_bg")
+            evidence(false,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.HIGH_TT_BLOCK)
             return false
         }
 
         // enable SMB/UAM if always-on (unless previously disabled for high temptarget)
         if (profile.enableSMB_always) {
             consoleError.add("SMB enabled due to enableSMB_always")
+            evidence(true,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.ALWAYS)
             return true
         }
 
         // enable SMB/UAM (if enabled in preferences) while we have COB
         if (profile.enableSMB_with_COB && meal_data.mealCOB != 0.0) {
             consoleError.add("SMB enabled for COB of ${meal_data.mealCOB}")
+            evidence(true,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.COB)
             return true
         }
 
@@ -101,16 +106,19 @@ class DetermineBasalAutoISF @Inject constructor(
         // (6 hours is defined in carbWindow in lib/meal/total.js)
         if (profile.enableSMB_after_carbs && meal_data.carbs != 0.0) {
             consoleError.add("SMB enabled for 6h after carb entry")
+            evidence(true,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.RECENT_CARBS)
             return true
         }
 
         // enable SMB/UAM (if enabled in preferences) if a low temptarget is set
         if (profile.enableSMB_with_temptarget && (profile.temptargetSet && target_bg < 100)) {
             consoleError.add("SMB enabled for temptarget of ${convert_bg(target_bg)}")
+            evidence(true,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.TT)
             return true
         }
 
         consoleError.add("SMB disabled (no enableSMB preferences active or no condition satisfied)")
+        evidence(false,app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.NO_CONDITION)
         return false
     }
 
@@ -184,6 +192,7 @@ class DetermineBasalAutoISF @Inject constructor(
      * that is how the event reaches Crashlytics even though the returned result is finite.
      */
     private fun abortNonFinite(token: String, rT: RT, currenttemp: CurrentTemp, basal: Double, deliverAt: Long): RT {
+        rT.decision=rT.decision?.copy(blockReason=app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.INVALID_INPUT)
         consoleError.add("Aborting run: $token")
         rT.reason.append("Aborting run: $token. ")
         if (currenttemp.rate > basal) {
@@ -217,6 +226,11 @@ class DetermineBasalAutoISF @Inject constructor(
             consoleError = consoleError
         )
 
+        rT.decision=app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot(
+            algorithm="AUTO_ISF",dynamicIsf=false,calculatedAt=currentTime,inputTimestamp=glucose_status.date,
+            profileIsfMgdl=profile.sens,currentDynamicIsfMgdl=if (autoIsfMode) profile.variable_sens else null,
+            carbRatio=profile.carb_ratio,smbConfigured=profile.enableSMB_always || profile.enableSMB_with_COB ||
+                profile.enableSMB_after_carbs || profile.enableSMB_with_temptarget || profile.enableSMB_EvenOn_OddOff_always)
         // TODO eliminate
         val deliverAt = currentTime
 
@@ -246,6 +260,7 @@ class DetermineBasalAutoISF @Inject constructor(
             rT.reason.append("Error: CGM data is unchanged for the past ~45m")
         }
         if (bg <= 10 || bg == 38.0 || noise >= 3 || minAgo > 12 || minAgo < -5 || (bg > 60 && flatBGsDetected)) {
+            rT.decision=rT.decision?.copy(blockReason=app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.INVALID_INPUT)
             if (currenttemp.rate > basal) { // high temp is running
                 rT.reason.append(". Replacing high temp basal of ${currenttemp.rate} with neutral temp of $basal")
                 rT.deliverAt = deliverAt
@@ -377,13 +392,15 @@ class DetermineBasalAutoISF @Inject constructor(
             if (loop_wanted_smb == "enforced" || loop_wanted_smb == "fullLoop") {              // otherwise FL switched SMB off
                 enableSMB = true
             }
+            rT.decision=rT.decision?.copy(conditionEligible=enableSMB,conditionReason=if (enableSMB)
+                app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.AUTO_FULL_LOOP else app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.AUTO_LOOP_DISABLED)
         } else {
             enableSMB = enable_smb(
                 profile,
                 microBolusAllowed,
                 meal_data,
                 target_bg
-            )
+            ) { eligible,reason -> rT.decision=rT.decision?.copy(conditionEligible=eligible,conditionReason=reason) }
         }
 
         //calculate BG impact: the amount BG "should" be rising or falling based on insulin activity alone
@@ -455,6 +472,7 @@ class DetermineBasalAutoISF @Inject constructor(
 
         //console.error(reservoir_data);
 
+        val initialDecision=rT.decision
         rT = RT(
             algorithm = APSResult.Algorithm.AUTO_ISF,
             runningDynamicIsf = autoIsfMode,
@@ -471,6 +489,10 @@ class DetermineBasalAutoISF @Inject constructor(
             variable_sens = profile.variable_sens
         )
 
+        val autoIsfFactor = if (autoIsfMode && profile.sens.isFinite() && profile.sens > 0.0 && sens.isFinite() && sens > 0.0)
+            profile.sens / sens else null
+        rT.decision=initialDecision?.copy(insulinReqIsfMgdl=sens,iobU=iob_data.iob,cobG=meal_data.mealCOB,
+            eventualBgMgdl=eventualBG,autoIsfFactor=autoIsfFactor)
         // generate predicted future BGs based on IOB, COB, and current absorption rate
 
         var COBpredBGs = mutableListOf<Double>()
@@ -907,6 +929,7 @@ class DetermineBasalAutoISF @Inject constructor(
         }
 
         if (enableSMB && minGuardBG < threshold) {
+            rT.decision=rT.decision?.copy(blockReason=app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.PREDICTED_LOW)
             consoleError.add("minGuardBG ${convert_bg(minGuardBG)} projected below ${convert_bg(threshold)} - disabling SMB")
             //rT.reason += "minGuardBG "+minGuardBG+"<"+threshold+": SMB disabled; ";
             enableSMB = false
@@ -916,11 +939,13 @@ class DetermineBasalAutoISF @Inject constructor(
             maxDeltaPercentage = 0.3
         }
         if (maxDelta > maxDeltaPercentage * bg) {
+            rT.decision=rT.decision?.copy(blockReason=app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.EXCESSIVE_DELTA)
             consoleError.add("maxDelta ${convert_bg(maxDelta)} > ${100 * maxDeltaPercentage}% of BG ${convert_bg(bg)} - disabling SMB")
             rT.reason.append("maxDelta " + convert_bg(maxDelta) + " > " + 100 * maxDeltaPercentage + "% of BG " + convert_bg(bg) + ": SMB disabled; ")
             enableSMB = false
         }
 
+        rT.decision=rT.decision?.copy(minPredBgMgdl=minPredBG,minGuardBgMgdl=minGuardBG,eventualBgMgdl=eventualBG)
         consoleError.add("BG projected to remain above ${convert_bg(min_bg)} for $minutesAboveMinBG minutes")
         if (minutesAboveThreshold < 240 || minutesAboveMinBG < 60) {
             consoleError.add("BG projected to remain above ${convert_bg(threshold)} for $minutesAboveThreshold minutes")
@@ -1085,6 +1110,7 @@ class DetermineBasalAutoISF @Inject constructor(
             rT.reason.append("Eventual BG " + convert_bg(eventualBG) + " >= " + convert_bg(max_bg) + ", ")
         }
         if (iob_data.iob > max_iob) {
+            rT.decision=rT.decision?.copy(blockReason=app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot.Reason.IOB,iobLimited=true)
             rT.reason.append("IOB ${round(iob_data.iob, 2)} > max_iob $max_iob")
             if (currenttemp.duration > 15 && (round_basal(basal) == round_basal(currenttemp.rate))) {
                 rT.reason.append(", temp ${currenttemp.rate} ~ req ${round(basal, 2).withoutZeros()}U/hr. ")
@@ -1099,8 +1125,10 @@ class DetermineBasalAutoISF @Inject constructor(
             var insulinReq =
                 // if (dynIsfMode) round((min(minPredBG, eventualBG) - target_bg) / future_sens, 2)
                 round((min(minPredBG, eventualBG) - target_bg) / sens, 2)
+            rT.decision=rT.decision?.copy(insulinReqBeforeIobClampU=insulinReq)
             // if that would put us over max_iob, then reduce accordingly
             if (insulinReq > max_iob - iob_data.iob) {
+                rT.decision=rT.decision?.copy(iobLimited=true)
                 rT.reason.append("max_iob $max_iob, ")
                 insulinReq = max_iob - iob_data.iob
             }
@@ -1128,6 +1156,7 @@ class DetermineBasalAutoISF @Inject constructor(
                 }
                 // bolus 1/2 the insulinReq, up to maxBolus, rounding down to nearest bolus increment
                 val roundSMBTo = 1 / profile.bolus_increment
+                rT.decision=rT.decision?.copy(maxBolusU=maxBolus,bolusLimited=insulinReq*(if (autoIsfMode) smb_ratio else 0.5)>=maxBolus)
                 //var microBolus: Double
                 var microBolus = Math.floor(Math.min(insulinReq / 2, maxBolus) * roundSMBTo) / roundSMBTo
                 if (autoIsfMode) {
@@ -1150,6 +1179,7 @@ class DetermineBasalAutoISF @Inject constructor(
                 }
 
                 var smbLowTempReq = 0.0
+                rT.smbZeroTempEquivalentMinutes = durationReq
                 if (durationReq <= 0) {
                     durationReq = 0
                     // don't set an SMB zero temp longer than 60 minutes
@@ -1158,7 +1188,8 @@ class DetermineBasalAutoISF @Inject constructor(
                     durationReq = min(60, max(0, durationReq))
                 } else {
                     // if SMB durationReq is less than 30m, set a nonzero low temp
-                    smbLowTempReq = round(basal * durationReq / 30.0, 2)
+                    // Hold back durationReq minutes of basal across a 30-minute temp (#5082).
+                    smbLowTempReq = round(basal * (30 - durationReq) / 30.0, 2)
                     durationReq = 30
                 }
                 rT.reason.append(" insulinReq $insulinReq")
@@ -1175,6 +1206,7 @@ class DetermineBasalAutoISF @Inject constructor(
                 //console.error(lastBolusAge);
                 // allow SMBIntervals between 1 and 10 minutes
                 val SMBInterval = min(10, max(1, profile.SMBInterval)) * 60.0   // in seconds
+                rT.decision=rT.decision?.copy(intervalWaiting=lastBolusAge<=SMBInterval-6.0,intervalSeconds=SMBInterval,lastBolusAgeSeconds=lastBolusAge)
                 //console.error(naive_eventualBG, insulinReq, worstCaseInsulinReq, durationReq);
                 consoleError.add("naive_eventualBG $naive_eventualBG,${durationReq}m ${smbLowTempReq}U/h temp needed; last bolus ${round(lastBolusAge / 60.0, 1)}m ago; maxBolus: $maxBolus")
                 if (lastBolusAge > SMBInterval - 6.0) {   // 6s tolerance

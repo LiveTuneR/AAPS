@@ -1,0 +1,12 @@
+{
+  "requestedUnits": 9.25,
+  "requestedSteps": 370,
+  "live": { "acceptedSteps": 370, "progressSteps": [360, 362, 364, 366, 368], "completedSteps": 370 },
+  "latestBoluses": [
+    { "timestamp": "2026-08-12T17:44:59Z", "requestedSteps": 16, "performedSteps": 16 },
+    { "timestamp": "2026-09-13T11:30:59Z", "requestedSteps": 17, "performedSteps": 17 },
+    { "timestamp": "2026-09-13T11:23:59Z", "requestedSteps": 6, "performedSteps": 6 }
+  ],
+  "expectedState": "DELIVERY_UNCERTAIN",
+  "automaticRetryAllowed": false
+}

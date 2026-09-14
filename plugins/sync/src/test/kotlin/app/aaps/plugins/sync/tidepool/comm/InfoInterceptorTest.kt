@@ -11,15 +11,13 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.jupiter.api.Test
-import org.mockito.kotlin.any
 import org.mockito.kotlin.mock
-import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.argumentCaptor
 
 /**
- * Tests for [InfoInterceptor], which writes the body of every Tidepool request to the log. Reading the
- * body must not use it up, so the call has to go on with the same request.
+ * Request payloads and user-specific paths must never enter diagnostic logs.
  */
 class InfoInterceptorTest {
 
@@ -38,7 +36,7 @@ class InfoInterceptorTest {
     }
 
     @Test
-    fun `body is logged and the request goes on`() {
+    fun `only metadata is logged and the request goes on`() {
         val body = """[{"type":"cbg"}]"""
         val request = Request.Builder()
             .url("https://api.tidepool.org/v1/datasets/1/data")
@@ -47,16 +45,21 @@ class InfoInterceptorTest {
         val (chain, response) = chainFor(request)
 
         assertThat(sut.intercept(chain)).isEqualTo(response)
-        verify(aapsLogger).debug(LTag.TIDEPOOL, "Interceptor Body size: ${body.length}")
-        verify(aapsLogger).debug(LTag.TIDEPOOL, "Interceptor Body: $body")
+        val log = argumentCaptor<String>()
+        verify(aapsLogger).debug(org.mockito.kotlin.eq(LTag.TIDEPOOL), log.capture())
+        assertThat(log.firstValue).contains("responseCode=200")
+        assertThat(log.firstValue).doesNotContain(body)
+        assertThat(log.firstValue).doesNotContain("datasets/1")
     }
 
     @Test
-    fun `request without a body is not logged`() {
+    fun `request without a body logs zero length`() {
         val request = Request.Builder().url("https://api.tidepool.org/v1/datasets").build()
         val (chain, response) = chainFor(request)
 
         assertThat(sut.intercept(chain)).isEqualTo(response)
-        verify(aapsLogger, never()).debug(any<LTag>(), any<String>())
+        val log = argumentCaptor<String>()
+        verify(aapsLogger).debug(org.mockito.kotlin.eq(LTag.TIDEPOOL), log.capture())
+        assertThat(log.firstValue).contains("contentLength=0")
     }
 }

@@ -1,5 +1,7 @@
 package app.aaps.plugins.sensitivity
 
+import app.aaps.core.interfaces.aps.copyStateTo
+
 import androidx.collection.LongSparseArray
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.aps.AutosensData
@@ -80,6 +82,7 @@ abstract class SensitivityTestBase : TestBaseWithProfile() {
         override var autosensResult = AutosensResult()
 
         override fun cloneCarbsList(): MutableList<AutosensData.CarbsInPast> = ArrayList()
+        override fun deepCopy(): AutosensData = copyStateTo(FakeAutosensData(time))
         override fun deductAbsorbedCarbs() {}
         override fun removeOldCarbs(toTime: Long, isAAPSOrWeighted: Boolean) {}
     }

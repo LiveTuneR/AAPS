@@ -99,6 +99,28 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     private val autosensDataProvider: Provider<AutosensData>
 ) : LoggingWorker(context, params, Dispatchers.Default, aapsLogger, fabricPrivacy) {
 
+    private data class Timing(var calls: Long = 0, var nanos: Long = 0)
+    private val timings = linkedMapOf<String, Timing>()
+    private var adsCacheHits = 0L
+    private var adsCacheMisses = 0L
+    @javax.inject.Inject lateinit var therapyTelemetry: Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
+    private var publishedEvidence: org.json.JSONObject? = null
+
+    private fun telemetry(data: () -> org.json.JSONObject) {
+        if (!::therapyTelemetry.isInitialized) return
+        try { therapyTelemetry.get().record(app.aaps.core.interfaces.telemetry.TherapyEventType.CALCULATION,data(),
+            inputData.getLong(WorkflowChainData.GEN_KEY,-1L)) }
+        catch (error: Exception) { aapsLogger.error(LTag.WORKER,"Calculation telemetry failed type=${error.javaClass.simpleName}") }
+    }
+
+    private inline fun <T> measured(section: String, block: () -> T): T {
+        val start = System.nanoTime()
+        try { return block() }
+        finally {
+            timings.getOrPut(section) { Timing() }.also { it.calls++; it.nanos += System.nanoTime() - start }
+        }
+    }
+
     class PrepareGraphData(
         val iobCobCalculator: IobCobCalculator, // cannot be injected : HistoryBrowser uses different instance
         val overviewData: OverviewData,
@@ -109,43 +131,78 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val bgDataReload: Boolean,
         val limitDataToOldestAvailable: Boolean,
         val triggeredByNewBG: Boolean,
-        val emitFinalProgress: Boolean
-    )
+        val emitFinalProgress: Boolean,
+        val invalidateFrom: Long? = null
+    ) {
+        private var workingAds: AutosensDataStore? = null
+        var ads: AutosensDataStore
+            get() = workingAds ?: iobCobCalculator.ads.clone().also { workingAds = it }
+            set(value) { workingAds = value }
+    }
 
     override suspend fun doWorkAndLog(): Result {
+        val started = System.nanoTime()
+        val startedAt = dateUtil.now()
+        var outcome = "INTERRUPTED"
+        try {
+            val result = if (inputData.getString(WorkflowChainData.JOB_KEY) == CalculationWorkflow.MAIN_CALCULATION)
+                workflowChainData.withMainCalculation { executeWork() }
+            else executeWork()
+            outcome = if (result is Result.Success) "SUCCEEDED" else "FAILED"
+            return result
+        }
+        finally {
+            val sections = timings.entries.joinToString(" ") { "${it.key}Calls=${it.value.calls} ${it.key}Ms=${it.value.nanos / 1_000_000}" }
+            aapsLogger.info(LTag.WORKER, "CalculationTiming job=${inputData.getString(WorkflowChainData.JOB_KEY)} generation=${inputData.getLong(WorkflowChainData.GEN_KEY, -1L)} startedAt=$startedAt finishedAt=${dateUtil.now()} stopped=$isStopped totalMs=${(System.nanoTime() - started) / 1_000_000} adsCacheHits=$adsCacheHits adsCacheMisses=$adsCacheMisses $sections")
+            telemetry { (publishedEvidence ?: org.json.JSONObject()).put("stage","FINISHED").put("outcome",outcome)
+                .put("calculationStartedAt",startedAt).put("calculationFinishedAt",dateUtil.now()).put("stopped",isStopped)
+                .put("calculationMs",(System.nanoTime()-started)/1_000_000).put("adsCacheHits",adsCacheHits).put("adsCacheMisses",adsCacheMisses)
+                .put("components",org.json.JSONArray().apply { timings.forEach { (name,timing) ->
+                    put(org.json.JSONObject().put("name",name).put("calls",timing.calls).put("durationMs",timing.nanos/1_000_000))
+                } }) }
+        }
+    }
+
+    private suspend fun executeWork(): Result {
         val data = workflowChainData.prepareFor(
             inputData.getString(WorkflowChainData.JOB_KEY),
             inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
         ) ?: return Result.failure(workDataOf("Error" to "missing or stale input data"))
 
+        data.invalidateFrom?.let {
+            data.ads.newHistoryData(it, aapsLogger, dateUtil)
+            data.iobCobCalculator.clearCache()
+        }
+
         // ===== Phase 1: Load BG into ads + smooth (was LoadBgDataWorker) =====
         if (data.bgDataReload) {
-            data.iobCobCalculator.ads.loadBgData(data.end)
-            data.iobCobCalculator.ads.smoothData()
+            measured("load") { data.ads.loadBgData(data.end) }
+            measured("smoothing") { data.ads.smoothData() }
             rxBus.send(EventBucketedDataCreated())
             data.iobCobCalculator.clearCache()
         }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         // ===== Phase 2: Bucketed data → cache (was PrepareBucketedDataWorker) =====
-        prepareBucketedData(data)
+        measured("bucketGraph") { prepareBucketedData(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         // ===== Phase 3: BG readings → cache (was PrepareBgDataWorker) =====
-        prepareBgData(data)
+        measured("bgGraph") { prepareBgData(data) }
 
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_BG, 100)
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
         // ===== Phases 4 & 5: IOB/COB autosens + graph data prep (was IobCobOref* + PrepareIobAutosens) =====
-        if (activePlugin.activeSensitivity.isOref1) runIobCobOref1(data) else runIobCobOref(data)
+        measured("autosensTotal") { if (activePlugin.activeSensitivity.isOref1) runIobCobOref1(data) else runIobCobOref(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
-        prepareIobAutosensGraphData(data)
+        measured("iobGraph") { prepareIobAutosensGraphData(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_IOB, 100)
 
         // ===== Phase 6: Final progress emit (terminal worker only) =====
         if (data.emitFinalProgress) {
+            data.iobCobCalculator.loopHealth?.completed(inputData.getLong(WorkflowChainData.GEN_KEY, -1L), dateUtil.now())
             data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
         }
 
@@ -161,6 +218,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val readings = persistenceLayer.getBgReadingsDataFromTimeToTime(start, to + T.mins(2).msecs(), false)
         synchronized(dataLock) {
             bgReadings = readings
+            pruneOlderThan(start)
             aapsLogger.debug(LTag.AUTOSENS) { "BG data loaded. Size: ${bgReadings.size} Start date: ${dateUtil.dateAndTimeString(start)} End date: ${dateUtil.dateAndTimeString(to)}" }
             createBucketedData(aapsLogger, dateUtil)
         }
@@ -180,7 +238,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     // ---------- Phase 2 (PrepareBucketedDataWorker logic) ----------
 
     private fun prepareBucketedData(data: PrepareGraphData) {
-        val bucketedData = data.iobCobCalculator.ads.getBucketedDataTableCopy() ?: return
+        val bucketedData = data.ads.getBucketedDataTableCopy() ?: return
         if (bucketedData.isEmpty()) {
             aapsLogger.debug("No bucketed data.")
             return
@@ -255,7 +313,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             }
             val oldestTimeWithData = data.iobCobCalculator.calculateDetectionStart(data.end, data.limitDataToOldestAvailable)
             // work on local copy and set back when finished
-            val ads = data.iobCobCalculator.ads.clone()
+            val ads = data.ads.clone()
             val bucketedData = ads.bucketedData
             val autosensDataTable = ads.autosensDataTable
             if (bucketedData == null || bucketedData.size < 3) {
@@ -283,10 +341,12 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 if (bgTime > ads.roundUpTime(dateUtil.now())) continue
                 var existing: AutosensData?
                 if (autosensDataTable[bgTime].also { existing = it } != null) {
+                    adsCacheHits++
                     previous = existing
                     continue
                 }
-                val profile = profileFunction.getProfile(bgTime)
+                adsCacheMisses++
+                val profile = measured("profile") { profileFunction.getProfile(bgTime) }
                 if (profile == null) {
                     aapsLogger.debug(LTag.AUTOSENS, "Aborting calculation thread (no profile): ${data.reason}")
                     continue
@@ -307,7 +367,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 delta = bg - bucketedData[i + 1].recalculated
                 avgDelta = (bg - bucketedData[i + 3].recalculated) / 3
                 val sens = profile.getIsfMgdlForCarbs(bgTime, "iobCobOref1Worker", config, processedDeviceStatusData)
-                val iob = data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile)
+                val iob = measured("treatmentsIob") { data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile) }
                 val bgi = -iob.activity * sens * 5
                 val deviation = delta - bgi
                 val avgDeviation = ((avgDelta - bgi) * 1000).roundToLong() / 1000.0
@@ -345,7 +405,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 }
                 // Use exclusive start (+1ms) to avoid double-counting carbs at window boundaries
                 // when consecutive 5-min windows share a boundary timestamp (issue #4596)
-                val recentCarbTreatments = persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true)
+                val recentCarbTreatments = measured("carbs") { persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true) }
                 for (recentCarbTreatment in recentCarbTreatments) {
                     autosensData.carbsFromBolus += recentCarbTreatment.amount
                     val isAAPSOrWeighted = activePlugin.activeSensitivity.isMinCarbsAbsorptionDynamic
@@ -446,16 +506,20 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 val hours = calendar[Calendar.HOUR_OF_DAY]
                 if (minute in 0..4 && hours % 2 == 0) autosensData.extraDeviation.add(0.0)
                 previous = autosensData
-                if (bgTime < dateUtil.now()) autosensDataTable.put(bgTime, autosensData)
+                if (bgTime < dateUtil.now()) {
+                    autosensDataTable.put(bgTime, autosensData)
+                    ads.putAutosensData(bgTime, autosensData)
+                }
                 aapsLogger.debug(LTag.AUTOSENS) {
                     "Running detectSensitivity from: " + dateUtil.dateAndTimeString(oldestTimeWithData) + " to: " + dateUtil.dateAndTimeString(bgTime) + " lastDataTime:" + ads.lastDataTime(dateUtil)
                 }
-                val sensitivity = activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches)
+                val sensitivity = measured("sensitivity") { activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches) }
                 aapsLogger.debug(LTag.AUTOSENS, "Sensitivity result: $sensitivity")
                 autosensData.autosensResult = sensitivity
+                if (bgTime < dateUtil.now()) ads.putAutosensData(bgTime, autosensData)
                 aapsLogger.debug(LTag.AUTOSENS) { autosensData.toString() }
             }
-            data.iobCobCalculator.ads = ads
+            publishAds(data, ads, start)
             Thread {
                 SystemClock.sleep(1000)
                 rxBus.send(EventAutosensCalculationFinished(data.triggeredByNewBG))
@@ -479,7 +543,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             }
             val oldestTimeWithData = data.iobCobCalculator.calculateDetectionStart(data.end, data.limitDataToOldestAvailable)
             // work on local copy and set back when finished
-            val ads = data.iobCobCalculator.ads.clone()
+            val ads = data.ads.clone()
             val bucketedData = ads.bucketedData
             val autosensDataTable = ads.autosensDataTable
             if (bucketedData == null || bucketedData.size < 3) {
@@ -507,10 +571,12 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 if (bgTime > ads.roundUpTime(dateUtil.now())) continue
                 var existing: AutosensData?
                 if (autosensDataTable[bgTime].also { existing = it } != null) {
+                    adsCacheHits++
                     previous = existing
                     continue
                 }
-                val profile = profileFunction.getProfile(bgTime)
+                adsCacheMisses++
+                val profile = measured("profile") { profileFunction.getProfile(bgTime) }
                 if (profile == null) {
                     aapsLogger.debug(LTag.AUTOSENS) { "Aborting calculation thread (no profile): ${data.reason}" }
                     continue
@@ -531,7 +597,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 delta = bg - bucketedData[i + 1].recalculated
                 avgDelta = (bg - bucketedData[i + 3].recalculated) / 3
                 val sens = profile.getIsfMgdlForCarbs(bgTime, "IobCobOrefWorker", config, processedDeviceStatusData)
-                val iob = data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile)
+                val iob = measured("treatmentsIob") { data.iobCobCalculator.calculateFromTreatmentsAndTemps(bgTime, profile) }
                 val bgi = -iob.activity * sens * 5
                 val deviation = delta - bgi
                 val avgDeviation = ((avgDelta - bgi) * 1000).roundToLong() / 1000.0
@@ -567,7 +633,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                     }
                 }
                 // Use exclusive start (+1ms) to avoid double-counting carbs at window boundaries (issue #4596)
-                val recentCarbTreatments = persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true)
+                val recentCarbTreatments = measured("carbs") { persistenceLayer.getCarbsFromTimeToTimeExpanded(bgTime - T.mins(5).msecs() + 1, bgTime, true) }
                 for (recentCarbTreatment in recentCarbTreatments) {
                     autosensData.carbsFromBolus += recentCarbTreatment.amount
                     val isAAPSOrWeighted = activePlugin.activeSensitivity.isMinCarbsAbsorptionDynamic
@@ -630,16 +696,20 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                     autosensData.pastSensitivity += "C"
                 }
                 previous = autosensData
-                if (bgTime < dateUtil.now()) autosensDataTable.put(bgTime, autosensData)
+                if (bgTime < dateUtil.now()) {
+                    autosensDataTable.put(bgTime, autosensData)
+                    ads.putAutosensData(bgTime, autosensData)
+                }
                 aapsLogger.debug(LTag.AUTOSENS) {
                     "Running detectSensitivity from: ${dateUtil.dateAndTimeString(oldestTimeWithData)} to: ${dateUtil.dateAndTimeString(bgTime)} lastDataTime:${ads.lastDataTime(dateUtil)}"
                 }
-                val sensitivity = activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches)
+                val sensitivity = measured("sensitivity") { activePlugin.activeSensitivity.detectSensitivity(ads, oldestTimeWithData, bgTime, sensitivityProfile, siteChanges, profileSwitches) }
                 aapsLogger.debug(LTag.AUTOSENS) { "Sensitivity result: $sensitivity" }
                 autosensData.autosensResult = sensitivity
+                if (bgTime < dateUtil.now()) ads.putAutosensData(bgTime, autosensData)
                 aapsLogger.debug(LTag.AUTOSENS, autosensData.toString())
             }
-            data.iobCobCalculator.ads = ads
+            publishAds(data, ads, start)
             Thread {
                 SystemClock.sleep(1000)
                 rxBus.send(EventAutosensCalculationFinished(data.triggeredByNewBG))
@@ -648,6 +718,28 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             data.signals.emitProgress(CalculationWorkflow.ProgressData.IOB_COB_OREF, 100)
             aapsLogger.debug(LTag.AUTOSENS) { "AUTOSENSDATA thread ended: ${data.reason}" }
             profiler.log(LTag.AUTOSENS, "IobCobThread", start)
+        }
+    }
+
+    private fun publishAds(data: PrepareGraphData, ads: AutosensDataStore, startedAt: Long) {
+        val job = inputData.getString(WorkflowChainData.JOB_KEY)
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        if (!workflowChainData.publishIfCurrent(job, generation, { isStopped }) {
+                ads.markCalculationCompleted()
+                data.ads = ads
+                data.iobCobCalculator.ads = ads
+                val pass = ads.lastBucketPass
+                try { publishedEvidence = org.json.JSONObject().put("rawBgTimestamp",ads.bgReadings.firstOrNull()?.timestamp ?: org.json.JSONObject.NULL)
+                    .put("bucketBgTimestamp",ads.lastBg()?.timestamp ?: org.json.JSONObject.NULL).put("published",true)
+                    .put("referenceTimeUsed",pass?.referenceTimeUsed ?: org.json.JSONObject.NULL).put("referenceTimeAfterPass",ads.bucketReferenceTime)
+                    .put("bucketStartedAt",pass?.startedAt ?: org.json.JSONObject.NULL).put("bucketFinishedAt",pass?.finishedAt ?: org.json.JSONObject.NULL)
+                } catch (error: Exception) {
+                    aapsLogger.error(LTag.WORKER,"Publication telemetry failed type=${error.javaClass.simpleName}")
+                }
+                aapsLogger.info(LTag.WORKER, "CgmDecision stage=ADS_PUBLISHED generation=$generation rawBgTimestamp=${ads.bgReadings.firstOrNull()?.timestamp} bucketBgTimestamp=${ads.lastBg()?.timestamp} referenceTimeUsed=${pass?.referenceTimeUsed} referenceTimeAfterPass=${ads.bucketReferenceTime} bucketStartedAt=${pass?.startedAt} bucketFinishedAt=${pass?.finishedAt} calculationStartedAt=$startedAt publishedAt=${dateUtil.now()}")
+            }) {
+            data.iobCobCalculator.loopHealth?.publishSkipped()
+            aapsLogger.info(LTag.WORKER, "CgmDecision stage=ADS_PUBLISH_SKIPPED generation=$generation activeGeneration=${workflowChainData.activeGeneration(job)} job=$job stopped=$isStopped reason=STALE_GENERATION_OR_STOPPED calculationStartedAt=$startedAt finishedAt=${dateUtil.now()}")
         }
     }
 
@@ -677,7 +769,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val dsMaxListCompose: MutableList<GraphDataPoint> = ArrayList()
         val dsMinListCompose: MutableList<GraphDataPoint> = ArrayList()
 
-        val adsData = data.iobCobCalculator.ads.clone()
+        val adsData = data.ads.clone()
 
         while (time <= endTime) {
             if (isStopped) return

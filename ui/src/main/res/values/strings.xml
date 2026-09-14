@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_disf">dISF</string>
+    <string name="apex7_tdd">TDD used (U)</string>
+    <string name="apex7_insulin_divisor">Insulin divisor</string>
+    <string name="apex7_updated_seconds">Updated %1$d s ago</string>
+    <string name="apex7_updated_minutes">Updated %1$d min ago</string>
     <string name="cancel_action_with_details" comment="%1$s=the word Cancel, %2$s=the active item being cancelled (e.g. a running temp basal or extended bolus description). Example: 'Cancel 150% 30min'">%1$s %2$s</string>
     <string name="no_temp_basal_running">No temp basal running</string>
     <string name="start_activity_tt">Start Activity TT</string>

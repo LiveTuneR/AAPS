@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_disf">dISF</string>
+    <string name="apex7_tdd">TDD в расчёте (Е)</string>
+    <string name="apex7_insulin_divisor">Делитель инсулина</string>
+    <string name="apex7_updated_seconds">Обновлено %1$d с назад</string>
+    <string name="apex7_updated_minutes">Обновлено %1$d мин назад</string>
     <string name="start_activity_tt">Включить временную цель TT Нагрузка</string>
     <string name="start_eating_soon_tt">Включить временную цель TT Ожидаемый прием пищи</string>
     <string name="start_hypo_tt">Начать временную цель ТТ Гипо</string>

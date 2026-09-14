@@ -12,6 +12,8 @@ import app.aaps.core.interfaces.profile.Profile
 
 interface IobCobCalculator {
 
+    val loopHealth: app.aaps.core.data.diagnostics.LoopHealthTracker? get() = null
+
     var ads: AutosensDataStore
 
     suspend fun getMealDataWithWaitingForCalculationFinish(): MealData

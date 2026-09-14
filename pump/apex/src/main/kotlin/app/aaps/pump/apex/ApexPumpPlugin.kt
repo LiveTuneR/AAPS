@@ -46,7 +46,9 @@ import app.aaps.pump.apex.connectivity.ProtocolVersion
 import app.aaps.pump.apex.connectivity.commands.pump.AlarmLength
 import app.aaps.pump.apex.misc.BatteryType
 import app.aaps.pump.apex.compose.ApexComposeContent
+import app.aaps.pump.apex.bolus.ApexBolusCoordinator
 import app.aaps.pump.apex.diagnostics.ApexTrace
+import app.aaps.pump.apex.diagnostics.ApexTherapyAttemptTracker
 import app.aaps.pump.apex.utils.keys.ApexBooleanKey
 import app.aaps.pump.apex.utils.keys.ApexDoubleKey
 import app.aaps.pump.apex.utils.keys.ApexStringKey
@@ -80,6 +82,8 @@ class ApexPumpPlugin @Inject constructor(
     private val constraintsChecker: ConstraintsChecker,
     private val commDirector: ApexCommDirector,
     private val trace: ApexTrace,
+    private val bolusCoordinator: ApexBolusCoordinator,
+    private val therapyAttemptTracker: ApexTherapyAttemptTracker,
 ): PumpPluginBase(
     PluginDescription()
         .mainType(PluginType.PUMP)
@@ -90,6 +94,7 @@ class ApexPumpPlugin @Inject constructor(
                 pump = pump,
                 commDirector = commDirector,
                 trace = trace,
+                bolusCoordinator = bolusCoordinator,
                 preferences = preferences,
             )
         }
@@ -151,6 +156,38 @@ class ApexPumpPlugin @Inject constructor(
 
     override fun manufacturer() = ManufacturerType.Apex
     override fun model() = PumpType.APEX_TRUCARE_III
+    override fun readOnlyDiagnostics(): app.aaps.core.data.diagnostics.PumpDiagnosticState {
+        val snapshot = commDirector.diagnosticSnapshot()
+        val version = pump.firmwareVersion
+        val unresolved = bolusCoordinator.current()
+        val therapyAttempt = therapyAttemptTracker.current()
+        return app.aaps.core.data.diagnostics.PumpDiagnosticState(
+            snapshot.state, snapshot.generation, snapshot.queuedCommands, snapshot.pendingCommand,
+            snapshot.pendingAgeMs, snapshot.progressAgeMs,
+            version?.let { "${it.firmwareMajor}.${it.firmwareMinor}" },
+            version?.let { "${it.protocolMajor}.${it.protocolMinor}" },
+            serialNumber().takeIf { it.isNotBlank() }?.let { "***${it.takeLast(3)}" },
+            bolusReconciliationRequired = unresolved != null,
+            bolusOperationId = unresolved?.operationUuid,
+            bolusState = unresolved?.state?.name,
+            bolusRequestedU = unresolved?.requestedUnits,
+            bolusLiveCompletedU = unresolved?.completedSteps?.let(ApexService::decodeDoseSteps),
+            bolusHistoryConfirmedU = unresolved?.matchedPerformedSteps?.let(ApexService::decodeDoseSteps),
+            bolusOperationCreatedUtc = unresolved?.createdUtc,
+            bolusLastReconciliationUtc = unresolved?.lastReconciliationUtc,
+            bolusTransportWriteIssued = unresolved?.transportWriteIssued,
+            bolusLatestHistoryResult = unresolved?.latestHistoryResult,
+            bolusFullHistoryResult = unresolved?.fullHistoryResult,
+            bolusReconciliationReason = unresolved?.reconciliationReason,
+            lastTherapyAttemptUtc = therapyAttempt?.timestamp,
+            lastTherapyRequestType = therapyAttempt?.requestType,
+            lastTherapyRequestedAmount = therapyAttempt?.requestedAmount,
+            lastTherapyDurationMinutes = therapyAttempt?.durationMinutes,
+            lastTherapyResult = therapyAttempt?.result,
+            lastTherapyFailureLayer = therapyAttempt?.failureLayer,
+            lastTherapyReason = therapyAttempt?.reason,
+        )
+    }
     override fun serialNumber() = preferences.get(ApexStringKey.LastConnectedSerialNumber)
 
     override val baseBasalRate: PumpRate
@@ -199,6 +236,11 @@ class ApexPumpPlugin @Inject constructor(
     suspend fun refreshForUi() {
         service?.getStatus("ApexComposeContent", force = true)
     }
+
+    suspend fun reconcileBolusForUi(): Boolean = service?.reconcileBolusForUi() ?: false
+
+    suspend fun operatorConfirmBolusNotDelivered(operationUuid: String): Boolean =
+        service?.operatorConfirmBolusNotDelivered(operationUuid) ?: false
 
     fun getJSONStatus(profile: Profile, profileName: String, version: String): JSONObject {
         val now = System.currentTimeMillis()
@@ -374,9 +416,10 @@ class ApexPumpPlugin @Inject constructor(
             }
 
         return pumpEnactResult.apply {
-            success = !bolus.failed
+            success = !bolus.failed && !bolus.uncertain
             enacted = bolus.currentDose > 0.024
             bolusDelivered = bolus.currentDose
+            if (bolus.uncertain) comment = rh.gs(R.string.bolus_reconciliation_required)
         }
     }
 
@@ -503,6 +546,10 @@ class ApexPumpPlugin @Inject constructor(
     }
 
     override fun applyBolusConstraints(insulin: Constraint<Double>): Constraint<Double> {
+        if (bolusCoordinator.safetyGateActive) {
+            insulin.set(0.0, rh.gs(R.string.bolus_reconciliation_required), this)
+            return insulin
+        }
         insulin.setIfSmaller(pump.maxBolus, rh.gs(app.aaps.core.ui.R.string.limitingbolus, pump.maxBolus, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this)
 
         // Pump starts a "No dosage" alarm on 5.0U reservoir level.

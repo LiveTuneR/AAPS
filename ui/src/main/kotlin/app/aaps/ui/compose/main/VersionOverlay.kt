@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.aaps.core.keys.LongComposedKey
+import app.aaps.core.keys.BooleanKey
 import app.aaps.core.ui.compose.AapsTheme
 import app.aaps.core.ui.compose.LocalConfig
 import app.aaps.core.ui.compose.LocalPreferences
@@ -20,7 +21,7 @@ fun VersionOverlay(
 ) {
     val config = LocalConfig.current
     val preferences = LocalPreferences.current
-    if (config.APS || config.PUMPCONTROL) {
+    if ((config.APS || config.PUMPCONTROL) && !preferences.get(BooleanKey.OverviewEnhanced)) {
         val colors = AapsTheme.generalColors
         val versionColor = when {
             config.COMMITTED                                                          -> colors.versionCommitted

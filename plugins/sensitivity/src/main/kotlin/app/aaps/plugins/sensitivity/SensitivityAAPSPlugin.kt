@@ -57,12 +57,13 @@ class SensitivityAAPSPlugin @Inject constructor(
         siteChanges: List<TE>,
         profileSwitches: List<PS>
     ): AutosensResult {
+        val table = ads.autosensDataTable
         val hoursForDetection = preferences.get(IntKey.AutosensPeriod)
         if (profile == null) {
             aapsLogger.error("No profile")
             return AutosensResult()
         }
-        if (ads.autosensDataTable.size() < 4) {
+        if (table.size() < 4) {
             aapsLogger.debug(LTag.AUTOSENS, "No autosens data available. lastDataTime=" + ads.lastDataTime(dateUtil))
             return AutosensResult()
         }
@@ -74,9 +75,9 @@ class SensitivityAAPSPlugin @Inject constructor(
         val deviationsArray: MutableList<Double> = ArrayList()
         val pastSensitivity = StringBuilder()
         // start the scan at the detection window instead of walking the whole table on every call
-        var index = firstIndexAtOrAfter(ads.autosensDataTable, toTime - hoursForDetection * 60 * 60 * 1000L)
-        while (index < ads.autosensDataTable.size()) {
-            val autosensData = ads.autosensDataTable.valueAt(index)
+        var index = firstIndexAtOrAfter(table, toTime - hoursForDetection * 60 * 60 * 1000L)
+        while (index < table.size()) {
+            val autosensData = table.valueAt(index)
             if (autosensData.time < fromTime) {
                 index++
                 continue

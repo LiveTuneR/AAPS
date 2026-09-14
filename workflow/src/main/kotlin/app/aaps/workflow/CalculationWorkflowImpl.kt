@@ -7,6 +7,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import app.aaps.core.data.workflow.CalculationIntent
+import app.aaps.core.data.workflow.LatestPendingCalculation
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -21,6 +23,15 @@ import app.aaps.core.utils.worker.then
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import java.util.UUID
 
 @Singleton
 class CalculationWorkflowImpl @Inject constructor(
@@ -43,6 +54,16 @@ class CalculationWorkflowImpl @Inject constructor(
     // silently dropped. Lock is held only across the enqueue itself — microseconds, no real
     // contention cost.
     private val enqueueLock = Any()
+    internal var observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal var observeMainWork = true
+    internal var schedulerOverride: LatestPendingCalculation? = null
+    private val mainScheduler: LatestPendingCalculation by lazy {
+        (schedulerOverride ?: LatestPendingCalculation(CalculationPreferenceJournal(
+            context.getSharedPreferences("apex7-calculation-journal", Context.MODE_PRIVATE)
+        ))).also { workflowChainData.mainScheduler = it }
+    }
+    private var mainBindings: PrepareGraphDataWorker.PrepareGraphData? = null
+    @Inject lateinit var therapyTelemetry: Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
 
     init {
         // Verify definition
@@ -51,7 +72,16 @@ class CalculationWorkflowImpl @Inject constructor(
         require(sumPercent == 100)
     }
 
-    override fun stopCalculation(job: String, from: String) {
+    override fun stopCalculation(job: String, from: String, invalidateFrom: Long?) {
+        synchronized(enqueueLock) {
+            if (job == MAIN_CALCULATION) mainScheduler.holdHistory(dateUtil.now(), invalidateFrom ?: 0)
+            workflowChainData.invalidate(job)
+        }
+        if (job == MAIN_CALCULATION) {
+            // Invalidated work drains behind the single producer mutex; a BG never cancels it.
+            aapsLogger.info(LTag.WORKER, "Scheduler stage=INVALIDATED reason=$from")
+            return
+        }
         aapsLogger.debug(LTag.WORKER, "Stopping calculation thread: $from")
         val workManager = WorkManager.getInstance(context)
         workManager.cancelUniqueWork(job)
@@ -94,7 +124,9 @@ class CalculationWorkflowImpl @Inject constructor(
         reason: String,
         end: Long,
         bgDataReload: Boolean,
-        triggeredByNewBG: Boolean
+        triggeredByNewBG: Boolean,
+        invalidateFrom: Long?,
+        rawBgTimestamp: Long?
     ) {
         aapsLogger.debug(LTag.WORKER, "Starting calculation worker: $reason to ${dateUtil.dateAndTimeAndSecondsString(end)}")
 
@@ -110,8 +142,22 @@ class CalculationWorkflowImpl @Inject constructor(
             limitDataToOldestAvailable = isMain,
             triggeredByNewBG = triggeredByNewBG,
             // HISTORY ends here, so emit DRAW_FINAL inline. MAIN delegates to PostCalculationWorker.
-            emitFinalProgress = !isMain
+            emitFinalProgress = !isMain,
+            invalidateFrom = invalidateFrom
         )
+        if (isMain) {
+            synchronized(enqueueLock) {
+                mainBindings = prepare
+                val intent = CalculationIntent(end, dateUtil.now(), rawBgTimestamp ?: end.takeIf { triggeredByNewBG },
+                    invalidateFrom, bgDataReload, triggeredByNewBG,
+                    therapy = !triggeredByNewBG && reason != "onEventAppInitialized")
+                mainScheduler.offer(intent)
+                if (intent.therapy) workflowChainData.invalidate(MAIN_CALCULATION)
+                logMainState("OFFER")
+                startPendingMain()
+            }
+            return
+        }
         synchronized(enqueueLock) {
             val generation = if (isMain) {
                 val post = PostCalculationWorker.PostCalculationData(
@@ -145,6 +191,90 @@ class CalculationWorkflowImpl @Inject constructor(
                 )
                 .enqueue()
         }
+    }
+
+    private fun startPendingMain() {
+        val bindings = mainBindings ?: return
+        val active = mainScheduler.startNext(dateUtil.now()) ?: return
+        val intent = active.intent
+        val prepare = PrepareGraphDataWorker.PrepareGraphData(bindings.iobCobCalculator, bindings.overviewData, bindings.cache,
+            bindings.signals, if (intent.therapy) "OrderedHistory" else if (intent.recovered) "RecoveredReload" else "LatestBG",
+            intent.end, intent.reloadBg || intent.recovered, true, intent.newBg, false, intent.invalidateFrom)
+        val post = PostCalculationWorker.PostCalculationData(bindings.overviewData, bindings.cache, bindings.signals, intent.newBg, true,
+            therapyRecalculation = intent.therapy && !intent.recovered)
+        workflowChainData.startMain(prepare, post, active.generation)
+        val input = dataForJob(MAIN_CALCULATION, active.generation)
+        val tail = OneTimeWorkRequest.Builder(PostCalculationWorker::class.java).setInputData(input).build()
+        // APPEND_OR_REPLACE preserves WM ordering across cancellation/restart. The in-process
+        // queue (not WM KEEP) owns latest-pending coalescing; the producer mutex also drains stopped workers.
+        try {
+            val operation = WorkManager.getInstance(context).beginUniqueWork(MAIN_CALCULATION, ExistingWorkPolicy.APPEND_OR_REPLACE,
+                OneTimeWorkRequest.Builder(PrepareGraphDataWorker::class.java).setInputData(input).addTag(prepareTag(MAIN_CALCULATION)).build())
+                .then(tail).enqueue()
+            operation.result.addListener({
+                try { operation.result.get() }
+                catch (error: Exception) { enqueueFailed(active.generation,error) }
+            }, { action -> observerScope.launch { action.run() } })
+        } catch (error: Exception) { enqueueFailed(active.generation,error); return }
+        logMainState("START")
+        if (observeMainWork) observeMainCompletion(tail.id, active.generation)
+    }
+
+    private fun observeMainCompletion(id: UUID, generation: Long) {
+        observerScope.launch {
+            var retry = 1000L
+            while (mainScheduler.snapshot().active?.generation == generation) {
+                try {
+                    // Periodically re-check ownership if enqueue failed before WorkManager emitted a row.
+                    val result = kotlinx.coroutines.withTimeoutOrNull(30_000L) {
+                        WorkManager.getInstance(context).getWorkInfoByIdFlow(id).filterNotNull().first { it.state.isFinished }
+                    } ?: continue
+                    mainFinished(generation, result.state == WorkInfo.State.SUCCEEDED)
+                    return@launch
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    aapsLogger.error(LTag.WORKER, "Scheduler completion observation failed generation=$generation type=${error.javaClass.simpleName} retryMs=$retry")
+                    delay(retry)
+                    retry = (retry * 2).coerceAtMost(30_000L)
+                }
+            }
+        }
+    }
+
+    private fun enqueueFailed(generation: Long, error: Exception) = synchronized(enqueueLock) {
+        val active = mainScheduler.snapshot().active?.takeIf { it.generation==generation } ?: return@synchronized
+        aapsLogger.error(LTag.WORKER,"Scheduler enqueue failed generation=$generation type=${error.javaClass.simpleName}")
+        // Only reload intent is retried. No result or insulin command is replayed.
+        mainScheduler.finish(generation,dateUtil.now(),false)
+        mainScheduler.offer(active.intent.copy(recovered=true,reloadBg=true))
+        logMainState("ENQUEUE_RETRY_PENDING")
+        observerScope.launch { delay(5000); synchronized(enqueueLock) { startPendingMain() } }
+    }
+
+    internal fun mainFinished(generation: Long, succeeded: Boolean) = synchronized(enqueueLock) {
+        val active = mainScheduler.snapshot().active
+        if (!mainScheduler.finish(generation, dateUtil.now(), succeeded)) return@synchronized
+        if (!succeeded && active?.valid == true) {
+            mainScheduler.offer(active.intent.copy(recovered = true, reloadBg = true))
+            logMainState("RELOAD_RETRY_PENDING")
+            observerScope.launch { delay(5000); synchronized(enqueueLock) { startPendingMain() } }
+            return@synchronized
+        }
+        logMainState(if (succeeded) "FINISH" else "CANCEL_OR_FAILURE")
+        startPendingMain()
+    }
+
+    private fun logMainState(stage: String) {
+        val state = mainScheduler.snapshot()
+        aapsLogger.info(LTag.WORKER, "Scheduler stage=$stage activeGeneration=${state.active?.generation} activeBg=${state.active?.intent?.rawBgTimestamp} pendingBg=${state.pending?.rawBgTimestamp} pendingHistory=${state.pending?.invalidateFrom} coalesced=${state.coalescedBgCount} completed=${state.completedCount} cancelled=${state.cancelledCount} staleRejects=${state.staleRejectCount} lastDurationMs=${state.lastDurationMs} oldestPendingAgeMs=${state.pending?.let { (dateUtil.now() - it.requestedAt).coerceAtLeast(0) }}")
+        if (::therapyTelemetry.isInitialized) try {
+            therapyTelemetry.get().record(app.aaps.core.interfaces.telemetry.TherapyEventType.SCHEDULER,org.json.JSONObject()
+                .put("stage",stage).put("rawBgTimestamp",state.active?.intent?.rawBgTimestamp ?: org.json.JSONObject.NULL)
+                .put("activeGeneration",state.active?.generation ?: org.json.JSONObject.NULL).put("activeStartedAt",state.active?.startedAt ?: org.json.JSONObject.NULL)
+                .put("pendingBg",state.pending?.rawBgTimestamp ?: org.json.JSONObject.NULL).put("pendingHistory",state.pending?.invalidateFrom ?: org.json.JSONObject.NULL)
+                .put("coalesced",state.coalescedBgCount).put("completed",state.completedCount).put("cancelled",state.cancelledCount)
+                .put("staleRejects",state.staleRejectCount).put("calculationMs",state.lastDurationMs ?: org.json.JSONObject.NULL),state.active?.generation)
+        } catch (error: Exception) { aapsLogger.error(LTag.WORKER,"Scheduler telemetry failed type=${error.javaClass.simpleName}") }
     }
 
     override fun runOnReceivedPredictions(overviewData: OverviewData) {

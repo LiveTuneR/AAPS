@@ -24,6 +24,8 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.doAnswer
+import org.mockito.kotlin.times
 import kotlin.test.assertIs
 
 class PostCalculationWorkerTest : TestBaseWithProfile() {
@@ -85,7 +87,8 @@ class PostCalculationWorkerTest : TestBaseWithProfile() {
         whenever(iobCobCalculator.ads).thenReturn(ads)
         whenever(ads.actualBg()).thenReturn(bg)
         whenever(loop.lastBgTriggeredRun).thenReturn(0L)
-        val data = dataWith(triggeredByNewBG = true, runLoopAndWidgetPhase = true)
+        // A DB replacement must retain the loop opportunity even without the NewBG flag.
+        val data = dataWith(triggeredByNewBG = false, runLoopAndWidgetPhase = true)
         whenever(workflowChainData.postFor(anyOrNull(), any())).thenReturn(data)
 
         val result = worker().doWorkAndLog()
@@ -93,5 +96,31 @@ class PostCalculationWorkerTest : TestBaseWithProfile() {
         Assertions.assertEquals(ListenableWorker.Result.success(), result)
         verify(loop).invoke(any(), any(), any())
         verify(widgetUpdater).update("WorkFlow")
+    }
+
+    @Test
+    fun `duplicate completed chains do not invoke twice for one BG`() = runTest {
+        val ads = mock<AutosensDataStore>()
+        val bg = InMemoryGlucoseValue(5000L, 100.0, sourceSensor = app.aaps.core.data.model.SourceSensor.UNKNOWN)
+        whenever(iobCobCalculator.ads).thenReturn(ads)
+        whenever(ads.actualBg()).thenReturn(bg)
+        var claimed = 0L
+        whenever(loop.lastBgTriggeredRun).thenAnswer { claimed }
+        doAnswer { claimed = it.getArgument(0); null }.whenever(loop).lastBgTriggeredRun = any()
+        val data = dataWith(false, true)
+        whenever(workflowChainData.postFor(anyOrNull(), any())).thenReturn(data)
+        repeat(100) { worker().doWorkAndLog() }
+        verify(loop, times(1)).invoke(any(), any(), any())
+        Assertions.assertEquals(5000L, claimed)
+    }
+
+    @Test
+    fun `no actual BG never invokes loop`() = runTest {
+        val ads = mock<AutosensDataStore>()
+        whenever(iobCobCalculator.ads).thenReturn(ads)
+        val data = dataWith(false, true)
+        whenever(workflowChainData.postFor(anyOrNull(), any())).thenReturn(data)
+        worker().doWorkAndLog()
+        verify(loop, never()).invoke(any(), any(), any())
     }
 }

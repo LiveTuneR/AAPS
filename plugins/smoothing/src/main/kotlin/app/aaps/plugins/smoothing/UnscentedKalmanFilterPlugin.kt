@@ -808,7 +808,7 @@ class UnscentedKalmanFilterPlugin @Inject constructor(
             }
 
             // Diagnostics on outliers, using effective covariance.
-            if (mahalSqEff > chiSquaredThreshold || abs(innovation) > outlierAbsolute) {
+            if (isNewData && (mahalSqEff > chiSquaredThreshold || abs(innovation) > outlierAbsolute)) {
                 aapsLogger.debug(
                     LTag.GLUCOSE,
                     "UKF: Outlier detected - χ²=${String.format(Locale.US, "%.2f", mahalSqEff)}, " +
@@ -827,7 +827,7 @@ class UnscentedKalmanFilterPlugin @Inject constructor(
             }
 
             // Logging with effective parameters (just switch to xPredEff for consistency).
-            aapsLogger.warn(
+            if (isNewData) aapsLogger.debug(
                 LTag.GLUCOSE,
                 "UKF: live R=${String.format(Locale.US, "%.1f", r)}, " +
                     "R_eff=${String.format(Locale.US, "%.1f", rEff)}, " +

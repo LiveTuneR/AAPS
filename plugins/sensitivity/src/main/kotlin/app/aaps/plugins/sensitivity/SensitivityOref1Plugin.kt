@@ -52,11 +52,12 @@ class SensitivityOref1Plugin @Inject constructor(
         siteChanges: List<TE>,
         profileSwitches: List<PS>
     ): AutosensResult {
+        val table = ads.autosensDataTable
         if (profile == null) {
             aapsLogger.error("No profile")
             return AutosensResult()
         }
-        if (ads.autosensDataTable.size() < 4) {
+        if (table.size() < 4) {
             aapsLogger.debug(LTag.AUTOSENS, "No autosens data available. lastDataTime=" + ads.lastDataTime(dateUtil))
             return AutosensResult()
         }
@@ -77,17 +78,21 @@ class SensitivityOref1Plugin @Inject constructor(
         val deviationCategory = listOf(96.0, 288.0)
         val ratioLimitArray = mutableListOf("", "")
         val hoursDetection = listOf(8.0, 24.0)
-        var index = 0
-        while (index < ads.autosensDataTable.size()) {
-            val autosensData = ads.autosensDataTable.valueAt(index)
+        val scanStart = System.nanoTime()
+        val tableSize = table.size()
+        val firstRelevantIndex = autosensLowerBound(tableSize, fromTime) { table.keyAt(it) }
+        var index = firstRelevantIndex
+        var rowsProcessed = 0
+        while (index < table.size()) {
+            val autosensData = table.valueAt(index)
             if (autosensData.time < fromTime) {
                 index++
                 continue
             }
             if (autosensData.time > toTime) {
-                index++
-                continue
+                break
             }
+            rowsProcessed++
             var hourSegment = 0
             //hourSegment = 0 = 8 hour
             //hourSegment = 1 = 24 hour
@@ -128,6 +133,7 @@ class SensitivityOref1Plugin @Inject constructor(
             index++
         }
 
+        aapsLogger.debug(LTag.AUTOSENS, "Oref1 range autosensTableSize=$tableSize firstRelevantIndex=$firstRelevantIndex rowsProcessed=$rowsProcessed durationMs=${(System.nanoTime() - scanStart) / 1_000_000}")
         // when we have less than 8h/24 worth of deviation data, add up to 90m of zero deviations
         // this dampens any large sensitivity changes detected based on too little data, without ignoring them completely
         for (i in deviationsHour.indices) {

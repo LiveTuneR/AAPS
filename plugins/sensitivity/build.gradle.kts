@@ -21,6 +21,8 @@ dependencies {
     implementation(project(":core:ui"))
 
     testImplementation(project(":shared:tests"))
+    testImplementation(project(":implementation"))
+    testImplementation(project(":plugins:main"))
 
     ksp(libs.com.google.dagger.compiler)
     ksp(libs.com.google.dagger.hilt.compiler)

@@ -43,6 +43,17 @@ class PumpSyncImplementation @Inject constructor(
     private val persistenceLayer: PersistenceLayer,
     private val activePlugin: ActivePlugin
 ) : PumpSync {
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
+
+    private fun reconciliation(values: () -> org.json.JSONObject) {
+        if (!::therapyTelemetry.isInitialized) return
+        try {
+            val command=app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
+            therapyTelemetry.get().record(app.aaps.core.interfaces.telemetry.TherapyEventType.HISTORY_RECONCILIATION,
+                values().put("source","PUMP_SYNC").put("stage","DATABASE_SYNC_RETURNED")
+                    .put("queueRequestId",command?.requestId ?: org.json.JSONObject.NULL),command?.generation,command?.decisionId ?: command?.requestId)
+        } catch (error: Exception) { aapsLogger.error(LTag.PUMP,"History telemetry failed type=${error.javaClass.simpleName}") }
+    }
 
     override fun connectNewPump(endRunning: Boolean) {
         if (endRunning) {
@@ -65,7 +76,7 @@ class PumpSyncImplementation @Inject constructor(
         val storedSerial = preferences.get(StringNonKey.ActivePumpSerialNumber)
         if (activePlugin.activePump.selectedActivePump() is VirtualPump) return true
         if (type.description == storedType && serialNumber == storedSerial) return true
-        aapsLogger.debug(LTag.PUMP, "verifyPumpIdentification failed for $type $serialNumber")
+        aapsLogger.debug(LTag.PUMP, "verifyPumpIdentification failed for $type [SERIAL_REDACTED]")
         return false
     }
 
@@ -84,7 +95,7 @@ class PumpSyncImplementation @Inject constructor(
 
         // If no value stored assume we start using new pump from now
         if (storedType.isEmpty() || storedSerial.isEmpty()) {
-            aapsLogger.debug(LTag.PUMP, "Registering new pump ${type.description} $serialNumber")
+            aapsLogger.debug(LTag.PUMP, "Registering new pump ${type.description} [SERIAL_REDACTED]")
             preferences.put(StringNonKey.ActivePumpType, type.description)
             preferences.put(StringNonKey.ActivePumpSerialNumber, serialNumber)
             preferences.put(LongNonKey.ActivePumpChangeTimestamp, dateUtil.now()) // allow only data newer than register time (ie. ignore older history)
@@ -100,9 +111,9 @@ class PumpSyncImplementation @Inject constructor(
             notificationManager.post(NotificationId.WRONG_PUMP_DATA, R.string.wrong_pump_data)
         aapsLogger.error(
             LTag.PUMP,
-            "Ignoring pump history record  Allowed: ${dateUtil.dateAndTimeAndSecondsString(storedTimestamp)} $storedType $storedSerial Received: $timestamp ${
+            "Ignoring pump history record  Allowed: ${dateUtil.dateAndTimeAndSecondsString(storedTimestamp)} $storedType [SERIAL_REDACTED] Received: $timestamp ${
                 dateUtil.dateAndTimeAndSecondsString(timestamp)
-            } ${type.description} $serialNumber"
+            } ${type.description} [SERIAL_REDACTED]"
         )
         return false
     }
@@ -190,6 +201,9 @@ class PumpSyncImplementation @Inject constructor(
             return false
         }
         val result = persistenceLayer.syncPumpBolusWithTempId(bolus, type)
+        reconciliation { org.json.JSONObject().put("commandType","BOLUS").put("eventTimestamp",timestamp)
+            .put("model",pumpType.name).put("pumpId",pumpId ?: org.json.JSONObject.NULL).put("temporaryId",temporaryId)
+            .put("reportedDeliveredPumpUnits",amount.cU).put("storedAmountU",bolus.amount).put("updatedRows",result.updated.size) }
         return result.updated.isNotEmpty()
     }
 
@@ -212,6 +226,9 @@ class PumpSyncImplementation @Inject constructor(
             return false
         }
         val result = persistenceLayer.syncPumpBolus(bolus, type)
+        reconciliation { org.json.JSONObject().put("commandType","BOLUS").put("eventTimestamp",timestamp)
+            .put("model",pumpType.name).put("pumpId",pumpId).put("reportedDeliveredPumpUnits",amount.cU)
+            .put("storedAmountU",bolus.amount).put("insertedRows",result.inserted.size).put("updatedRows",result.updated.size) }
         return result.inserted.isNotEmpty()
     }
 
@@ -332,12 +349,17 @@ class PumpSyncImplementation @Inject constructor(
             return false
         }
         val result = persistenceLayer.syncPumpTemporaryBasal(temporaryBasal, type?.toDbType())
+        reconciliation { org.json.JSONObject().put("commandType","TBR").put("eventTimestamp",timestamp).put("model",pumpType.name)
+            .put("pumpId",pumpId).put("ratePumpUnits",rate.cU).put("storedRate",temporaryBasal.rate).put("isAbsolute",isAbsolute)
+            .put("durationMs",duration).put("insertedRows",result.inserted.size).put("updatedRows",result.updated.size) }
         return result.inserted.isNotEmpty()
     }
 
     override suspend fun syncStopTemporaryBasalWithPumpId(timestamp: Long, endPumpId: Long, pumpType: PumpType, pumpSerial: String, ignorePumpIds: Boolean): Boolean {
         if (!ignorePumpIds && !confirmActivePump(timestamp, pumpType, pumpSerial)) return false
         val result = persistenceLayer.syncPumpCancelTemporaryBasalIfAny(timestamp, endPumpId, pumpType, pumpSerial)
+        reconciliation { org.json.JSONObject().put("commandType","TBR_CANCEL").put("eventTimestamp",timestamp).put("model",pumpType.name)
+            .put("endPumpId",endPumpId).put("updatedRows",result.updated.size) }
         return result.updated.isNotEmpty()
     }
 
@@ -404,6 +426,10 @@ class PumpSyncImplementation @Inject constructor(
             return false
         }
         val result = persistenceLayer.syncPumpTemporaryBasalWithTempId(temporaryBasal, type?.toDbType())
+        reconciliation { org.json.JSONObject().put("commandType","TBR").put("eventTimestamp",timestamp).put("model",pumpType.name)
+            .put("pumpId",temporaryBasal.ids.pumpId ?: org.json.JSONObject.NULL).put("temporaryId",temporaryBasal.ids.temporaryId ?: org.json.JSONObject.NULL)
+            .put("ratePumpUnits",rate.cU).put("storedRate",temporaryBasal.rate).put("isAbsolute",isAbsolute)
+            .put("durationMs",duration).put("updatedRows",result.updated.size) }
         return result.updated.isNotEmpty()
     }
 

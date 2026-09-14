@@ -129,6 +129,7 @@ class ImplementationModule {
         @ContributesAndroidInjector fun contributesTimeDateOrTZChangeReceiver(): TimeDateOrTZChangeReceiver
 
         @Binds fun bindPreferences(preferencesImpl: PreferencesImpl): Preferences
+        @Binds fun bindTherapyTelemetry(impl: app.aaps.implementation.telemetry.TherapyTelemetryImpl): app.aaps.core.interfaces.telemetry.TherapyTelemetry
         @Binds fun bindVisibilityContext(impl: VisibilityContextImpl): VisibilityContext
         @Binds fun bindFabricPrivacy(fabricPrivacyImpl: FabricPrivacyImpl): FabricPrivacy
         @Binds fun bindActivePlugin(pluginStore: PluginStore): ActivePlugin

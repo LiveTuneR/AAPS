@@ -77,10 +77,12 @@ class TidepoolCallbackTest {
     }
 
     @Test
-    fun `network failure reports failure with the reason`() {
-        sut.onFailure(call, IOException("no route to host"))
+    fun `network failure reports type without leaking URL or private server text`() {
+        sut.onFailure(call, IOException("private-token-and-payload"))
 
         assertThat(failed.awaitResult()).isTrue()
-        assertThat(statusMessages().single()).contains("no route to host")
+        val status = statusMessages().single()
+        assertThat(status).contains("IOException")
+        assertThat(status).doesNotContain("private-token-and-payload")
     }
 }

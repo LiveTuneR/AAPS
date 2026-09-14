@@ -104,7 +104,7 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
         if (wearPlugin.isEnabled()) {
             when (messageEvent.path) {
                 rxPath          -> {
-                    aapsLogger.debug(LTag.WEAR, "onMessageReceived rxPath: ${String(messageEvent.data)}")
+                    aapsLogger.debug(LTag.WEAR, "onMessageReceived rxPath bytes=${messageEvent.data.size}")
                     val command = EventData.deserialize(String(messageEvent.data))
                     rxBus.send(command.also { it.sourceNodeId = messageEvent.sourceNodeId })
                 }
@@ -155,7 +155,7 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
                             .setUrgent()
 
                         val result = dataClient.putDataItem(request).await()
-                        aapsLogger.debug(LTag.WEAR, "sendData: ${result.uri} ${params.joinToString()}")
+                        aapsLogger.debug(LTag.WEAR, "sendData completed items=${params.size}")
                     }
                 } catch (cancellationException: CancellationException) {
                     throw cancellationException
@@ -167,7 +167,7 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     }
 
     private fun sendMessage(path: String, data: String?) {
-        aapsLogger.debug(LTag.WEAR, "sendMessage: $path $data")
+        aapsLogger.debug(LTag.WEAR, "sendMessage: $path characters=${data?.length ?: 0}")
         transcriptionNodeId?.also { nodeId ->
             messageClient
                 .sendMessage(nodeId, path, data?.toByteArray() ?: byteArrayOf()).apply {

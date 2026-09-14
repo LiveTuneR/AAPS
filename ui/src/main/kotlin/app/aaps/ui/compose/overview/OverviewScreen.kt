@@ -1,6 +1,8 @@
 package app.aaps.ui.compose.overview
 
 import android.content.res.Configuration
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.health.connect.client.PermissionController
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,10 +26,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aaps.ui.compose.overview.enhanced.OverviewDashboardViewModel
+import app.aaps.ui.compose.overview.enhanced.EnhancedOverviewContent
+import app.aaps.ui.compose.overview.graphs.GraphsSection
+import app.aaps.ui.compose.scenes.ActiveSceneBanner
+import app.aaps.core.ui.compose.LocalConfig
 import app.aaps.core.data.model.ActiveSceneState
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TT
 import app.aaps.core.interfaces.notifications.AapsNotification
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.overview.graph.TbrState
 import app.aaps.core.interfaces.pump.BolusProgressState
 import app.aaps.core.ui.compose.TABLET_MIN_SW_DP
@@ -123,9 +133,29 @@ fun OverviewScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isTablet = configuration.smallestScreenWidthDp >= TABLET_MIN_SW_DP && isLandscape
+    val dashboard: OverviewDashboardViewModel = hiltViewModel()
+    val enhanced by dashboard.enabled.collectAsStateWithLifecycle()
+    val healthPermissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract(),
+    ) { dashboard.refreshActivity() }
 
     Box(modifier = modifier.fillMaxSize()) {
-        if (isTablet) {
+        if (enhanced && !LocalConfig.current.AAPSCLIENT) {
+            val state by dashboard.state.collectAsStateWithLifecycle()
+            val bg by graphViewModel.bgInfoState.collectAsStateWithLifecycle()
+            EnhancedOverviewContent(
+                state = state, bg = bg, target = tempTargetText, smbEnabled = smbEnabled,
+                targetActive = tempTargetState == TempTargetChipState.Active,
+                modeNotice = runningModeText.takeUnless { runningMode == RM.Mode.CLOSED_LOOP },
+                modifier = Modifier.padding(paddingValues),
+                onTargetClick = { onNavigate(NavigationRequest.Element(ElementType.TEMP_TARGET_MANAGEMENT)) },
+                onActivityPermissionClick = { healthPermissionLauncher.launch(dashboard.activityPermissions) },
+                banner = { ActiveSceneBanner(activeState = activeSceneState, expired = sceneExpired,
+                    onEndClick = onEndScene, onDismiss = onDismissScene, endEnabled = endSceneEnabled,
+                    formatDuration = formatDuration) },
+                graphs = { GraphsSection(graphViewModel, isSimpleMode, minimumBgHeight = 180, referenceStyle = true) }
+            )
+        } else if (isTablet) {
             OverviewScreenTablet(
                 profileName = profileName,
                 isProfileModified = isProfileModified,

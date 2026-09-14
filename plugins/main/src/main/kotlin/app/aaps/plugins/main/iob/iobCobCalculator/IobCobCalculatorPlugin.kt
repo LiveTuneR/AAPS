@@ -11,6 +11,8 @@ import app.aaps.core.data.model.EB
 import app.aaps.core.data.model.EPS
 import app.aaps.core.data.model.GV
 import app.aaps.core.data.model.TB
+import app.aaps.core.data.model.TT
+import app.aaps.core.data.model.PS
 import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.aps.AutosensData
@@ -33,6 +35,7 @@ import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
+import app.aaps.core.interfaces.rx.collectResilient
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventAppInitialized
 import app.aaps.core.interfaces.rx.events.EventCalibrationChanged
@@ -57,14 +60,14 @@ import app.aaps.plugins.main.iob.iobCobCalculator.data.AutosensDataStoreObject
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -112,12 +115,14 @@ class IobCobCalculatorPlugin @Inject constructor(
     private var iobTable = LongSparseArray<IobTotal>() // oldest at index 0
     private var basalDataTable = LongSparseArray<BasalData>() // oldest at index 0
 
-    override var ads: AutosensDataStore = AutosensDataStoreObject()
+    @Volatile override var ads: AutosensDataStore = AutosensDataStoreObject()
+    override val loopHealth = app.aaps.core.data.diagnostics.LoopHealthTracker()
 
     private val dataLock = Any()
 
     override suspend fun onStart() {
         super.onStart()
+        historyWorker = Executors.newSingleThreadScheduledExecutor()
         val newScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope = newScope
         // EventConfigBuilderChange
@@ -140,50 +145,54 @@ class IobCobCalculatorPlugin @Inject constructor(
             )
         // EffectiveProfileSwitch changes
         persistenceLayer.observeChanges(EPS::class.java)
-            .onEach { epsList ->
+            .collectInput(newScope, "EPS") { epsList ->
                 epsList.minOfOrNull { it.timestamp }?.let { timestamp ->
-                    newHistoryData(timestamp, bgDataReload = false, triggeredByNewBG = false)
+                    scheduleHistoryDataChange(timestamp, reloadBgData = false, triggeredByNewBG = false)
                 }
-            }.launchIn(newScope)
+            }
         // Preference changes
-        merge(
-            preferences.observe(IntKey.AutosensPeriod).drop(1).map {},
-            preferences.observe(StringKey.SafetyAge).drop(1).map {},
-            preferences.observe(DoubleKey.AbsorptionMaxTime).drop(1).map {},
-            preferences.observe(DoubleKey.ApsAmaMin5MinCarbsImpact).drop(1).map {},
-            preferences.observe(DoubleKey.ApsSmbMin5MinCarbsImpact).drop(1).map {},
-            preferences.observe(DoubleKey.AbsorptionCutOff).drop(1).map {},
-            preferences.observe(DoubleKey.AutosensMax).drop(1).map {},
-            preferences.observe(DoubleKey.AutosensMin).drop(1).map {},
-        ).onEach { resetDataAndRunCalculation("onPreferenceChange") }.launchIn(newScope)
+        merge(*app.aaps.core.keys.TherapyPreferenceFlows.observe(preferences).filterKeys { it != "GeneralUnits" }
+            .values.map { it.drop(1).map {} }.toTypedArray())
+            .collectInput(newScope, "preferences") { resetDataAndRunCalculation("onPreferenceChange") }
         // GlucoseValue changes → reload BG data + trigger loop
         persistenceLayer.observeChanges(GV::class.java)
-            .onEach { gvList ->
-                gvList.minOfOrNull { it.timestamp }?.let { timestamp ->
-                    scheduleHistoryDataChange(timestamp, reloadBgData = true, triggeredByNewBG = true)
+            .collectInput(newScope, "GV") { gvList ->
+                val completed = ads
+                val classified = gvList.map { it to completed.classifyCompletedGlucose(it) }
+                val relevant = classified.filter { it.second != app.aaps.core.data.diagnostics.GlucoseChange.METADATA_ONLY }.map { it.first }
+                val metadata = gvList.size - relevant.size
+                loopHealth.glucoseEvents(metadata, gvList.size - metadata)
+                aapsLogger.debug(LTag.AUTOSENS, "GV changes metadataSkipped=$metadata relevantOrUnknown=${relevant.size}")
+                relevant.minOfOrNull { it.timestamp }?.let { timestamp ->
+                    val newestCompleted = completed.lastBg()?.timestamp ?: Long.MIN_VALUE
+                    val changesHistory = classified.any { (gv, change) ->
+                        change == app.aaps.core.data.diagnostics.GlucoseChange.THERAPY_RELEVANT ||
+                            (change == app.aaps.core.data.diagnostics.GlucoseChange.UNKNOWN && gv.timestamp <= newestCompleted)
+                    }
+                    scheduleHistoryDataChange(timestamp, reloadBgData = true, triggeredByNewBG = true,
+                        therapyChange = changesHistory, newestBgTimestamp = relevant.maxOf { it.timestamp })
                 }
-            }.launchIn(newScope)
+            }
         // Treatment changes → invalidate caches
         persistenceLayer.observeChanges(CA::class.java)
-            .onEach { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
-            .launchIn(newScope)
+            .collectInput(newScope, "CA") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
         persistenceLayer.observeChanges(BS::class.java)
-            .onEach { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
-            .launchIn(newScope)
+            .collectInput(newScope, "BS") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
         persistenceLayer.observeChanges(BCR::class.java)
-            .onEach { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
-            .launchIn(newScope)
+            .collectInput(newScope, "BCR") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
         persistenceLayer.observeChanges(TB::class.java)
-            .onEach { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
-            .launchIn(newScope)
+            .collectInput(newScope, "TB") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
         persistenceLayer.observeChanges(EB::class.java)
-            .onEach { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
-            .launchIn(newScope)
+            .collectInput(newScope, "EB") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
+        persistenceLayer.observeChanges(TT::class.java)
+            .collectInput(newScope, "TT") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
+        persistenceLayer.observeChanges(PS::class.java)
+            .collectInput(newScope, "PS") { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
         // Units change
         preferences.observe(StringKey.GeneralUnits).drop(1)
-            .onEach {
+            .collectInput(newScope, "units") {
                 scheduleHistoryDataChange(0, reloadBgData = true)
-            }.launchIn(newScope)
+            }
         disposable += rxBus
             .toObservable(EventAppInitialized::class.java)
             .observeOn(aapsSchedulers.io)
@@ -203,15 +212,22 @@ class IobCobCalculatorPlugin @Inject constructor(
                 },
                 fabricPrivacy::logException
             )
-        historyWorker = Executors.newSingleThreadScheduledExecutor()
     }
+
+    private fun <T> Flow<T>.collectInput(scope: CoroutineScope, stream: String, action: suspend (T) -> Unit) =
+        collectResilient(scope, aapsLogger, LTag.AUTOSENS, streamName = stream, block = action)
 
     override suspend fun onStop() {
         scope?.cancel()
         scope = null
         disposable.clear()
-        historyWorker?.shutdown()
-        historyWorker = null
+        synchronized(this) {
+            scheduledHistoryPost?.cancel(false)
+            scheduledHistoryPost = null
+            scheduledData = null
+            historyWorker?.shutdown()
+            historyWorker = null
+        }
         super.onStop()
     }
 
@@ -448,13 +464,21 @@ class IobCobCalculatorPlugin @Inject constructor(
     private class ScheduledHistoryData(
         val oldDataTimestamp: Long,
         var reloadBgData: Boolean,
-        var triggeredByNewBG: Boolean
+        var triggeredByNewBG: Boolean,
+        var therapyChange: Boolean,
+        var newestBgTimestamp: Long?
     )
 
     private var scheduledData: ScheduledHistoryData? = null
 
     @Synchronized
-    fun scheduleHistoryDataChange(oldDataTimestamp: Long, reloadBgData: Boolean, triggeredByNewBG: Boolean = false) {
+    fun scheduleHistoryDataChange(oldDataTimestamp: Long, reloadBgData: Boolean, triggeredByNewBG: Boolean = false,
+                                  therapyChange: Boolean = !triggeredByNewBG, newestBgTimestamp: Long? = null) {
+        val executor = historyWorker ?: run {
+            aapsLogger.warn(LTag.AUTOSENS, "History scheduler unavailable")
+            return
+        }
+        if (therapyChange) calculationWorkflow.stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "HistoryMutationObserved", oldDataTimestamp - T.mins(5).msecs())
         // if there is nothing scheduled or asking reload deeper to the past
         if (scheduledData == null || oldDataTimestamp < (scheduledData?.oldDataTimestamp ?: 0L)) {
             // cancel waiting task to prevent sending multiple posts
@@ -462,31 +486,53 @@ class IobCobCalculatorPlugin @Inject constructor(
             // merge flags from previously scheduled event
             val mergedReload = reloadBgData || (scheduledData?.reloadBgData ?: false)
             val mergedTriggeredByNewBG = triggeredByNewBG || (scheduledData?.triggeredByNewBG ?: false)
-            val data = ScheduledHistoryData(oldDataTimestamp, mergedReload, mergedTriggeredByNewBG)
+            val data = ScheduledHistoryData(oldDataTimestamp, mergedReload, mergedTriggeredByNewBG,
+                therapyChange || scheduledData?.therapyChange == true,
+                listOfNotNull(newestBgTimestamp, scheduledData?.newestBgTimestamp).maxOrNull())
             scheduledData = data
-            scheduledHistoryPost = historyWorker?.schedule(
-                {
-                    synchronized(this) {
-                        aapsLogger.debug(LTag.AUTOSENS, "Running newHistoryData")
-                        runBlocking { persistenceLayer.clearCachedTddData(MidnightTime.calc(data.oldDataTimestamp)) }
-                        newHistoryData(data.oldDataTimestamp, data.reloadBgData, data.triggeredByNewBG)
-                        scheduledData = null
-                        scheduledHistoryPost = null
-                    }
-                }, 5L, TimeUnit.SECONDS
-            )
+            scheduledHistoryPost = executor.schedule({ runScheduledHistory(data,0) },5L,TimeUnit.SECONDS)
         } else {
             // asked reload is newer -> adjust params only
             scheduledData?.let {
                 if (!it.reloadBgData) it.reloadBgData = reloadBgData
                 if (!it.triggeredByNewBG) it.triggeredByNewBG = triggeredByNewBG
+                it.therapyChange = it.therapyChange || therapyChange
+                it.newestBgTimestamp = listOfNotNull(it.newestBgTimestamp, newestBgTimestamp).maxOrNull()
+            }
+        }
+    }
+
+    private fun runScheduledHistory(data: ScheduledHistoryData,attempt: Int): Unit = synchronized(this) {
+        if (scheduledData !== data) return@synchronized
+        var completed=false
+        try {
+            newHistoryData(data.oldDataTimestamp,data.reloadBgData,data.triggeredByNewBG,data.therapyChange,data.newestBgTimestamp)
+            completed=true
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            aapsLogger.error(LTag.AUTOSENS,"History processing failed type=${error.javaClass.simpleName} attempt=$attempt; reload intent retained")
+        } finally {
+            if (completed) { scheduledData=null; scheduledHistoryPost=null }
+            else historyWorker?.takeUnless { it.isShutdown }?.let { executor ->
+                // Retry invalidation/reload only. Never persist or replay an APS result or pump command.
+                scheduledHistoryPost=executor.schedule({ runScheduledHistory(data,attempt+1) },
+                    (5L shl attempt.coerceAtMost(4)).coerceAtMost(60L),TimeUnit.SECONDS)
             }
         }
     }
 
     // When historical data is changed (coming from NS etc.) finished calculations after this date must be invalidated
-    private fun newHistoryData(oldDataTimestamp: Long, bgDataReload: Boolean, triggeredByNewBG: Boolean) {
-        calculationWorkflow.stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "onEventNewHistoryData")
+    private fun newHistoryData(oldDataTimestamp: Long, bgDataReload: Boolean, triggeredByNewBG: Boolean,
+                               therapyChange: Boolean = !triggeredByNewBG, newestBgTimestamp: Long? = null) {
+        if (!therapyChange) {
+            calculationWorkflow.runCalculation(CalculationWorkflow.MAIN_CALCULATION, this, overviewData, cache.get(), signals,
+                "NewBG", System.currentTimeMillis(), bgDataReload, triggeredByNewBG,
+                invalidateFrom = oldDataTimestamp - T.mins(5).msecs(), rawBgTimestamp = newestBgTimestamp ?: oldDataTimestamp)
+            return
+        }
+        calculationWorkflow.stopCalculation(CalculationWorkflow.MAIN_CALCULATION, "onEventNewHistoryData", oldDataTimestamp - T.mins(5).msecs())
+        // Clear cached TDD before releasing the ordered history barrier.
+        runBlocking { persistenceLayer.clearCachedTddData(MidnightTime.calc(oldDataTimestamp)) }
         synchronized(dataLock) {
 
             // clear up 5 min back for proper COB calculation
@@ -519,7 +565,9 @@ class IobCobCalculatorPlugin @Inject constructor(
             reason = if (triggeredByNewBG) "NewBG" else "DBChange",
             end = System.currentTimeMillis(),
             bgDataReload = bgDataReload,
-            triggeredByNewBG = triggeredByNewBG
+            triggeredByNewBG = false,
+            invalidateFrom = oldDataTimestamp - T.mins(5).msecs(),
+            rawBgTimestamp = newestBgTimestamp
         )
     }
 

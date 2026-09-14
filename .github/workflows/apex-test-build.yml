@@ -2,6 +2,11 @@ name: Apex test build
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      buildVariant:
+        type: string
+        default: fullRelease
 
 permissions:
   contents: read
@@ -14,14 +19,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    env:
-      KEYSTORE_SET: ${{ secrets.KEYSTORE_SET }}
-      KEYSTORE_BASE64_SECRET: ${{ secrets.KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD_SECRET: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS_SECRET: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD_SECRET: ${{ secrets.KEY_PASSWORD }}
-
     steps:
+      - name: Validate build variant
+        env:
+          BUILD_VARIANT: ${{ inputs.buildVariant || 'fullRelease' }}
+        run: test "$BUILD_VARIANT" = fullRelease
+
       - uses: actions/checkout@v5
 
       - uses: actions/setup-java@v5
@@ -30,21 +33,59 @@ jobs:
           java-version: '21'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Prepare Gradle
         run: chmod +x gradlew
 
-      - name: Test Apex safety and protocol
+      - name: Test reliability and diagnostic modules
+        env:
+          APEX7_CAPTURE_SCREENSHOTS: 'true'
         run: |
-          COMMON_ARGS=(--no-daemon --max-workers=1 --console=plain -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -Xss1m")
-          ./gradlew :pump:apex:testFullDebugUnitTest --tests app.aaps.pump.apex.ApexSafetyTest "${COMMON_ARGS[@]}"
-          ./gradlew :pump:apex:testFullDebugUnitTest --tests app.aaps.pump.apex.ApexCommDirectorTest "${COMMON_ARGS[@]}"
-          ./gradlew :pump:apex:testFullDebugUnitTest --tests app.aaps.pump.apex.CommandsTest "${COMMON_ARGS[@]}"
+          ./gradlew :workflow:testFullDebugUnitTest :plugins:main:testFullDebugUnitTest \
+            :plugins:sensitivity:testFullDebugUnitTest :core:interfaces:testFullDebugUnitTest \
+            :plugins:sync:testFullDebugUnitTest :pump:apex:testFullDebugUnitTest :core:data:test \
+            :pump:medtrum:testFullDebugUnitTest :plugins:aps:testFullDebugUnitTest \
+            :plugins:smoothing:testFullDebugUnitTest \
+            :implementation:testFullDebugUnitTest :shared:impl:testFullDebugUnitTest \
+            :ui:testFullDebugUnitTest \
+            --no-daemon --max-workers=2 --console=plain -I doc/apex7-validation.init.gradle \
+            -Pkotlin.compiler.execution.strategy=in-process \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -Xss1m"
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apex7-tests-${{ github.run_number }}
+          path: |
+            workflow/build/test-results/**/*.xml
+            plugins/*/build/test-results/**/*.xml
+            core/*/build/test-results/**/*.xml
+            pump/apex/build/test-results/**/*.xml
+            pump/medtrum/build/test-results/**/*.xml
+            implementation/build/test-results/**/*.xml
+            shared/impl/build/test-results/**/*.xml
+            ui/build/test-results/**/*.xml
+            ui/build/reports/apex7-screenshots/*.png
+            ui/build/reports/tests/**
+            doc/APEX7_BOLUS_BASELINE.md
+            doc/APEX_BOLUS_DEVICE_ACCEPTANCE_RU.md
+            pump/apex/src/test/resources/apex/incidents/*.json
+          retention-days: 14
 
       - name: Decode signing key
         shell: bash
+        env:
+          KEYSTORE_SET: ${{ secrets.KEYSTORE_SET }}
+          KEYSTORE_BASE64_SECRET: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD_SECRET: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS_SECRET: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD_SECRET: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          umask 077
           if [[ -n "$KEYSTORE_SET" ]]; then
             decoded=$(printf '%s' "$KEYSTORE_SET" | base64 --decode)
             keystore_base64=$(printf '%s' "$decoded" | cut -d'|' -f1)
@@ -72,7 +113,7 @@ jobs:
 
       - name: Build signed APK
         run: |
-          ./gradlew :app:assembleFullRelease --no-daemon --max-workers=2 --console=plain \
+          ./gradlew :app:assembleFullRelease :wear:assembleFullRelease --no-daemon --max-workers=2 --console=plain \
             -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseParallelGC -Xss1m" \
             -Pandroid.injected.signing.store.file="$KEYSTORE_FILE" \
             -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
@@ -83,15 +124,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apk=$(find app/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
-          [[ -n "$apk" ]] || { echo "APK was not produced"; exit 1; }
           apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
-          "$apksigner" verify --verbose --print-certs "$apk"
           short_sha=${GITHUB_SHA:0:7}
-          output="aaps-4.0-apex-$short_sha.apk"
-          cp "$apk" "$output"
-          sha256sum "$output" > "$output.sha256"
-          echo "APK_OUTPUT=$output" >> "$GITHUB_ENV"
+          expected_cert=1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084
+          app_apk=$(find app/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
+          wear_apk=$(find wear/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
+          [[ -n "$app_apk" && -n "$wear_apk" ]] || { echo "Phone or Wear APK was not produced"; exit 1; }
+          for spec in "phone:$app_apk:aaps-4.0-apex-$short_sha.apk" "wear:$wear_apk:aaps-4.0-apex-wear-$short_sha.apk"; do
+            kind=${spec%%:*}; rest=${spec#*:}; apk=${rest%%:*}; output=${rest#*:}
+            "$apksigner" verify --verbose --print-certs "$apk" | tee "$output.signature.txt"
+            actual_cert=$(awk '/certificate SHA-256 digest:/ { print $NF }' "$output.signature.txt" | sort -u)
+            [[ "$actual_cert" = "$expected_cert" ]] || { echo "$kind signing certificate mismatch"; exit 1; }
+            cp "$apk" "$output"
+            sha256sum "$output" > "$output.sha256"
+            printf 'artifact=%s\ncommit=%s\nrun=%s\nstatus=EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED\n' \
+              "$kind" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$output.provenance.txt"
+          done
+          echo "APK_OUTPUT=aaps-4.0-apex-$short_sha.apk" >> "$GITHUB_ENV"
+          echo "WEAR_OUTPUT=aaps-4.0-apex-wear-$short_sha.apk" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -99,5 +149,90 @@ jobs:
           path: |
             ${{ env.APK_OUTPUT }}
             ${{ env.APK_OUTPUT }}.sha256
+            ${{ env.APK_OUTPUT }}.provenance.txt
+            ${{ env.APK_OUTPUT }}.signature.txt
+            ${{ env.WEAR_OUTPUT }}
+            ${{ env.WEAR_OUTPUT }}.sha256
+            ${{ env.WEAR_OUTPUT }}.provenance.txt
+            ${{ env.WEAR_OUTPUT }}.signature.txt
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload signed phone and Wear APKs to Google Drive
+        shell: bash
+        env:
+          GDRIVE_OAUTH2: ${{ secrets.GDRIVE_OAUTH2 }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GDRIVE_OAUTH2" ]] || { echo "GDRIVE_OAUTH2 secret is missing"; exit 1; }
+          decoded=$(printf '%s' "$GDRIVE_OAUTH2" | base64 --decode)
+          client_id=$(printf '%s' "$decoded" | cut -d'|' -f1)
+          refresh_token=$(printf '%s' "$decoded" | cut -d'|' -f2)
+          echo "::add-mask::$client_id"
+          echo "::add-mask::$refresh_token"
+          token_response=$(curl --fail-with-body -sS -X POST https://oauth2.googleapis.com/token \
+            -d client_id="$client_id" -d refresh_token="$refresh_token" -d grant_type=refresh_token)
+          access_token=$(jq -er '.access_token' <<<"$token_response")
+          echo "::add-mask::$access_token"
+
+          find_folder() {
+            local name=$1 parent=${2:-}
+            local query="name='$name' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+            [[ -z "$parent" ]] || query="$query and '$parent' in parents"
+            curl --fail-with-body -sS -G -H "Authorization: Bearer $access_token" \
+              --data-urlencode "q=$query" --data-urlencode 'fields=files(id)' \
+              https://www.googleapis.com/drive/v3/files | jq -r '.files[0].id // empty'
+          }
+          create_folder() {
+            local name=$1 parent=${2:-} metadata
+            if [[ -n "$parent" ]]; then
+              metadata=$(jq -nc --arg name "$name" --arg parent "$parent" \
+                '{name:$name,mimeType:"application/vnd.google-apps.folder",parents:[$parent]}')
+            else
+              metadata=$(jq -nc --arg name "$name" '{name:$name,mimeType:"application/vnd.google-apps.folder"}')
+            fi
+            curl --fail-with-body -sS -X POST -H "Authorization: Bearer $access_token" \
+              -H 'Content-Type: application/json' -d "$metadata" \
+              'https://www.googleapis.com/drive/v3/files?fields=id' | jq -er '.id'
+          }
+          ensure_folder() {
+            local name=$1 parent=${2:-} id
+            id=$(find_folder "$name" "$parent")
+            [[ -n "$id" ]] || id=$(create_folder "$name" "$parent")
+            printf '%s' "$id"
+          }
+          upload_file() {
+            local file=$1 parent=$2 name id query metadata method url
+            name=$(basename "$file")
+            query="name='$name' and '$parent' in parents and trashed=false"
+            id=$(curl --fail-with-body -sS -G -H "Authorization: Bearer $access_token" \
+              --data-urlencode "q=$query" --data-urlencode 'fields=files(id)' \
+              https://www.googleapis.com/drive/v3/files | jq -r '.files[0].id // empty')
+            metadata=$(jq -nc --arg name "$name" --arg parent "$parent" '{name:$name,parents:[$parent]}')
+            if [[ -n "$id" ]]; then
+              method=PATCH
+              url="https://www.googleapis.com/upload/drive/v3/files/$id?uploadType=multipart&fields=id,name"
+              metadata=$(jq -nc --arg name "$name" '{name:$name}')
+            else
+              method=POST
+              url='https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name'
+            fi
+            curl --fail-with-body -sS -X "$method" -H "Authorization: Bearer $access_token" \
+              -F "metadata=$metadata;type=application/json;charset=UTF-8" \
+              -F "file=@$file;type=application/octet-stream" "$url" | jq -e '.id and .name' >/dev/null
+          }
+
+          root_id=$(ensure_folder AAPS)
+          apex_id=$(ensure_folder Apex7 "$root_id")
+          short_sha=${GITHUB_SHA:0:7}
+          release_id=$(ensure_folder "$short_sha" "$apex_id")
+          for file in "$APK_OUTPUT" "$APK_OUTPUT.sha256" "$APK_OUTPUT.signature.txt" "$APK_OUTPUT.provenance.txt" \
+                      "$WEAR_OUTPUT" "$WEAR_OUTPUT.sha256" "$WEAR_OUTPUT.signature.txt" "$WEAR_OUTPUT.provenance.txt"; do
+            upload_file "$file" "$release_id"
+          done
+          echo "Google Drive folder: https://drive.google.com/drive/folders/$release_id" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/apex-signing/keystore.jks"

@@ -4,6 +4,7 @@ import android.os.SystemClock
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.pump.apex.connectivity.bluetooth.ApexTransport
+import app.aaps.pump.apex.connectivity.bluetooth.ApexTransportWriteOutcome
 import app.aaps.pump.apex.connectivity.bluetooth.Configuration
 import app.aaps.pump.apex.connectivity.commands.device.DeviceCommand
 import app.aaps.pump.apex.connectivity.commands.device.Bolus
@@ -21,6 +22,7 @@ import app.aaps.pump.apex.connectivity.commands.pump.StatusV1
 import app.aaps.pump.apex.connectivity.commands.pump.StatusV2
 import app.aaps.pump.apex.connectivity.commands.pump.TDDEntry
 import app.aaps.pump.apex.connectivity.commands.pump.Version
+import app.aaps.pump.apex.bolus.ApexBolusCoordinator
 import app.aaps.pump.apex.diagnostics.ApexTrace
 import app.aaps.pump.apex.interfaces.ApexBluetoothCallback
 import app.aaps.pump.apex.interfaces.ApexDeviceInfo
@@ -51,6 +53,7 @@ class ApexCommDirector @Inject constructor(
     private val aapsLogger: AAPSLogger,
     private val apexDeviceInfo: ApexDeviceInfo,
     private val trace: ApexTrace,
+    private val bolusCoordinator: ApexBolusCoordinator? = null,
 ) : ApexBluetoothCallback {
 
     private enum class CommandSafety { READ_ONLY, IDEMPOTENT, RECONCILE_REQUIRED }
@@ -100,6 +103,7 @@ class ApexCommDirector @Inject constructor(
         val safety: CommandSafety,
         val priority: RequestPriority,
         val slotPool: RequestSlotPool,
+        val bolusOperationUuid: String? = null,
         val issued: CompletableDeferred<Boolean> = CompletableDeferred(),
     )
 
@@ -202,9 +206,15 @@ class ApexCommDirector @Inject constructor(
         submit(GetValue(apexDeviceInfo, value))
 
     suspend fun execute(command: DeviceCommand): CommandResponse? =
-        submit(command)?.singleOrNull() as? CommandResponse
+        if (command is Bolus) {
+            trace.record("bolus_direct_write_blocked", activeGeneration, fields = mapOf("reason" to "missing_durable_operation"))
+            null
+        } else submit(command)?.singleOrNull() as? CommandResponse
 
-    private suspend fun submit(command: DeviceCommand): List<PumpObjectModel>? {
+    suspend fun executeBolus(command: Bolus, operationUuid: String): CommandResponse? =
+        submit(command, operationUuid)?.singleOrNull() as? CommandResponse
+
+    private suspend fun submit(command: DeviceCommand, bolusOperationUuid: String? = null): List<PumpObjectModel>? {
         val deferred = CompletableDeferred<List<PumpObjectModel>?>()
         val operationId = trace.nextOperationId()
         val safety = classify(command)
@@ -214,7 +224,7 @@ class ApexCommDirector @Inject constructor(
             RequestPriority.START_BOLUS  -> RequestSlotPool.START_BOLUS
             RequestPriority.NORMAL       -> RequestSlotPool.NORMAL
         }
-        val request = Request(command, deferred, operationId, safety, priority, slotPool)
+        val request = Request(command, deferred, operationId, safety, priority, slotPool, bolusOperationUuid)
         val slotAcquired = withTimeoutOrNull(Configuration.REQUEST_ISSUE_TIMEOUT) {
             slots(request).acquire()
             true
@@ -501,14 +511,51 @@ class ApexCommDirector @Inject constructor(
                     "requiredGapMs" to commandGap.requiredMs,
                 ),
             )
-            if (!apexBluetooth.send(request.command)) {
-                trace.record("command_write_failed", activeGeneration, request.operationId)
+            if (request.command is Bolus) {
+                val operationUuid = request.bolusOperationUuid
+                val authorized = operationUuid != null && (bolusCoordinator?.beginTransportWrite(
+                    operationUuid,
+                    request.command.dose,
+                    activeGeneration,
+                ) ?: true)
+                if (!authorized) {
+                    trace.record("bolus_safety_gate_blocked_transport", activeGeneration, request.operationId)
+                    request.result.complete(null)
+                    clearPending(current)
+                    continue
+                }
+            }
+            val transportOutcome = apexBluetooth.send(request.command) {
+                request.bolusOperationUuid?.let { bolusCoordinator?.markTransportWriteIssued(it, activeGeneration) }
+            }
+            request.bolusOperationUuid?.let {
+                bolusCoordinator?.markTransportWriteCompleted(it, activeGeneration, transportOutcome.name)
+            }
+            if (transportOutcome != ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT) {
+                request.bolusOperationUuid?.let { operationUuid ->
+                    when (transportOutcome) {
+                        ApexTransportWriteOutcome.NOT_ISSUED -> bolusCoordinator?.markDefinitelyNotIssued(operationUuid)
+                        ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN -> bolusCoordinator?.markTransportOutcomeUnknown(
+                            operationUuid,
+                            activeGeneration,
+                            "ble_write_outcome_unknown",
+                        )
+                        ApexTransportWriteOutcome.ISSUED_CONFIRMED_BY_GATT -> Unit
+                    }
+                }
+                trace.record(
+                    "command_write_failed",
+                    activeGeneration,
+                    request.operationId,
+                    commandFields(request.command, "transportOutcome" to transportOutcome),
+                )
                 request.result.complete(null)
                 clearPending(current)
-                events.trySend(LinkEvent.TransportFault(activeGeneration, "write_failed"))
+                events.trySend(LinkEvent.TransportFault(activeGeneration, "write_${transportOutcome.name.lowercase()}"))
                 continue
             }
             lastSendUptime = SystemClock.uptimeMillis()
+            trace.record("command_sent",activeGeneration,request.operationId,commandFields(request.command,"transportOutcome" to transportOutcome))
 
             val timeout = if (single) Configuration.PUMP_RESPONSE_TIMEOUT else COMPLEX_RESPONSE_TIMEOUT_MS
             val response = withTimeoutOrNull(timeout) { request.result.await() }

@@ -127,6 +127,7 @@ class GraphViewModel @AssistedInject constructor(
     val epsGraphFlow = cache.epsGraphFlow
     val basalGraphFlow = cache.basalGraphFlow
     val targetLineFlow = cache.targetLineFlow
+    val tempTargetFlow = cache.tempTargetFlow
     val runningModeGraphFlow = cache.runningModeGraphFlow
 
     // NSClient status (pump/openAPS/uploader from Nightscout)

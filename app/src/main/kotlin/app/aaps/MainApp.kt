@@ -138,6 +138,8 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
 
     @Inject lateinit var pluginStore: PluginStore
     @Inject lateinit var aapsLogger: AAPSLogger
+    @Inject lateinit var therapyTelemetryCollector: app.aaps.implementation.telemetry.TherapyTelemetryCollector
+    @Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
     @Inject lateinit var activityMonitor: ActivityMonitor
     @Inject lateinit var versionCheckersUtils: VersionCheckerUtils
     @Inject lateinit var sp: SP
@@ -398,6 +400,7 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
         passwordResetCheck()
         exportPasswordResetCheck()
         config.initCompleted()
+        therapyTelemetryCollector.start()
         rxBus.send(EventAppInitialized())
         aapsLogger.debug("doInit end")
     }
@@ -988,6 +991,15 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
                     } else aapsLogger.error("RemoteConfig fetch failed")
                 }
         }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (::therapyTelemetry.isInitialized) try {
+            therapyTelemetry.get().record(app.aaps.core.interfaces.telemetry.TherapyEventType.ERROR,
+                JSONObject().put("stage","MEMORY_WARNING").put("level",level)
+                    .put("heapUsedBytes",Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory()))
+        } catch (_: Exception) { }
     }
 
     override fun onTerminate() {

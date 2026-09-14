@@ -39,6 +39,7 @@ dependencies {
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.work.runtime)
     implementation(libs.androidx.core)
+    implementation(libs.androidx.health.connect)
     api(libs.kotlinx.datetime)
 
     api(libs.com.squareup.okhttp3.okhttp)

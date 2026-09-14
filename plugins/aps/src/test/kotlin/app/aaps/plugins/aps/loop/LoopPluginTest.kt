@@ -36,6 +36,18 @@ import org.mockito.kotlin.eq
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.mock
+import org.mockito.kotlin.stub
+import org.mockito.kotlin.doSuspendableAnswer
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import app.aaps.core.interfaces.aps.APSResult
+import app.aaps.core.interfaces.aps.Loop
+import app.aaps.core.interfaces.profile.EffectiveProfile
+import app.aaps.core.interfaces.pump.PumpRate
 
 class LoopPluginTest : TestBaseWithProfile() {
 
@@ -52,6 +64,112 @@ class LoopPluginTest : TestBaseWithProfile() {
 
     private lateinit var loopPlugin: LoopPlugin
     private val testScope = CoroutineScope(Dispatchers.Unconfined)
+
+    private suspend fun pumpRequest(bolus: Boolean = true): Pair<APSResult, EffectiveProfile> {
+        val profile = mock<EffectiveProfile>()
+        whenever(profileFunction.getProfile()).thenReturn(profile)
+        whenever(virtualPumpPlugin.isInitialized()).thenReturn(true)
+        whenever(virtualPumpPlugin.isSuspended()).thenReturn(false)
+        whenever(virtualPumpPlugin.pumpDescription).thenReturn(PumpDescription().apply { basalStep = 0.05 })
+        whenever(virtualPumpPlugin.baseBasalRate).thenReturn(PumpRate(1.0))
+        whenever(ch.fromPump(any<PumpRate>())).thenReturn(1.0)
+        whenever(processedTbrEbData.getTempBasalIncludingConvertedExtended(anyLong())).thenReturn(null)
+        whenever(persistenceLayer.getRunningModeActiveAt(anyLong())).thenReturn(RM(timestamp = 0, mode = RM.Mode.CLOSED_LOOP, duration = 0))
+        whenever(constraintChecker.isLoopInvocationAllowed()).thenReturn(ConstraintObject(true, aapsLogger))
+        whenever(constraintChecker.isClosedLoopAllowed()).thenReturn(ConstraintObject(true, aapsLogger))
+        whenever(constraintChecker.isLgsForced()).thenReturn(ConstraintObject(false, aapsLogger))
+        val request = mock<APSResult>()
+        whenever(request.isTempBasalRequested).thenReturn(true)
+        whenever(request.rate).thenReturn(2.0)
+        whenever(request.duration).thenReturn(30)
+        whenever(request.usePercent).thenReturn(false)
+        whenever(request.isBolusRequested).thenReturn(bolus)
+        whenever(request.smb).thenReturn(if (bolus) 0.1 else 0.0)
+        return request to profile
+    }
+
+    @Test fun `cancelled calculation during TBR still attempts SMB once and records both results`() = runTest {
+        val (request, profile) = pumpRequest()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val tbr = pumpEnactResultProvider.get().enacted(true).success(true)
+        val smb = pumpEnactResultProvider.get().enacted(true).success(true)
+        commandQueue.stub {
+            onBlocking { tempBasalAbsolute(any(), any(), any(), any(), any()) } doSuspendableAnswer {
+                started.complete(Unit)
+                release.await()
+                tbr
+            }
+        }
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(smb)
+        val last = Loop.LastRun().apply { lastAPSRun = dateUtil.now() }
+        val job = launch { loopPlugin.enactConstrainedDecision(last, request, profile, false) }
+        started.await()
+        job.cancel()
+        release.complete(Unit)
+        job.join()
+        assertThat(last.tbrSetByPump).isSameInstanceAs(tbr)
+        assertThat(last.smbSetByPump).isSameInstanceAs(smb)
+        verify(commandQueue).bolus(anyOrNull())
+        verify(commandQueue).tempBasalAbsolute(any(), any(), any(), any(), any())
+    }
+
+    @Test fun `cancellation before enactment sends no pump command`() = runTest {
+        val (request, profile) = pumpRequest()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            currentCoroutineContext().cancel()
+            loopPlugin.enactConstrainedDecision(Loop.LastRun(), request, profile, false)
+        }
+        job.join()
+        verify(commandQueue, never()).tempBasalAbsolute(any(), any(), any(), any(), any())
+        verify(commandQueue, never()).bolus(anyOrNull())
+    }
+
+    @Test fun `failed TBR is recorded without sending SMB`() = runTest {
+        val (request, profile) = pumpRequest()
+        val failure = pumpEnactResultProvider.get().enacted(false).success(false)
+        whenever(commandQueue.tempBasalAbsolute(any(), any(), any(), any(), any())).thenReturn(failure)
+        val last = Loop.LastRun()
+        loopPlugin.enactConstrainedDecision(last, request, profile, false)
+        assertThat(last.tbrSetByPump).isSameInstanceAs(failure)
+        assertThat(last.smbSetByPump).isNull()
+        verify(commandQueue, never()).bolus(anyOrNull())
+    }
+
+    @Test fun `failed SMB replaces queued state and is not replayed`() = runTest {
+        val (request, profile) = pumpRequest()
+        val tbr = pumpEnactResultProvider.get().enacted(true).success(true)
+        val failure = pumpEnactResultProvider.get().enacted(false).success(false)
+        whenever(commandQueue.tempBasalAbsolute(any(), any(), any(), any(), any())).thenReturn(tbr)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(failure)
+        val last = Loop.LastRun()
+        loopPlugin.enactConstrainedDecision(last, request, profile, false)
+        assertThat(last.smbSetByPump).isSameInstanceAs(failure)
+        assertThat(last.lastSMBEnact).isEqualTo(0)
+        verify(commandQueue).bolus(anyOrNull())
+    }
+
+    @Test fun `accepted open loop records result after caller cancellation`() = runTest {
+        val (request, _) = pumpRequest(false)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val result = pumpEnactResultProvider.get().enacted(true).success(true)
+        commandQueue.stub {
+            onBlocking { tempBasalAbsolute(any(), any(), any(), any(), any()) } doSuspendableAnswer {
+                started.complete(Unit)
+                release.await()
+                result
+            }
+        }
+        loopPlugin.lastRun = Loop.LastRun().apply { constraintsProcessed = request; lastAPSRun = dateUtil.now() }
+        val job = launch { loopPlugin.acceptChangeRequest() }
+        started.await()
+        job.cancel()
+        release.complete(Unit)
+        job.join()
+        assertThat(loopPlugin.lastRun?.tbrSetByPump).isSameInstanceAs(result)
+        assertThat(loopPlugin.lastRun?.lastOpenModeAccept).isNotEqualTo(0)
+    }
 
     @BeforeEach fun prepare() {
         whenever(config.APS).thenReturn(true)

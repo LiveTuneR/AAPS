@@ -430,7 +430,7 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
         aapsLogger.debug(LTag.APS, ">>> Invoking determine_basal AutoISF <<<")
         aapsLogger.debug(LTag.APS, "Glucose status:     $glucoseStatus")
         aapsLogger.debug(LTag.APS, "Current temp:       $currentTemp")
-        aapsLogger.debug(LTag.APS, "IOB data:           ${iobArray.joinToString()}")
+        aapsLogger.debug(LTag.APS, "IOB forecast count=${iobArray.size} currentIob=${iobArray.firstOrNull()?.iob}")
         aapsLogger.debug(LTag.APS, "Profile:            $oapsProfile")
         aapsLogger.debug(LTag.APS, "Autosens data:      $autosensResult")
         aapsLogger.debug(LTag.APS, "Meal data:          $mealData")
@@ -458,6 +458,8 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
             auto_isf_consoleError = consoleError,
             auto_isf_consoleLog = consoleLog
         ).also {
+            it.decision=it.decision?.copy(requestedSmbU=it.units,requestedTbrUph=it.rate,requestedTbrMinutes=it.duration,
+                maxIobU=oapsProfile.max_iob,maxBasalUph=oapsProfile.max_basal)
             val determineBasalResult = apsResultProvider.get().with(it)
             // Preserve input data
             determineBasalResult.inputConstraints = inputConstraints
@@ -469,7 +471,7 @@ open class OpenAPSAutoISFPlugin @Inject constructor(
             determineBasalResult.mealData = mealData
             lastAPSResult = determineBasalResult
             lastAPSRun = now
-            aapsLogger.debug(LTag.APS, "Result: $it")
+            aapsLogger.debug(LTag.APS, "Result at=$now rate=${it.rate} duration=${it.duration} smb=${it.units} insulinReq=${it.insulinReq}")
             rxBus.send(EventAPSCalculationFinished())
         }
 

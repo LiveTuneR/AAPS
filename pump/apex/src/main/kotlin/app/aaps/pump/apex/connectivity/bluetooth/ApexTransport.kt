@@ -8,5 +8,14 @@ interface ApexTransport {
     fun connect(generation: Long)
     fun disconnect()
     fun shutdown()
-    suspend fun send(command: DeviceCommand): Boolean
+    suspend fun send(command: DeviceCommand, onFirstWriteIssued: (() -> Unit)? = null): ApexTransportWriteOutcome
 }
+
+enum class ApexTransportWriteOutcome {
+    NOT_ISSUED,
+    ISSUED_CONFIRMED_BY_GATT,
+    ISSUED_OUTCOME_UNKNOWN,
+}
+
+internal fun rejectedWriteOutcome(anyChunkIssued: Boolean): ApexTransportWriteOutcome =
+    if (anyChunkIssued) ApexTransportWriteOutcome.ISSUED_OUTCOME_UNKNOWN else ApexTransportWriteOutcome.NOT_ISSUED

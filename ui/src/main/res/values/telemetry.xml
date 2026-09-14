@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="apex7_seconds">%1$d s</string>
+    <string name="telemetry_title">Therapy telemetry</string>
+    <string name="telemetry_local_archive">Local analysis archive</string>
+    <string name="telemetry_size">Storage: %1$d KiB. Lost records: %2$d</string>
+    <string name="telemetry_incomplete">Data integrity warning. See the export manifest.</string>
+    <string name="telemetry_retention">Retention: %1$d days</string>
+    <string name="telemetry_period">Export: last %1$d days</string>
+    <string name="telemetry_interval">Expected CGM interval</string>
+    <string name="telemetry_export">Export ZIP</string>
+    <string name="telemetry_exporting">Preparing archive</string>
+    <string name="telemetry_export_failed">Telemetry export failed</string>
+    <string name="telemetry_export_saved">Telemetry archive saved</string>
+    <string name="apex7_bolus_uncertain">Reconciliation required</string>
+    <string name="apex7_bolus_unreconciled">Previous Apex delivery is not confirmed</string>
+    <string name="apex7_bolus_state">Bolus reconciliation</string>
+    <string name="apex7_bolus_requested">Requested bolus</string>
+    <string name="apex7_bolus_live">Live completed</string>
+    <string name="apex7_bolus_history">History confirmed</string>
+    <string name="apex7_bolus_operation_age">Operation age</string>
+    <string name="apex7_bolus_last_reconcile">Last reconciliation</string>
+</resources>

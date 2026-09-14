@@ -7,11 +7,15 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.utils.DateUtil
 
 interface AutosensDataStore {
+    val bucketReferenceTime: Long? get() = null
+    val lastBucketPass: BucketPassEvidence? get() = null
 
     val dataLock: Any
 
     var bgReadings: List<GV>
     var autosensDataTable: LongSparseArray<AutosensData>
+    /** Snapshot getters never expose owned mutable rows. Use this to publish one changed row. */
+    fun putAutosensData(time: Long, data: AutosensData)
     var bucketedData: MutableList<InMemoryGlucoseValue>?
     var lastUsed5minCalculation: Boolean?
 
@@ -39,4 +43,20 @@ interface AutosensDataStore {
     fun newHistoryData(time: Long, aapsLogger: AAPSLogger, dateUtil: DateUtil)
     fun roundUpTime(time: Long): Long
     fun reset()
+    /** Remove only keys strictly older than this calculation's historical window. */
+    fun pruneOlderThan(cut: Long)
+    /** Called only within successful generation-checked ADS publication. */
+    fun markCalculationCompleted()
+    /** Unknown/unpublished data must never provide positive equality proof. */
+    fun classifyCompletedGlucose(gv: GV): app.aaps.core.data.diagnostics.GlucoseChange
 }
+
+/** Immutable diagnostic evidence, never reused as the next bucketing pass anchor. */
+data class BucketPassEvidence(
+    val startedAt: Long,
+    val finishedAt: Long,
+    val referenceTimeUsed: Long?,
+    val rawBgTimestamp: Long?,
+    val bucketBgTimestamp: Long?,
+    val completed: Boolean
+)

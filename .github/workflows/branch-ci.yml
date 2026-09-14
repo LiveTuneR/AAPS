@@ -19,7 +19,16 @@ on:
           - pumpcontrolDebug
 
 jobs:
+  apex7-reliability:
+    if: github.ref == 'refs/heads/codex/apex7-reliability-overview'
+    uses: ./.github/workflows/apex-test-build.yml
+    with:
+      buildVariant: ${{ inputs.buildVariant }}
+    secrets: inherit
+    permissions:
+      contents: read
   build:
+    if: github.ref != 'refs/heads/codex/apex7-reliability-overview'
     name: Build AAPS
     runs-on: ubuntu-latest
     steps:

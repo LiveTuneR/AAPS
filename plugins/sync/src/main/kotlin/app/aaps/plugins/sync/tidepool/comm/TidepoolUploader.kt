@@ -29,7 +29,6 @@ import kotlinx.coroutines.sync.Mutex
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -84,15 +83,11 @@ class TidepoolUploader @Inject constructor(
     private fun getRetrofitInstance(): Retrofit? {
         if (retrofit == null) {
 
-            val httpLoggingInterceptor = HttpLoggingInterceptor()
-            httpLoggingInterceptor.level = HttpLoggingInterceptor.Level.BODY
-
+            // Even development builds must not emit auth headers, private IDs or clinical payloads.
             val client = OkHttpClient.Builder()
-                .also {
-                    if (l.findByName(LTag.TIDEPOOL.tag).enabled && (config.isEngineeringMode() || config.isDev()))
-                        it.addInterceptor(httpLoggingInterceptor)
-                    it.addInterceptor(InfoInterceptor(aapsLogger))
-                }.build()
+                .callTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .addInterceptor(InfoInterceptor(aapsLogger))
+                .build()
 
             retrofit = Retrofit.Builder()
                 .baseUrl(if (preferences.get(TidepoolBooleanKey.UseTestServers)) INTEGRATION_BASE_URL else PRODUCTION_BASE_URL)
@@ -260,7 +255,7 @@ class TidepoolUploader @Inject constructor(
                                         })
                                 )
                             } else {
-                                aapsLogger.debug(LTag.TIDEPOOL, "Existing Dataset: " + session.datasetReply!!.getUploadId())
+                                aapsLogger.debug(LTag.TIDEPOOL, "Existing dataset selected")
                                 // TODO: Wouldn't need to do this if we could block on the above `call.enqueue`.
                                 // ie, do the openDataSet conditionally, and then do `doUpload` either way.
                                 authFlowOut.updateConnectionStatus(AuthFlowOut.ConnectionStatus.SESSION_ESTABLISHED, "Appending to existing dataset")
@@ -330,17 +325,22 @@ class TidepoolUploader @Inject constructor(
                     rxBus.send(EventTidepoolStatus(("Uploading")))
                     if (session.service != null && session.token != null && session.datasetReply != null) {
                         val call = session.service.doUpload(session.token!!, session.datasetReply!!.getUploadId()!!, body)
+                        val windowStart = session.start
+                        val windowEnd = session.end
+                        aapsLogger.info(LTag.TIDEPOOL, "UploadProgress stage=SUBMITTED start=$windowStart end=$windowEnd bytes=${body.contentLength()}")
                         // Ownership of the lock passes to the async callback (released in both branches).
                         call.enqueue(
                             TidepoolCallback<UploadReplyMessage>(
                                 aapsLogger, rxBus, session, "Data Upload $from",
                                 {
                                     uploadChunk.setLastEnd(session.end)
+                                    aapsLogger.info(LTag.TIDEPOOL, "UploadProgress stage=HTTP_ACK start=$windowStart end=$windowEnd checkpoint=${uploadChunk.getLastEnd()}")
                                     authFlowOut.updateConnectionStatus(AuthFlowOut.ConnectionStatus.SESSION_ESTABLISHED, "Upload completed OK")
                                     releaseWakeLock()
                                     uploadMutex.unlock()
                                     uploadNext()
                                 }, {
+                                    aapsLogger.info(LTag.TIDEPOOL, "UploadProgress stage=FAILED start=$windowStart end=$windowEnd checkpoint=${uploadChunk.getLastEnd()}")
                                     authFlowOut.updateConnectionStatus(AuthFlowOut.ConnectionStatus.FAILED, "Upload FAILED")
                                     releaseWakeLock()
                                     uploadMutex.unlock()
@@ -414,7 +414,7 @@ class TidepoolUploader @Inject constructor(
         service.deleteDataSet(token, uploadId).enqueue(object : Callback<DatasetReplyMessage> {
             override fun onResponse(call: Call<DatasetReplyMessage>, response: Response<DatasetReplyMessage>) {
                 if (response.isSuccessful) {
-                    aapsLogger.debug(LTag.TIDEPOOL, "Purged Tidepool dataset $uploadId")
+                    aapsLogger.debug(LTag.TIDEPOOL, "Purged Tidepool dataset")
                     rxBus.send(EventTidepoolStatus("All Tidepool data purged"))
                     resetInstance() // drop the deleted dataset; the next upload opens a fresh one
                 } else {

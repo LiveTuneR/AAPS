@@ -30,7 +30,7 @@ class RxBusImpl @Inject constructor(
 
     override fun send(event: Event) {
         if (event !is EventUpdateOverviewCalcProgress)
-            aapsLogger.debug(LTag.EVENTS, "Sending $event")
+            aapsLogger.debug(LTag.EVENTS, "Sending type=${event.javaClass.simpleName}")
         publisher.onNext(event)
         flowPublisher.tryEmit(event)
     }

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="apex7_seconds">%1$d с</string>
+    <string name="telemetry_title">Телеметрия терапии</string>
+    <string name="telemetry_local_archive">Локальный архив для анализа</string>
+    <string name="telemetry_size">Занято: %1$d КиБ. Потеряно записей: %2$d</string>
+    <string name="telemetry_incomplete">Есть нарушения полноты данных. Подробности в манифесте архива.</string>
+    <string name="telemetry_retention">Хранение: %1$d дней</string>
+    <string name="telemetry_period">Экспорт за последние %1$d дней</string>
+    <string name="telemetry_interval">Ожидаемый интервал CGM</string>
+    <string name="telemetry_export">Экспорт ZIP</string>
+    <string name="telemetry_exporting">Подготовка архива</string>
+    <string name="telemetry_export_failed">Не удалось экспортировать телеметрию</string>
+    <string name="telemetry_export_saved">Архив телеметрии сохранён</string>
+    <string name="apex7_bolus_uncertain">Требуется сверка</string>
+    <string name="apex7_bolus_unreconciled">Предыдущая подача Apex не подтверждена</string>
+    <string name="apex7_bolus_state">Сверка болюса</string>
+    <string name="apex7_bolus_requested">Запрошенный болюс</string>
+    <string name="apex7_bolus_live">Завершено по live</string>
+    <string name="apex7_bolus_history">Подтверждено историей</string>
+    <string name="apex7_bolus_operation_age">Возраст операции</string>
+    <string name="apex7_bolus_last_reconcile">Последняя сверка</string>
+</resources>

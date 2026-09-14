@@ -17,6 +17,7 @@ import org.json.JSONObject
  * Created by mike on 04.06.2016.
  */
 interface Pump {
+    fun readOnlyDiagnostics(): app.aaps.core.data.diagnostics.PumpDiagnosticState? = null
 
     /**
      * Whether the pump has been set up by the user and is ready for connection attempts.

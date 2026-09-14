@@ -170,6 +170,7 @@ fun OverviewScreenTablet(
                     }
                 }
 
+
                 OverviewStatusSection(
                     sensorStatus = statusState.sensorStatus,
                     insulinStatus = statusState.insulinStatus,
