@@ -340,7 +340,8 @@ class OverviewDashboardViewModel @Inject constructor(
                     ActivityAccess.ERROR -> R.string.apex7_access_error
                 }),
                 R.string.apex7_last_read to time(activity.lastSuccessfulRead),
-                R.string.apex7_reachable to activity.watchReachable?.let { bool(it) } ?: rh.gs(R.string.apex7_watch_reachability_unavailable),
+                R.string.apex7_reachable to (activity.watchReachable?.let { bool(it) }
+                    ?: rh.gs(R.string.apex7_watch_reachability_unavailable)),
                 R.string.apex7_clock_skew to bool(activity.clockSkew),
                 R.string.apex7_source to activitySource(event), R.string.apex7_category to event?.let { "${activityName(it.category)}\n${it.rawType}" },
                 R.string.apex7_device to event?.sourceDevice, R.string.apex7_start to time(event?.startTime), R.string.apex7_end to time(event?.endTime),
