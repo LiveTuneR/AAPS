@@ -105,6 +105,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     private var adsCacheMisses = 0L
     @javax.inject.Inject lateinit var therapyTelemetry: Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
     private var publishedEvidence: org.json.JSONObject? = null
+    private var optionalGraphPublished = false
 
     private fun telemetry(data: () -> org.json.JSONObject) {
         if (!::therapyTelemetry.isInitialized) return
@@ -134,6 +135,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val emitFinalProgress: Boolean,
         val invalidateFrom: Long? = null
     ) {
+        var optionalRange: TimeRange? = null
         private var workingAds: AutosensDataStore? = null
         var ads: AutosensDataStore
             get() = workingAds ?: iobCobCalculator.ads.clone().also { workingAds = it }
@@ -221,10 +223,10 @@ class PrepareGraphDataWorker @AssistedInject constructor(
 
     private suspend fun executeOptionalGraph(): Result {
         val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
-        val data = workflowChainData.graphFor(generation) ?: return Result.success()
+        val data = workflowChainData.graphInputFor(generation) ?: return Result.success()
         if (!data.cache.hasIobGraphConsumers) return Result.success()
         measured("optionalIobGraph") { prepareIobAutosensGraphData(data) }
-        return Result.success()
+        return Result.success(workDataOf("graphPublished" to optionalGraphPublished))
     }
 
     // ---------- Phase 1 helpers (LoadBgDataWorker logic) ----------
@@ -764,7 +766,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
     // ---------- Phase 5: IOB/autosens graph data (was PrepareIobAutosensGraphDataWorker) ----------
 
     private suspend fun prepareIobAutosensGraphData(data: PrepareGraphData) {
-        val cacheTimeRange = data.cache.timeRangeFlow.value
+        val cacheTimeRange = if (inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false)) data.optionalRange ?: data.cache.timeRangeFlow.value else data.cache.timeRangeFlow.value
         val fromTime = cacheTimeRange?.fromTime ?: data.overviewData.fromTime
         val endTime = cacheTimeRange?.endTime ?: data.overviewData.endTime
 
@@ -793,7 +795,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
 
         while (time <= endTime) {
             if (isStopped || inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false) &&
-                workflowChainData.graphFor(inputData.getLong(WorkflowChainData.GEN_KEY, -1L)) == null) return
+                workflowChainData.graphInputFor(inputData.getLong(WorkflowChainData.GEN_KEY, -1L)) == null) return
             val progress = (time - fromTime).toDouble() / (endTime - fromTime) * 100.0
             if (reportCalculationProgress) data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, progress.toInt())
             val profile = profileFunction.getProfile(time)
@@ -851,7 +853,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         for (i in iobPredictionArray) {
             iobPredictionsListCompose.add(GraphDataPoint(i.time, i.iob))
         }
-        aapsLogger.debug(LTag.AUTOSENS, "IOB prediction for AS=" + decimalFormatter.to2Decimal(lastAutosensResult.ratio) + ": " + data.iobCobCalculator.iobArrayToString(iobPredictionArray))
+        aapsLogger.debug(LTag.AUTOSENS) { "IOB graph prediction ratio=${lastAutosensResult.ratio} points=${iobPredictionArray.size}" }
 
         val varSensListCompose: MutableList<GraphDataPoint> = ArrayList()
         val apsResults = measured("apsResultReadDecode") { persistenceLayer.getApsResults(fromTime, endTime) }
@@ -888,6 +890,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             workflowChainData.publishGraphIfCurrent(generation, { isStopped }, publishForRange)
         else workflowChainData.publishIfCurrent(job, generation, { isStopped }, publishForRange)
         if (!published || !rangePublished) return
+        optionalGraphPublished = true
 
         if (reportCalculationProgress) data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 100)
     }

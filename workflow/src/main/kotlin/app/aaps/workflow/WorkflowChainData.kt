@@ -69,6 +69,11 @@ class WorkflowChainData @Inject constructor(
     private val mainCalculationMutex = Mutex()
     private val graphCalculationMutex = Mutex()
     private var graphReadyGeneration: Long? = null
+    private var runningGraph: Pair<Long, PrepareGraphDataWorker.PrepareGraphData>? = null
+    @Synchronized internal fun retainGraph(generation: Long, data: PrepareGraphDataWorker.PrepareGraphData) { runningGraph = generation to data }
+    @Synchronized internal fun releaseGraph(generation: Long) { if (runningGraph?.first == generation) runningGraph = null }
+    @Synchronized internal fun graphInputFor(generation: Long): PrepareGraphDataWorker.PrepareGraphData? =
+        runningGraph?.takeIf { it.first == generation }?.second ?: graphFor(generation)
 
     internal suspend fun <T> withGraphCalculation(block: suspend () -> T): T = graphCalculationMutex.withLock { block() }
 
@@ -99,7 +104,7 @@ class WorkflowChainData @Inject constructor(
     @Synchronized
     fun invalidate(job: String) {
         when (job) {
-            MAIN_CALCULATION -> { mainScheduler?.invalidate(); mainChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); mainChain = null }
+            MAIN_CALCULATION -> { mainScheduler?.invalidate(); mainChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); mainChain = null; runningGraph = null }
             HISTORY_CALCULATION -> { historyChain?.prepare?.iobCobCalculator?.loopHealth?.invalidated(); historyChain = null }
             UPDATE_PREDICTIONS -> predictionsChain = null
         }

@@ -54,6 +54,7 @@ class CalculationWorkflowImpl @Inject constructor(
     // silently dropped. Lock is held only across the enqueue itself — microseconds, no real
     // contention cost.
     private val enqueueLock = Any()
+    private val optionalGraphs = LatestPendingGraph<Pair<Long, app.aaps.core.interfaces.overview.graph.TimeRange?>, PrepareGraphDataWorker.PrepareGraphData>()
     internal var observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     internal var observeMainWork = true
     internal var schedulerOverride: LatestPendingCalculation? = null
@@ -273,10 +274,46 @@ class CalculationWorkflowImpl @Inject constructor(
     private fun enqueueOptionalGraph(generation: Long) {
         val prepare = workflowChainData.graphFor(generation) ?: return
         if (!prepare.cache.hasIobGraphConsumers) return
+        val range = prepare.cache.timeRangeFlow.value
+        val snapshot = PrepareGraphDataWorker.PrepareGraphData(prepare.iobCobCalculator, prepare.overviewData,
+            prepare.cache, prepare.signals, prepare.reason, prepare.end, false,
+            prepare.limitDataToOldestAvailable, false, false).apply {
+                ads = prepare.ads.clone()
+                optionalRange = range
+            }
+        optionalGraphs.offer(generation to range, snapshot)?.let(::startOptionalGraph)
+    }
+
+    private fun startOptionalGraph(entry: LatestPendingGraph.Entry<Pair<Long, app.aaps.core.interfaces.overview.graph.TimeRange?>, PrepareGraphDataWorker.PrepareGraphData>) {
+        val generation = entry.key.first
+        if (workflowChainData.graphFor(generation) == null || !entry.value.cache.hasIobGraphConsumers) {
+            optionalGraphs.finish(entry.key, false)?.let(::startOptionalGraph)
+            return
+        }
+        workflowChainData.retainGraph(generation, entry.value)
         val input = Data.Builder().putString(WorkflowChainData.JOB_KEY, MAIN_CALCULATION)
             .putLong(WorkflowChainData.GEN_KEY, generation).putBoolean(WorkflowChainData.GRAPH_ONLY_KEY, true).build()
-        WorkManager.getInstance(context).enqueueUniqueWork("$MAIN_CALCULATION:optionalGraph", ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequest.Builder(PrepareGraphDataWorker::class.java).setInputData(input).build())
+        val request = OneTimeWorkRequest.Builder(PrepareGraphDataWorker::class.java).setInputData(input).build()
+        try {
+            val operation = WorkManager.getInstance(context).enqueue(request)
+            observerScope.launch {
+                var published = false
+                try {
+                    operation.result.get()
+                    val result = WorkManager.getInstance(context).getWorkInfoByIdFlow(request.id).filterNotNull().first { it.state.isFinished }
+                    published = result.state == WorkInfo.State.SUCCEEDED && result.outputData.getBoolean("graphPublished", false)
+                } catch (error: Exception) { aapsLogger.warn(LTag.WORKER, "Optional graph completion generation=$generation type=${error.javaClass.simpleName}") }
+                finally { synchronized(enqueueLock) {
+                    workflowChainData.releaseGraph(generation)
+                    optionalGraphs.finish(entry.key, published)?.let(::startOptionalGraph)
+                    aapsLogger.info(LTag.WORKER, "OptionalGraph started=${optionalGraphs.started} completed=${optionalGraphs.completed} coalesced=${optionalGraphs.coalesced} discarded=${optionalGraphs.discarded} occupancy=${optionalGraphs.occupancy()}")
+                } }
+            }
+        } catch (error: Exception) {
+            workflowChainData.releaseGraph(generation)
+            optionalGraphs.finish(entry.key, false)?.let(::startOptionalGraph)
+            aapsLogger.error(LTag.WORKER, "Optional graph enqueue generation=$generation type=${error.javaClass.simpleName}")
+        }
     }
 
     private fun logMainState(stage: String) {
