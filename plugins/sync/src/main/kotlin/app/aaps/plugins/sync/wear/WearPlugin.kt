@@ -45,8 +45,12 @@ import app.aaps.plugins.sync.wear.wearintegration.DataHandlerMobile
 import app.aaps.plugins.sync.wear.wearintegration.DataLayerListenerServiceMobileHelper
 import app.aaps.shared.impl.extensions.safeQueryBroadcastReceivers
 import io.reactivex.rxjava3.disposables.CompositeDisposable
+import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
@@ -56,11 +60,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.rx3.rxCompletable
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.TimeUnit
 
 @Singleton
 class WearPlugin @Inject constructor(
@@ -90,6 +96,7 @@ class WearPlugin @Inject constructor(
 
     private val disposable = CompositeDisposable()
     private var scope: CoroutineScope? = null
+    private var snapshotRequests: Channel<String>? = null
     private val deferredStart = DeferredForegroundStart()
 
     private val _connectedDevice = MutableStateFlow<String?>(null)
@@ -111,6 +118,17 @@ class WearPlugin @Inject constructor(
         super.onStart()
         val newScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope = newScope
+        val requests = Channel<String>(Channel.CONFLATED)
+        snapshotRequests = requests
+        newScope.launch {
+            for (from in requests) {
+                try { dataHandlerMobile.resendData(from) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { fabricPrivacy.logException(error) }
+            }
+        }
+        dataHandlerMobile.resetHistoryDelivery()
+        requests.trySend("WearStart")
         deferredStart.start { dataLayerListenerServiceMobileHelper.startService(context) }
         // Last percent actually sent to the watch. Starts at 100 = "nothing to clear": the empty-status
         // clear frame on state-null is only needed when the watch was left mid-progress (< 100). If the
@@ -118,7 +136,6 @@ class WearPlugin @Inject constructor(
         // overwrite that text with "100% - " for the notification's 5 s dismiss window.
         var lastSentPercent = 100
         bolusProgressData.state
-            .drop(1) // Skip initial null emission on collection start
             .collectResilient(newScope, aapsLogger, LTag.WEAR) { state ->
                 if (isEnabled()) {
                     if (state != null) {
@@ -152,41 +169,21 @@ class WearPlugin @Inject constructor(
             dataHandlerMobile.resendData("PreferenceChange")
             checkCustomWatchfacePreferences()
         }
-        disposable += rxBus
-            .toObservable(EventAutosensCalculationFinished::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable { dataHandlerMobile.resendData("EventAutosensCalculationFinished") }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
-        disposable += rxBus
-            .toObservable(EventLoopUpdateGui::class.java)
-            .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable { dataHandlerMobile.resendData("EventLoopUpdateGui") }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
         // AAPSCLIENT: fresh predictions arrive via NS devicestatus, not a local loop run — without this the
         // watch graph trails the phone by one loop cycle (the BG-triggered autosens resend fires BEFORE the
         // master's new devicestatus lands). Event is only sent on AAPSCLIENT; processedDeviceStatusData is
         // updated synchronously before it fires, so the resend reads the new predictions.
-        disposable += rxBus
-            .toObservable(EventNsClientStatusUpdated::class.java)
+        disposable += Observable.merge(
+            rxBus.toObservable(EventAutosensCalculationFinished::class.java).map { "EventAutosensCalculationFinished" },
+            rxBus.toObservable(EventLoopUpdateGui::class.java).map { "EventLoopUpdateGui" },
+            rxBus.toObservable(EventNsClientStatusUpdated::class.java).map { "EventNsClientStatusUpdated" }
+        )
+            .throttleLatest(500, TimeUnit.MILLISECONDS, aapsSchedulers.io, true)
             .observeOn(aapsSchedulers.io)
-            .concatMapCompletable {
-                rxCompletable { dataHandlerMobile.resendData("EventNsClientStatusUpdated") }
-                    .doOnError(fabricPrivacy::logException)
-                    .onErrorComplete()
-            }
-            .subscribe()
+            .subscribe({ from -> requests.trySend(from) }, fabricPrivacy::logException)
         // Push status to watch quickly when a TT changes, without waiting for the loop's 10s debounce
         persistenceLayer.observeChanges<TT>()
-            .drop(1) // Skip initial emission on collection start
-            .debounce(2_000L)
+            .filter { it.isNotEmpty() } // Change notifications have no initial replay to discard.
             .collectResilient(newScope, aapsLogger, LTag.WEAR) { dataHandlerMobile.resendData("TempTargetChange") }
         // Refresh wear scene tile whenever the scene list changes (add / update / delete)
         scenes.scenesFlow
@@ -251,6 +248,8 @@ class WearPlugin @Inject constructor(
     }
 
     override suspend fun onStop() {
+        snapshotRequests?.close()
+        snapshotRequests = null
         scope?.cancel()
         scope = null
         disposable.clear()

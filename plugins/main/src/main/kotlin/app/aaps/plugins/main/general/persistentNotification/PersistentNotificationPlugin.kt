@@ -44,7 +44,14 @@ import app.aaps.plugins.main.R
 import io.reactivex.rxjava3.core.Observable
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -98,44 +105,56 @@ class PersistentNotificationPlugin @Inject constructor(
     private val disposable = CompositeDisposable()
     private val deferredStart = DeferredForegroundStart()
     private var lastAutoNotificationContent: String = ""
+    private var lastAutoNotificationAt = Long.MIN_VALUE
+    private var notificationScope: CoroutineScope? = null
+    private var refreshRequests: Channel<Unit>? = null
+    private val autoRequested = AtomicBoolean(false)
 
     override suspend fun onStart() {
         super.onStart()
         notificationHolder.createNotificationChannel()
-        disposable += rxBus
-            .toObservable(EventRefreshOverview::class.java)
+        val requests = Channel<Unit>(Channel.CONFLATED)
+        refreshRequests = requests
+        notificationScope = CoroutineScope(Dispatchers.IO + SupervisorJob()).also { scope ->
+            scope.launch {
+                for (request in requests) {
+                    try {
+                        updateNotification(autoRequested.getAndSet(false))
+                        deferredStart.start { dummyServiceHelper.startService(context) }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { fabricPrivacy.logException(error) }
+                }
+            }
+        }
+        disposable += Observable.merge(
+            rxBus.toObservable(EventRefreshOverview::class.java).map { Unit },
+            rxBus.toObservable(EventAutosensCalculationFinished::class.java).map { Unit }
+        )
+            .throttleLatest(500, TimeUnit.MILLISECONDS, aapsSchedulers.io, true)
             .observeOn(aapsSchedulers.io)
-            .subscribe({ triggerNotificationUpdate() }, fabricPrivacy::logException)
+            .subscribe({ triggerNotificationUpdate(includeAuto = true) }, fabricPrivacy::logException)
         disposable += rxBus
             .toObservable(EventInitializationChanged::class.java)
             .observeOn(aapsSchedulers.io)
             .subscribe({ triggerNotificationUpdate() }, fabricPrivacy::logException)
-        disposable += rxBus
-            .toObservable(EventAutosensCalculationFinished::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({ triggerNotificationUpdate() }, fabricPrivacy::logException)
-        /// Android Auto - debounced to prevent rapid pop-ups
-        disposable += Observable.merge(
-            rxBus.toObservable(EventRefreshOverview::class.java).map { },
-            rxBus.toObservable(EventInitializationChanged::class.java).map { },
-            rxBus.toObservable(EventAutosensCalculationFinished::class.java).map { }
-        )
-            .debounce(10, TimeUnit.SECONDS)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({ triggerNotificationUpdate(includeAuto = true) }, fabricPrivacy::logException)
-        /// End Android Auto
+        triggerNotificationUpdate()
     }
 
     override suspend fun onStop() {
         disposable.clear()
+        refreshRequests?.close()
+        refreshRequests = null
+        notificationScope?.cancel()
+        notificationScope = null
+        autoRequested.set(false)
         deferredStart.cancel()
         dummyServiceHelper.stopService(context)
         super.onStop()
     }
 
     private fun triggerNotificationUpdate(includeAuto: Boolean = false) {
-        runBlocking { updateNotification(includeAuto) }
-        deferredStart.start { dummyServiceHelper.startService(context) }
+        if (includeAuto) autoRequested.set(true)
+        refreshRequests?.trySend(Unit)
     }
 
     private suspend fun updateNotification(includeAuto: Boolean = false) {
@@ -233,8 +252,10 @@ class PersistentNotificationPlugin @Inject constructor(
             line1 = rh.gs(app.aaps.core.ui.R.string.no_profile_set)
         }
         val content = "$line1|$line2|$line3"
-        if (includeAuto && content == lastAutoNotificationContent) return
-        if (includeAuto) lastAutoNotificationContent = content
+        val nowMono = android.os.SystemClock.elapsedRealtime()
+        val publishAuto = includeAuto && content != lastAutoNotificationContent &&
+            (lastAutoNotificationAt == Long.MIN_VALUE || nowMono - lastAutoNotificationAt >= 10_000L)
+        if (publishAuto) { lastAutoNotificationContent = content; lastAutoNotificationAt = nowMono }
         val builder = NotificationCompat.Builder(context, notificationHolder.channelID)
         builder.setOngoing(true)
         builder.setOnlyAlertOnce(true)
@@ -244,7 +265,7 @@ class PersistentNotificationPlugin @Inject constructor(
         if (line2 != null) builder.setContentText(line2)
         if (line3 != null) builder.setSubText(line3)
         /// Android Auto
-        if (includeAuto && unreadConversationBuilder != null) {
+        if (publishAuto && unreadConversationBuilder != null) {
             builder.extend(
                 NotificationCompat.CarExtender()
                     .setLargeIcon(rh.decodeResource(iconsProvider.getIcon()))

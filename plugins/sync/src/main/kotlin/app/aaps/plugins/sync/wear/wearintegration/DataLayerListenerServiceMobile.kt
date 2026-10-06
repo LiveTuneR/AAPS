@@ -49,6 +49,8 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     @Inject lateinit var activePlugin: ActivePlugin
     @Inject lateinit var rxBus: RxBus
     @Inject lateinit var aapsSchedulers: AapsSchedulers
+    @Inject lateinit var dataHandlerMobile: DataHandlerMobile
+    @Inject lateinit var therapyTelemetry: app.aaps.core.interfaces.telemetry.TherapyTelemetry
 
     inner class LocalBinder : Binder() {
 
@@ -64,6 +66,17 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     private var handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
 
     private val disposable = CompositeDisposable()
+    private val traffic = WearTrafficCounters()
+
+    private fun reportTraffic(size: Int) {
+        traffic.sent(size)
+        traffic.reportIfDue()?.let { stats ->
+            therapyTelemetry.record(app.aaps.core.interfaces.telemetry.TherapyEventType.SCHEDULER,
+                org.json.JSONObject().put("source","WEAR_LINK").put("stage","TX_API_TOTALS")
+                    .put("messages",stats.messages).put("bytes",stats.bytes)
+                    .put("succeeded",stats.succeeded).put("failed",stats.failed).put("durationMs",stats.durationMs))
+        }
+    }
 
     private val rxPath get() = getString(app.aaps.core.interfaces.R.string.path_rx_bridge)
     private val rxWatchfacePath get() = getString(app.aaps.core.interfaces.R.string.path_rx_data_bridge)
@@ -72,7 +85,6 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
         AndroidInjection.inject(this)
         super.onCreate()
         aapsLogger.debug(LTag.WEAR, "onCreate")
-        handler.post { updateTranscriptionCapability() }
         disposable += rxBus
             .toObservable(EventMobileToWear::class.java)
             .observeOn(aapsSchedulers.io)
@@ -81,6 +93,8 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
             .toObservable(EventMobileToWearWatchface::class.java)
             .observeOn(aapsSchedulers.io)
             .subscribe { sendMessage(rxWatchfacePath, it.payload) }
+        // Discovery may request an immediate resend: install both outgoing consumers first.
+        handler.post { updateTranscriptionCapability() }
     }
 
     override fun onCapabilityChanged(p0: CapabilityInfo) {
@@ -118,21 +132,33 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
         }
     }
 
-    private var transcriptionNodeId: String? = null
+    @Volatile private var transcriptionNodeId: String? = null
 
     private fun updateTranscriptionCapability() {
+        if (!wearPlugin.isEnabled()) {
+            transcriptionNodeId = null
+            wearPlugin.updateConnectedDevice(null)
+            dataHandlerMobile.resetHistoryDelivery()
+            return
+        }
         try {
             val capabilityInfo: CapabilityInfo = Tasks.await(
                 capabilityClient.getCapability(WEAR_CAPABILITY, CapabilityClient.FILTER_REACHABLE)
             )
             aapsLogger.debug(LTag.WEAR, "Nodes: ${capabilityInfo.nodes.joinToString(", ") { it.displayName + "(" + it.id + ")" }}")
             val bestNode = pickBestNodeId(capabilityInfo.nodes)
+            val changed = transcriptionNodeId != bestNode?.id
             transcriptionNodeId = bestNode?.id
             wearPlugin.updateConnectedDevice(bestNode?.displayName)
             rxBus.send(EventWearUpdateGui())
             aapsLogger.debug(LTag.WEAR, "Selected node: ${bestNode?.displayName} $transcriptionNodeId")
-            rxBus.send(EventMobileToWear(EventData.ActionPing(System.currentTimeMillis())))
-            rxBus.send(EventData.ActionResendData("WatchUpdaterService"))
+            if (changed) {
+                dataHandlerMobile.resetHistoryDelivery()
+                if (bestNode != null) {
+                    rxBus.send(EventMobileToWear(EventData.ActionPing(System.currentTimeMillis())))
+                    rxBus.send(EventData.ActionResendData("WatchUpdaterService"))
+                }
+            }
         } catch (_: Exception) {
             fabricPrivacy.logCustom("WearOS_unsupported")
         }
@@ -167,12 +193,16 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     }
 
     private fun sendMessage(path: String, data: String?) {
+        if (!wearPlugin.isEnabled()) return
         aapsLogger.debug(LTag.WEAR, "sendMessage: $path characters=${data?.length ?: 0}")
         transcriptionNodeId?.also { nodeId ->
+            val bytes = data?.toByteArray() ?: byteArrayOf()
+            reportTraffic(bytes.size)
             messageClient
-                .sendMessage(nodeId, path, data?.toByteArray() ?: byteArrayOf()).apply {
-                    addOnSuccessListener { }
+                .sendMessage(nodeId, path, bytes).apply {
+                    addOnSuccessListener { traffic.completed(true) }
                     addOnFailureListener {
+                        traffic.completed(false)
                         aapsLogger.debug(LTag.WEAR, "sendMessage:  $path failure")
                     }
                 }
@@ -180,12 +210,15 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     }
 
     private fun sendMessage(path: String, data: ByteArray) {
+        if (!wearPlugin.isEnabled()) return
         aapsLogger.debug(LTag.WEAR, "sendMessage: $path ${data.size}")
         transcriptionNodeId?.also { nodeId ->
+            reportTraffic(data.size)
             messageClient
                 .sendMessage(nodeId, path, data).apply {
-                    addOnSuccessListener { }
+                    addOnSuccessListener { traffic.completed(true) }
                     addOnFailureListener {
+                        traffic.completed(false)
                         aapsLogger.debug(LTag.WEAR, "sendMessage:  $path failure ${data.size}")
                     }
                 }

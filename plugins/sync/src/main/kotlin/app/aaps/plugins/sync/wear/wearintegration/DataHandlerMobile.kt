@@ -100,6 +100,8 @@ import app.aaps.plugins.sync.R
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import kotlinx.coroutines.rx3.rxCompletable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -159,6 +161,14 @@ class DataHandlerMobile @Inject constructor(
     @Inject lateinit var scenes: SceneAutomationApi
     @Inject lateinit var sceneActions: SceneActions
     private val disposable = CompositeDisposable()
+    private val snapshotMutex = Mutex()
+    private data class GraphKey(
+        val points: List<InMemoryGlucoseValue>, val units: GlucoseUnit, val displayUnits: String,
+        val low: Double, val high: Double, val slope: String, val delta: Double?, val average: Double?
+    )
+    private val graphHistory = WearHistoryCache<GraphKey, EventData.GraphData>()
+
+    fun resetHistoryDelivery() = graphHistory.reconnect()
 
     /**
      * Registers a serialized suspend [handler] for one [EventData] subtype arriving from Wear.
@@ -212,7 +222,7 @@ class DataHandlerMobile @Inject constructor(
             loop.acceptChangeRequest()
             (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(Constants.NOTIFICATION_ID)
         }
-        onEvent<EventData.ActionResendData> { resendData(it.from) }
+        onEvent<EventData.ActionResendData> { resendData(it.from, forceHistory = true) }
         onEvent<EventData.ActionPumpStatus> {
             sendToWear(
                 EventData.ConfirmAction(
@@ -1071,14 +1081,14 @@ class DataHandlerMobile @Inject constructor(
     private fun sendQuickWizardListToWear() =
         sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
 
-    suspend fun resendData(from: String) {
+    suspend fun resendData(from: String, forceHistory: Boolean = false) = snapshotMutex.withLock {
         aapsLogger.debug(LTag.WEAR, "Sending data to wear from $from")
         // Wear can request a resend before MainApp's init scope has populated pluginStore.plugins
         // (e.g. immediately after device reboot). Skip until the active pump is selectable —
         // the wear app will retry on its next state change.
         if (!config.appInitialized) {
             aapsLogger.debug(LTag.WEAR, "Skipping resendData — app not yet initialized")
-            return
+            return@withLock
         }
         // SingleBg
         iobCobCalculator.ads.lastBg()?.let { sendToWear(getSingleBG(it)) }
@@ -1114,7 +1124,11 @@ class DataHandlerMobile @Inject constructor(
             val lowLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewLowMark), units)
             val highLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewHighMark), units)
             val slopeArrow = (trendCalculator.getTrendArrow(iobCobCalculator.ads) ?: TrendArrow.NONE).symbol
-            sendToWear(EventData.GraphData(ArrayList(bucketedData.map { buildSingleBg(it, glucoseStatus, units, lowLine, highLine, slopeArrow) })))
+            val key = GraphKey(bucketedData.map { it.copy() }, units, preferences.get(StringKey.GeneralUnits),
+                lowLine, highLine, slopeArrow, glucoseStatus?.delta, glucoseStatus?.shortAvgDelta)
+            graphHistory.snapshot(key, System.nanoTime(), forceHistory) {
+                EventData.GraphData(ArrayList(bucketedData.map { buildSingleBg(it, glucoseStatus, units, lowLine, highLine, slopeArrow) }))
+            }?.let(::sendToWear)
         }
         // Treatments
         sendTreatments()
@@ -1161,11 +1175,12 @@ class DataHandlerMobile @Inject constructor(
         val predictions = arrayListOf<EventData.SingleBg>()
         if (!config.appInitialized) return
         val profile = profileFunction.getProfile() ?: return
+        val tempHistory = processedTbrEbData.getTempBasalsIncludingConvertedExtended(startTimeWindow, now)
         var beginBasalSegmentTime = startTimeWindow
         var runningTime = startTimeWindow
         var beginBasalValue = profile.getBasal(beginBasalSegmentTime)
         var endBasalValue = beginBasalValue
-        var tb1 = processedTbrEbData.getTempBasalIncludingConvertedExtended(runningTime)
+        var tb1 = tempHistory.at(runningTime)
         var tb2: TB?
         var tbBefore = beginBasalValue
         var tbAmount = beginBasalValue
@@ -1191,7 +1206,7 @@ class DataHandlerMobile @Inject constructor(
             }
 
             //temps
-            tb2 = processedTbrEbData.getTempBasalIncludingConvertedExtended(runningTime)
+            tb2 = tempHistory.at(runningTime)
             when {
                 tb1 == null && tb2 == null -> {
                     //no temp stays no temp
@@ -1229,7 +1244,7 @@ class DataHandlerMobile @Inject constructor(
             basals.add(EventData.TreatmentData.Basal(beginBasalSegmentTime, runningTime, beginBasalValue))
         }
         if (tb1 != null) {
-            tb2 = processedTbrEbData.getTempBasalIncludingConvertedExtended(now) //use "now" to express current situation
+            tb2 = tempHistory.at(now) //use "now" to express current situation
             if (tb2 == null) {
                 //express the canceled temp by painting it down one minute early
                 temps.add(EventData.TreatmentData.TempBasal(tbStart, tbBefore, now - 60 * 1000, endBasalValue, tbAmount))
@@ -1245,7 +1260,7 @@ class DataHandlerMobile @Inject constructor(
                 }
             }
         } else {
-            tb2 = processedTbrEbData.getTempBasalIncludingConvertedExtended(now) //use "now" to express current situation
+            tb2 = tempHistory.at(now) //use "now" to express current situation
             if (tb2 != null) {
                 //onset at the end
                 val profileTB = profileFunction.getProfile(runningTime)
