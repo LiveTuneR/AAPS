@@ -2,7 +2,7 @@ name: Apex test build
 
 on:
   push:
-    branches: [codex/energy-r1-2026-10-06]
+    branches: [codex/energy-r1-2026-10-06, codex/energy-r1_1-2026-10-06]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -54,6 +54,8 @@ jobs:
             -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -Xss1m"
       - name: Profile synthetic SQL fixture
         run: python3 doc/performance/measure_energy_fixture.py --output build/reports/energy-fixtures/sql-fixture.json
+      - name: Verify protected therapy sources
+        run: python3 doc/performance/verify_energy_invariants.py --output build/reports/energy-fixtures/therapy-source-invariants.json
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

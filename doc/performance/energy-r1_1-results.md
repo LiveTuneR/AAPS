@@ -1,0 +1,60 @@
+# Energy R1.1 implementation and acceptance
+
+Base: `7cc441acd7dfec408042615c9f868e0dea3aafab`; pre-energy comparator: `da3220a5982000b63940f03004fa3a51af531017`. Branch: `codex/energy-r1_1-2026-10-06`. Phone/Wear versionCode 2008. This document describes the candidate source; final run/SHA, signed APK checksums and executed-test totals belong to the downloaded release evidence beside the APKs.
+
+## Proven by code/tests
+
+- Empty telemetry diagnostic buffer has no recurring timer. First observation owns one delayed deadline, invalidated by drain/pressure/critical/export/stop. Tests simulate ten idle minutes, a hundred-event burst, stale timer execution, shutdown and producer/writer concurrency. This removes the previous potential 86,400 idle dispatches/day; it is a dispatch bound, not a measured battery saving.
+- Diagnostic overload swaps two bounded buffers (128 rows/64KiB each), retries the incoming observation and requests immediate writer drain. No filesystem wait occurs in the therapy caller. Hard overload records counts, type counts and UTC span. PUMP_STATE aggregation/WAL/crash uncertainty and critical per-record durability remain intact. A stalled writer can exceed the one-second disk deadline; RAM diagnostics are still crash-vulnerable.
+- Ordinary support ZIP contains independent non-destructive current Medtrum/Apex ring snapshots, including dropped count and UTC coverage. Rings stay at 512 entries/512KiB per driver; raw BLE is not continuously written to disk.
+- NS3 operation lease starts before asynchronous dispatch and ends after awaited SGV/treatment/calibration/food/delete/profile processing. ACK callbacks acquire independent leases. Cancellation/destroy/failure release ownership. Android bounds each physical wake lock at 30s; timeout counts distinguish late completion. Exceptions request REST replay. RAM/channel enqueue is explicitly not a durable handoff.
+- WS does not move the REST high-water mark, including after initial load. REST BG/treatment/profile page cursors persist only after their data write completes. DB failure leaves the old cursor; retry replays the same window through existing upserts. Tests exercise the real SGV/treatment/delete/profile listeners, subscribe ACK, failure and reconnect cursor ordering. Real Doze is still pending.
+- Wear domains compare full content before serialization/MessageClient calls. BG correction with the same timestamp remains visible. One terminal generation commits only after successful frame construction; stale/duplicate generations are skipped. Early BG and terminal status use separate equality keys. Routine traffic does not resend static configuration or treatment history. History heartbeat is removed; reconnect/explicit request retain full snapshots. Message API failure invalidates delivery keys for recovery.
+- FastStatus bundles BG/status/predictions into one ordinary message and one watch DataStore transaction. History/treatment payloads remain separate. Urgent bolus progress, confirmations, commands and ACKs bypass routine suppression. New Phone/Wear APKs form one protocol pair; using an old watch with a new phone is not an accepted runtime configuration because old Wear does not understand FastStatus.
+- Optional graph uses one active request and one replaceable latest pending request. A new routine BG cannot cancel active work; retained input permits it to finish. Current generation and range still guard publication. Destructive invalidation clears the retained input. Main and graph mutexes remain independent.
+- Notification expiry has no empty/non-expiring-list ticker. Scheduled widgets and ongoing notifications compare cheap display revisions before DB rebuilding. Settings and persistence mutations invalidate presentation keys; failed rendering does not commit a key. Minute age changes and Android Auto behavior remain supported.
+- Hidden overview stops two-second display work. Health Connect reading is retained independently after the user's clarification; its costs are instrumented, and the activity/dosing boundary is unchanged. See [assessment](health-connect-assessment-r1_1.md).
+
+Protected therapy sources are checked automatically against R1: algorithms, smoothing, constraints, CGM sources and pump code except observational trace exporters. DetermineBasal/smoothing also match the pre-energy source. Existing frozen replay tests cover 768 complete serialized SMB/DynISF results (including requested SMB/TBR), command/constraint/rounding suites cover both pumps, fresh-minute raw/smoothed ADS publication is fenced, and full historical IOB cold/warm/correction and range-equivalence tests remain in the complete suite. Source equality supplements these executable tests; it does not claim an exhaustive clinical proof.
+
+No further point-to-range semantic replacement is added in R1.1: R1 already covers the known TBR/EB/TT graph/Wear loops. Remaining time-dependent profile reads/TDD paths were audited and kept until equivalent invalidation/query evidence exists. No database migration or index is introduced. [Full background map](phone-background-work-map.md).
+
+## Synthetic benchmark
+
+LatestPendingGraphTest uses CGM every 60s and a 90s graph: 61 mandatory input events, 40 completed graph runs, 41 starts, ≤1 active/1 pending, pending replacements rather than cancellation. No stale publication. This proves scheduling behavior in the simulation, not CPU/battery on a phone.
+
+The existing actual-schema SQL fixture compares 2,881 point queries/table with one bounded range read over a 48h window in a 90-day/10,809-row database, with 8,655 boundary/equivalence assertions. Latest timings and the unchanged 100-state diagnostic-burst evidence are in CI/local fixture files. Do not compare host wall timings with device mandatory latency.
+
+## Device measured
+
+No R1.1 hardware A/B interval has been measured. No CPU, wakelock, energy percentage or phone/watch latency improvement is claimed. Supplied Android battery screenshots identify high app attribution; they cannot assign causality to an individual hot path.
+
+## Runtime measurement
+
+Ordinary support export `build-provenance.json` contains `energyRuntime`: cumulative process-local counters, elapsed time, and bounded latency windows (latest 2,048 samples, at most 32 duration keys/256 counters). No counter timer/thread exists. `telemetryPerformance` retains WAL/store latency, directory scans, batches, deadline callbacks and buffer state. Empty diagnostic checks do not perform disk flush/fsync.
+
+Metrics cover mandatory preparation separately from optional/history graph, outcome/discard, ADS and historical IOB hits/misses, known TBR point/range reads, per-worker starts, NS3 lease duration/count/timeouts, DummyService starts, widget/visible-overview/notification-expiry callbacks, Health Connect reads, telemetry type/bytes/store and admission fsync, Wear builds/skips/resync/reconnect/messages/bytes by domain and API success/failure. Counter deltas divided by paired duration give rates/hour. They are observations of instrumented paths, not a total OS CPU or all-driver wakelock inventory. API success is not proof that the watch applied the frame.
+
+Mandatory preparation wall p50/p95/p99 includes its queue/mutex wait once the worker enters. Optional wall includes suspension; CPU must be read from process/Perfetto data, because coroutine thread CPU cannot be inferred across suspension. Percentiles spanning a long process lifetime require a fresh representative trace/interval or exported event samples, not subtraction of percentile values.
+
+## Pending and release gates
+
+Run all 16 R1 validation modules without exclusions, SQL/source fixtures and final signed release workflow. Signed Phone/Wear must come from the same successful run for the exact branch HEAD. Verify both package/certificate/SDK/ABIs, versionCode 2008 > previous 2006/2007, ZIP integrity, full embedded commit and Watch Face Push validators. Build jobs receive no signing keys; signing and Drive delivery remain isolated jobs.
+
+`DEVICE_ENERGY_VALIDATION_READY` applies only after those engineering gates succeed and the downloaded release evidence confirms them. `DEVICE_ENERGY_VALIDATION_PASSED` requires actual paired device intervals. This source document itself is not a signed-artifact attestation.
+
+## Reproducible phone/watch A/B
+
+Compare A (pre-energy da3220a APK or recorded actual previous release) and B (this exact signed R1.1 pair). Keep minute Lumiflex/MicroTech, smoothing, profiles/limits, enabled plugins, logging, network, battery conditions and graph/widget usage matched. Do not change clinical settings for this measurement. Record device/OS/app SHA/certificate, pump family, CGM cadence and matching interval start/end UTC.
+
+Separate pairs: Phone-only/no Wear; Phone + Galaxy Watch; Medtrum Nano 200U primary; Apex TruCare III if available. Use matched overnight screen-off and ordinary daytime intervals, ideally multiple pairs. Do not claim a cross-day difference with different screen/network/workout/charging exposure as causal evidence.
+
+At each boundary run `collect_energy_device.ps1` for Phone and, if ADB-connected, Watch, then save a normal AAPS support ZIP. It collects read-only battery/CPU/power/service/job/alarm/package snapshots. Capture a representative 60s Perfetto scheduling window using the optional script flag or Android Studio System Trace. No force-Doze, battery reset, pump action or automatic uninstall/data clear is performed. Store data locally; exports can contain health/device identifiers.
+
+Use `summarize_energy_interval.py --start START.zip --end END.zip --output rates.json` to normalize available B counters/hour. Reject intervals spanning process restart/negative counter deltas; collect OS evidence for baseline A, whose export lacks new counters. Compare CPU seconds/hour, partial-wakelock seconds/hour, worker executions/hour, store+admission fsync/hour, telemetry bytes/hour, Wear messages/bytes/hour and measured mandatory latency. Battery %/hour is supplemental. Account for the brief measurement window and export overhead consistently in both arms.
+
+Acceptance gates: no lost valid minute CGM; main calculation never waits for graph; same requested SMB/TBR/constraints/rounding for deterministic inputs; p95 mandatory preparation target <5s, temporary <10s only with documented blocker; no duplicate enactment or weakened unknown-delivery handling; correct graph/range after navigation/reconciliation; live trace available in normal support ZIP.
+
+Screen-off/natural Doze: check CGM timestamp→APS publication, Medtrum link, actual NS DB insertion and full Wear reconnect snapshot. Separately exercise Wi-Fi→LTE, offline→online and NS socket reconnect; compare durable cursor/DB identifiers to detect missing or duplicate history. Medtrum/Apex disconnect/reconnect must preserve the existing command recovery contract. Test these with recorded treatment history and normal operation; the collector does not issue therapy commands. Verify APK upgrade preserves settings, history and pairing without clearing data. Install both Phone and Wear before evaluating routine transport.
+
+Health Connect acceptance is separate: inspect access status and source workout availability, read latency, source update age and CPU; resolve pagination/background grant/deletion gaps before broadening activity integration. Activity is still observational in this release.

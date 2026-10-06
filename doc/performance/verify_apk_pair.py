@@ -31,7 +31,7 @@ for kind, name in [("phone", args.phone), ("wear", args.wear)]:
     sdk = re.search(r"(?:minSdkVersion|sdkVersion):'([^']+)'", manifest)[1]
     target = re.search(r"targetSdkVersion:'([^']+)'", manifest)[1]
     assert package == "info.nightscout.androidaps"
-    assert int(version_code) == (2006 if args.previous else 2007)
+    assert int(version_code) in ((2006, 2007) if args.previous else (2008,))
     assert version_name == "4.0.0-beta-apex7"
     assert (sdk, target) == (("31", "35") if kind == "phone" else ("30", "30"))
     with zipfile.ZipFile(apk) as z:

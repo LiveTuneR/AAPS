@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "telemetrySha256Verified": true,
+  "archiveBuildSha": "da3220a",
+  "activityEvents": 5811,
+  "availableActiveEvents": 0,
+  "distinctSourceUpdates": 17,
+  "distinctSessions": 17,
+  "states": [
+    {
+      "state": "STALE_ACTIVITY",
+      "access": "AVAILABLE",
+      "count": 2750
+    },
+    {
+      "state": "STALE_ACTIVITY",
+      "access": "NO_DATA",
+      "count": 2490
+    },
+    {
+      "state": "POST_ACTIVITY",
+      "access": "AVAILABLE",
+      "count": 568
+    },
+    {
+      "state": "STALE_ACTIVITY",
+      "access": "HEALTH_CONNECT_UNAVAILABLE",
+      "count": 3
+    }
+  ],
+  "sourceAgeMinutes": {
+    "min": 0.1291,
+    "median": 1078.6402,
+    "max": 3060.725033333333
+  },
+  "lastSessionDurationMinutes": 18.153033333333333,
+  "assessment": "No live signal demonstrated; automatic dosing integration not supported by this archive",
+  "limitations": "Retrospective observations are not a counterfactual trial; no insulin adjustment or efficacy estimate is derived."
+}
