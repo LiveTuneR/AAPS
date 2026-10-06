@@ -94,6 +94,7 @@ class WearPlugin @Inject constructor(
     aapsLogger = aapsLogger, rh = rh, preferences = preferences
 ) {
 
+    @Inject lateinit var automation: app.aaps.core.interfaces.automation.Automation
     private val disposable = CompositeDisposable()
     private var scope: CoroutineScope? = null
     private var snapshotRequests: Channel<String>? = null
@@ -122,7 +123,10 @@ class WearPlugin @Inject constructor(
         snapshotRequests = requests
         newScope.launch {
             for (from in requests) {
-                try { dataHandlerMobile.resendData(from) }
+                try {
+                    if (from == "WearStart") dataHandlerMobile.resendData(from)
+                    else dataHandlerMobile.sendFastStatus(from, generation = from.removePrefix("Final:").toLongOrNull())
+                }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) { fabricPrivacy.logException(error) }
             }
@@ -166,25 +170,56 @@ class WearPlugin @Inject constructor(
             preferences.observe(StringNonKey.WearCwfAuthorVersion).drop(1).map {},
             preferences.observe(StringNonKey.WearCwfFileName).drop(1).map {},
         ).collectResilient(newScope, aapsLogger, LTag.WEAR) {
-            dataHandlerMobile.resendData("PreferenceChange")
+            dataHandlerMobile.sendPreferences()
             checkCustomWatchfacePreferences()
         }
         // AAPSCLIENT: fresh predictions arrive via NS devicestatus, not a local loop run — without this the
         // watch graph trails the phone by one loop cycle (the BG-triggered autosens resend fires BEFORE the
         // master's new devicestatus lands). Event is only sent on AAPSCLIENT; processedDeviceStatusData is
         // updated synchronously before it fires, so the resend reads the new predictions.
-        disposable += Observable.merge(
-            rxBus.toObservable(EventAutosensCalculationFinished::class.java).map { "EventAutosensCalculationFinished" },
-            rxBus.toObservable(EventLoopUpdateGui::class.java).map { "EventLoopUpdateGui" },
-            rxBus.toObservable(EventNsClientStatusUpdated::class.java).map { "EventNsClientStatusUpdated" }
-        )
-            .throttleLatest(500, TimeUnit.MILLISECONDS, aapsSchedulers.io, true)
+        // Autosens is an early BG frame. GUI progress during loop.invoke is not a final cycle.
+        disposable += rxBus.toObservable(EventAutosensCalculationFinished::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({ from -> requests.trySend(from) }, fabricPrivacy::logException)
-        // Push status to watch quickly when a TT changes, without waiting for the loop's 10s debounce
-        persistenceLayer.observeChanges<TT>()
-            .filter { it.isNotEmpty() } // Change notifications have no initial replay to discard.
-            .collectResilient(newScope, aapsLogger, LTag.WEAR) { dataHandlerMobile.resendData("TempTargetChange") }
+            .concatMapCompletable { rxCompletable {
+                dataHandlerMobile.sendFastStatus("Autosens", bgOnly = true)
+                dataHandlerMobile.sendGraphHistory()
+            }.doOnError(fabricPrivacy::logException).onErrorComplete() }.subscribe()
+        disposable += rxBus.toObservable(app.aaps.core.interfaces.rx.events.EventCalculationCompleted::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ requests.trySend("Final:${it.generation}") }, fabricPrivacy::logException)
+        disposable += rxBus.toObservable(EventNsClientStatusUpdated::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ if (config.AAPSCLIENT) requests.trySend("NsClientStatus") }, fabricPrivacy::logException)
+        persistenceLayer.observeChanges<TT>().filter { it.isNotEmpty() }
+            .collectResilient(newScope, aapsLogger, LTag.WEAR) { dataHandlerMobile.sendFastStatus("TempTargetChange") }
+        merge(
+            persistenceLayer.observeChanges<app.aaps.core.data.model.BS>().map {},
+            persistenceLayer.observeChanges<app.aaps.core.data.model.CA>().map {},
+            persistenceLayer.observeChanges<app.aaps.core.data.model.TB>().map {},
+            persistenceLayer.observeChanges<app.aaps.core.data.model.EB>().map {},
+            persistenceLayer.observeChanges<app.aaps.core.data.model.EPS>().map {},
+            persistenceLayer.observeChanges<app.aaps.core.data.model.PS>().map {},
+        ).debounce(100).collectResilient(newScope, aapsLogger, LTag.WEAR) {
+            dataHandlerMobile.sendTreatmentHistory()
+        }
+        persistenceLayer.observeChanges<app.aaps.core.data.model.RM>().filter { it.isNotEmpty() }
+            .collectResilient(newScope, aapsLogger, LTag.WEAR) {
+                dataHandlerMobile.sendRoutineModes()
+                dataHandlerMobile.sendFastStatus("RunningModeChange")
+            }
+        preferences.observe(StringNonKey.QuickWizard).drop(1)
+            .collectResilient(newScope, aapsLogger, LTag.WEAR) { dataHandlerMobile.sendQuickWizard() }
+        merge(
+            preferences.observe(app.aaps.core.keys.StringKey.GeneralUnits).drop(1).map {},
+            preferences.observe(app.aaps.core.keys.UnitDoubleKey.OverviewLowMark).drop(1).map {},
+            preferences.observe(app.aaps.core.keys.UnitDoubleKey.OverviewHighMark).drop(1).map {},
+        ).collectResilient(newScope, aapsLogger, LTag.WEAR) {
+            dataHandlerMobile.sendPreferences()
+            dataHandlerMobile.sendGraphHistory()
+            dataHandlerMobile.sendFastStatus("DisplayUnitsOrLimits")
+        }
+        if (::automation.isInitialized) automation.events.drop(1)
+            .collectResilient(newScope, aapsLogger, LTag.WEAR) { dataHandlerMobile.sendUserActions() }
         // Refresh wear scene tile whenever the scene list changes (add / update / delete)
         scenes.scenesFlow
             .drop(1) // Skip initial replay on subscribe
@@ -259,6 +294,11 @@ class WearPlugin @Inject constructor(
     }
 
     private fun broadcastData(payload: EventData) {
+        if (payload is EventData.FastStatus) {
+            payload.bg?.let(::broadcastData)
+            payload.status?.let(::broadcastData)
+            return
+        }
         // Identify and update source set before broadcast
         val client = if (config.AAPSCLIENT1) 1 else if (config.AAPSCLIENT2) 2 else if (config.AAPSCLIENT3) 3 else throw UnsupportedOperationException()
         val dataToSend = when (payload) {

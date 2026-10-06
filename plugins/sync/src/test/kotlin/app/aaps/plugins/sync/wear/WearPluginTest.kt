@@ -44,13 +44,20 @@ class WearPluginTest : TestBaseWithProfile() {
         val changes = MutableSharedFlow<List<TT>>()
         val subscribed = CountDownLatch(1)
         whenever(persistenceLayer.observeChanges(TT::class.java)).thenReturn(changes.onSubscription { subscribed.countDown() })
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.BS::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.CA::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.TB::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.EB::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.EPS::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.PS::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
+        whenever(persistenceLayer.observeChanges(app.aaps.core.data.model.RM::class.java)).thenReturn(kotlinx.coroutines.flow.emptyFlow())
         whenever(scenes.scenesFlow).thenReturn(MutableStateFlow(""))
         whenever(scenes.activeFlow).thenReturn(flowOf(false))
         wearPlugin.onStart()
         try {
             assertTrue(subscribed.await(3, TimeUnit.SECONDS), "TT observer not attached")
             changes.emit(listOf(TT(timestamp=now, duration=60_000, lowTarget=100.0, highTarget=110.0, reason=TT.Reason.ACTIVITY)))
-            verifyBlocking(dataHandlerMobile, timeout(3_000)) { resendData("TempTargetChange", false) }
+            verifyBlocking(dataHandlerMobile, timeout(3_000)) { sendFastStatus("TempTargetChange", false, null) }
         } finally { wearPlugin.onStop() }
     }
 }

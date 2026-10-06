@@ -89,6 +89,30 @@ class ComplicationDataRepository @Inject constructor(
         }
     }
 
+    /** Routine BG/status/predictions cost one DataStore transaction on the watch. */
+    suspend fun updateFastStatus(frame: EventData.FastStatus) {
+        dataStore.updateData { current ->
+            var next = current
+            frame.bg?.let { bg -> next = when (bg.dataset) {
+                0 -> next.copy(bgData = bg)
+                1 -> next.copy(bgData1 = bg)
+                2 -> next.copy(bgData2 = bg)
+                else -> next
+            } }
+            frame.status?.let { status -> next = when (status.dataset) {
+                0 -> next.copy(statusData = status)
+                1 -> next.copy(statusData1 = status)
+                2 -> next.copy(statusData2 = status)
+                else -> next
+            } }
+            frame.predictions?.let { predictions ->
+                val history = next.treatmentData
+                next = next.copy(treatmentData = history.copy(predictions = predictions))
+            }
+            next.copy(lastUpdateTimestamp = System.currentTimeMillis())
+        }
+    }
+
     /**
      * Update Status data from phone
      * Supports multiple datasets for AAPSClient mode (0=primary, 1=client1, 2=client2)

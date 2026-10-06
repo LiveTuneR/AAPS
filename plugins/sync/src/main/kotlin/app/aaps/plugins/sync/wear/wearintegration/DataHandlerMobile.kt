@@ -164,11 +164,15 @@ class DataHandlerMobile @Inject constructor(
     private val snapshotMutex = Mutex()
     private data class GraphKey(
         val points: List<InMemoryGlucoseValue>, val units: GlucoseUnit, val displayUnits: String,
-        val low: Double, val high: Double, val slope: String, val delta: Double?, val average: Double?
+        val low: Double, val high: Double
     )
     private val graphHistory = WearHistoryCache<GraphKey, EventData.GraphData>()
 
-    fun resetHistoryDelivery() = graphHistory.reconnect()
+    private val domainDelivery = WearDomainDelivery()
+    private var lastFinalGeneration: Long? = null
+    fun resetHistoryDelivery() { graphHistory.reconnect(); domainDelivery.reset() }
+    internal fun deliveryMetrics() = domainDelivery.stats()
+
 
     /**
      * Registers a serialized suspend [handler] for one [EventData] subtype arriving from Wear.
@@ -982,7 +986,7 @@ class DataHandlerMobile @Inject constructor(
     private var lastRunningModes: List<AvailableRunningMode>? = null
 
     // internal so DataHandlerMobileWearBolusTest can negotiate the available modes (populating the nonce + tile list).
-    internal suspend fun handleAvailableRunningModes() {
+    internal suspend fun handleAvailableRunningModes(routine: Boolean = false) {
         if (!profileFunction.isProfileValid("WearDataHandler_LoopChangeState")) return
 
         val pumpDescription = activePlugin.activePump.pumpDescription
@@ -1022,7 +1026,7 @@ class DataHandlerMobile @Inject constructor(
             lastRunningModes = states
         }
         sendToWear(
-            EventData.RunningModeList(lastAuthorizedRunningModeChangeTS!!, states)
+            EventData.RunningModeList(lastAuthorizedRunningModeChangeTS!!, states), force = !routine
         )
     }
 
@@ -1081,18 +1085,22 @@ class DataHandlerMobile @Inject constructor(
     private fun sendQuickWizardListToWear() =
         sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
 
+    /** Full snapshot is reserved for restart, reconnect and an explicit watch request. */
     suspend fun resendData(from: String, forceHistory: Boolean = false) = snapshotMutex.withLock {
-        aapsLogger.debug(LTag.WEAR, "Sending data to wear from $from")
-        // Wear can request a resend before MainApp's init scope has populated pluginStore.plugins
-        // (e.g. immediately after device reboot). Skip until the active pump is selectable —
-        // the wear app will retry on its next state change.
-        if (!config.appInitialized) {
-            aapsLogger.debug(LTag.WEAR, "Skipping resendData — app not yet initialized")
-            return@withLock
-        }
-        // SingleBg
-        iobCobCalculator.ads.lastBg()?.let { sendToWear(getSingleBG(it)) }
-        // Preferences
+        if (!config.appInitialized) return@withLock
+        resetHistoryDelivery()
+        sendPreferences()
+        sendQuickWizardListToWear()
+        sendUserActions()
+        sendScenes()
+        sendActiveSceneState(scenes.hasSceneToStop())
+        sendGraphHistory(forceHistory)
+        sendTreatments()
+        handleAvailableRunningModes()
+        sendFastStatus(from)
+    }
+
+    fun sendPreferences() {
         sendToWear(
             EventData.Preferences(
                 timeStamp = System.currentTimeMillis(),
@@ -1107,16 +1115,26 @@ class DataHandlerMobile @Inject constructor(
                 carbsButtonIncrement2 = preferences.get(IntKey.OverviewCarbsButtonIncrement2)
             )
         )
-        // QuickWizard
-        sendQuickWizardListToWear()
-        //UserAction
-        sendUserActions()
-        // Scenes
-        sendScenes()
-        // Same condition as the live push in WearPlugin (scenes.activeFlow) — the tile is fed by both,
-        // so a resend must not disagree with the flow about whether the STOP button belongs there.
-        sendActiveSceneState(scenes.hasSceneToStop())
-        // GraphData
+    }
+
+    fun sendQuickWizard() = sendQuickWizardListToWear()
+    suspend fun sendTreatmentHistory() = snapshotMutex.withLock { sendTreatments() }
+    suspend fun sendRoutineModes() = handleAvailableRunningModes(routine = true)
+
+    /** Early minute-CGM update is cheap. The terminal generation owns the final APS status. */
+    suspend fun sendFastStatus(from: String, bgOnly: Boolean = false, generation: Long? = null) {
+        if (!config.appInitialized) return
+        if (generation != null) synchronized(this) {
+            if (lastFinalGeneration == generation) return
+            lastFinalGeneration = generation
+        }
+        val bg = iobCobCalculator.ads.lastBg()?.let(::getSingleBG)
+        val status = if (bgOnly) null else buildStatus(from)
+        val predictions = if (bgOnly) null else buildPredictions()
+        sendToWear(EventData.FastStatus(bg, status, predictions))
+    }
+
+    fun sendGraphHistory(forceHistory: Boolean = false) {
         iobCobCalculator.ads.getBucketedDataTableCopy()?.let { bucketedData ->
             // Hoist out of the per-bucket map: getGlucoseStatusData copies the bucketed table and runs a polynomial fit on every call.
             val glucoseStatus = glucoseStatusProvider.getGlucoseStatusData(true)
@@ -1125,17 +1143,11 @@ class DataHandlerMobile @Inject constructor(
             val highLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewHighMark), units)
             val slopeArrow = (trendCalculator.getTrendArrow(iobCobCalculator.ads) ?: TrendArrow.NONE).symbol
             val key = GraphKey(bucketedData.map { it.copy() }, units, preferences.get(StringKey.GeneralUnits),
-                lowLine, highLine, slopeArrow, glucoseStatus?.delta, glucoseStatus?.shortAvgDelta)
+                lowLine, highLine)
             graphHistory.snapshot(key, System.nanoTime(), forceHistory) {
                 EventData.GraphData(ArrayList(bucketedData.map { buildSingleBg(it, glucoseStatus, units, lowLine, highLine, slopeArrow) }))
             }?.let(::sendToWear)
         }
-        // Treatments
-        sendTreatments()
-        // Status
-        // Keep status last. Wear start refreshing after status received
-        sendStatus(from)
-        handleAvailableRunningModes()
     }
 
     private fun AutomationEvent.toWear(now: Long): EventData.UserAction.UserActionEntry =
@@ -1274,6 +1286,11 @@ class DataHandlerMobile @Inject constructor(
             .forEach { (_, _, _, isValid, _, _, timestamp, _, amount, type) -> boluses.add(EventData.TreatmentData.Treatment(timestamp, amount, 0.0, type === BS.Type.SMB, isValid)) }
         persistenceLayer.getCarbsFromTimeExpanded(startTimeWindow, true)
             .forEach { (_, _, _, isValid, _, _, timestamp, _, _, amount) -> boluses.add(EventData.TreatmentData.Treatment(timestamp, 0.0, amount, false, isValid)) }
+        sendToWear(EventData.TreatmentData(temps, basals, boluses, buildPredictions()))
+    }
+
+    private fun buildPredictions(): ArrayList<EventData.SingleBg> {
+        val predictions = arrayListOf<EventData.SingleBg>()
         val apsResult = if (config.APS) {
             val lastRun = loop.lastRun
             if (lastRun?.request?.hasPredictions == true) {
@@ -1299,7 +1316,7 @@ class DataHandlerMobile @Inject constructor(
                     )
                 )
             }
-        sendToWear(EventData.TreatmentData(temps, basals, boluses, predictions))
+        return predictions
     }
 
     private fun predictionColor(data: GV): Int {
@@ -1316,7 +1333,7 @@ class DataHandlerMobile @Inject constructor(
         }
     }
 
-    private suspend fun sendStatus(caller: String) {
+    private suspend fun buildStatus(caller: String): EventData.Status {
         val profile = profileFunction.getProfile()
         var status = rh.gs(app.aaps.core.ui.R.string.noprofile)
         var iobSum = ""
@@ -1393,8 +1410,7 @@ class DataHandlerMobile @Inject constructor(
             else                   -> 0
         }
 
-        sendToWear(
-            EventData.Status(
+        return EventData.Status(
                 dataset = 0,
                 externalStatus = status,
                 iobSum = iobSum,
@@ -1415,7 +1431,6 @@ class DataHandlerMobile @Inject constructor(
                 reservoir = reservoir,
                 reservoirLevel = reservoirLevel
             )
-        )
     }
 
     private fun deltaString(deltaMGDL: Double, deltaMMOL: Double, units: GlucoseUnit): String {
@@ -1617,7 +1632,8 @@ class DataHandlerMobile @Inject constructor(
         sendToWear(EventData.ConfirmAction(rh.gs(app.aaps.core.ui.R.string.error), errorMessage, returnCommand = EventData.Error(dateUtil.now()))) // ignore return path
     }
 
-    private fun sendToWear(event: EventData) {
+    private fun sendToWear(event: EventData, force: Boolean = false) {
+        if (!domainDelivery.accept(event, force)) return
         rxBus.send(EventMobileToWear(event))
     }
 

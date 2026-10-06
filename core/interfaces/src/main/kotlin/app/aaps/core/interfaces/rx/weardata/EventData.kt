@@ -257,6 +257,10 @@ sealed class EventData : Event() {
     }
 
     // Mobile -> Wear
+    /** One routine frame; prediction-only updates preserve the watch's treatment history. */
+    @Serializable
+    data class FastStatus(val bg: SingleBg?, val status: Status?, val predictions: ArrayList<SingleBg>? = null) : EventData()
+
     @Serializable
     data class CancelNotification(val timeStamp: Long) : EventData()
 

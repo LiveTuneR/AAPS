@@ -173,6 +173,14 @@ class DataHandlerWear @Inject constructor(
             })
         }
         onEvent<EventData.BolusProgress> { handleBolusProgress(it) }
+        onEvent<EventData.FastStatus> { frame ->
+            dataStoreScope.launch {
+                complicationDataRepository.updateFastStatus(frame)
+                triggerComplicationUpdates()
+                if (frame.bg != null) TileService.getUpdater(context).requestUpdate(BgGraphTileService::class.java)
+                LocalBroadcastManager.getInstance(context).sendBroadcast(Intent(DataLayerListenerServiceWear.INTENT_NEW_DATA))
+            }
+        }
         onEvent<EventData.Status>(detail = { " dataset=${it.dataset} iob=${it.iobSum} cob=${it.cob}" }) {
             // Store in DataStore - supports all datasets (0, 1, 2)
             dataStoreScope.launch {

@@ -59,6 +59,7 @@ class PostCalculationWorker @AssistedInject constructor(
     private val preferences: Preferences
 ) : LoggingWorker(context, params, Dispatchers.Default, aapsLogger, fabricPrivacy) {
     @javax.inject.Inject lateinit var therapyTelemetry: javax.inject.Provider<app.aaps.core.interfaces.telemetry.TherapyTelemetry>
+    @javax.inject.Inject lateinit var rxBus: app.aaps.core.interfaces.rx.bus.RxBus
 
     class PostCalculationData(
         val overviewData: OverviewData,
@@ -87,6 +88,7 @@ class PostCalculationWorker @AssistedInject constructor(
 
         if (data.runLoopAndWidgetPhase) iobCobCalculator.loopHealth?.completed(inputData.getLong(WorkflowChainData.GEN_KEY, -1L), System.currentTimeMillis())
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
+        if (::rxBus.isInitialized) rxBus.send(app.aaps.core.interfaces.rx.events.EventCalculationCompleted(inputData.getLong(WorkflowChainData.GEN_KEY, -1L)))
         return Result.success()
     }
 

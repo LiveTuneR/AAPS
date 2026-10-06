@@ -68,13 +68,17 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     private val disposable = CompositeDisposable()
     private val traffic = WearTrafficCounters()
 
-    private fun reportTraffic(size: Int) {
-        traffic.sent(size)
+    private fun reportTraffic(size: Int, domain: String = "WATCHFACE") {
+        traffic.sent(size, domain)
         traffic.reportIfDue()?.let { stats ->
             therapyTelemetry.record(app.aaps.core.interfaces.telemetry.TherapyEventType.SCHEDULER,
                 org.json.JSONObject().put("source","WEAR_LINK").put("stage","TX_API_TOTALS")
                     .put("messages",stats.messages).put("bytes",stats.bytes)
-                    .put("succeeded",stats.succeeded).put("failed",stats.failed).put("durationMs",stats.durationMs))
+                    .put("succeeded",stats.succeeded).put("failed",stats.failed).put("durationMs",stats.durationMs)
+                    .put("domainBytes",org.json.JSONObject(stats.domainBytes))
+                    .put("delivery", dataHandlerMobile.deliveryMetrics().let { delivery -> org.json.JSONObject()
+                        .put("domainSends",org.json.JSONObject(delivery.sends)).put("skippedUnchanged",delivery.skippedUnchanged)
+                        .put("fullResyncs",delivery.fullResyncs) }))
         }
     }
 
@@ -88,7 +92,7 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
         disposable += rxBus
             .toObservable(EventMobileToWear::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe { sendMessage(rxPath, it.payload.serialize()) }
+            .subscribe { if (wearPlugin.isEnabled() && transcriptionNodeId != null) sendMessage(rxPath, it.payload.serialize(), it.payload.javaClass.simpleName) }
         disposable += rxBus
             .toObservable(EventMobileToWearWatchface::class.java)
             .observeOn(aapsSchedulers.io)
@@ -192,12 +196,12 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
         }
     }
 
-    private fun sendMessage(path: String, data: String?) {
+    private fun sendMessage(path: String, data: String?, domain: String = "PROTOCOL") {
         if (!wearPlugin.isEnabled()) return
         aapsLogger.debug(LTag.WEAR, "sendMessage: $path characters=${data?.length ?: 0}")
         transcriptionNodeId?.also { nodeId ->
             val bytes = data?.toByteArray() ?: byteArrayOf()
-            reportTraffic(bytes.size)
+            reportTraffic(bytes.size, domain)
             messageClient
                 .sendMessage(nodeId, path, bytes).apply {
                     addOnSuccessListener { traffic.completed(true) }

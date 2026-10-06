@@ -1,7 +1,7 @@
 package app.aaps.plugins.sync.wear.wearintegration
 
 /** One immutable snapshot. Equality must cover content, not SingleBg's timestamp/color-only equals. */
-internal class WearHistoryCache<K : Any, V : Any>(private val heartbeatNanos: Long = 300_000_000_000L) {
+internal class WearHistoryCache<K : Any, V : Any>(private val heartbeatNanos: Long = Long.MAX_VALUE) {
     private var key: K? = null
     private var value: V? = null
     private var sentAt: Long? = null
