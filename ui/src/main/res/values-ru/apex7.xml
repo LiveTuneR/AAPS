@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_checked_seconds">Проверено %1$d с назад</string>
+    <string name="apex7_checked_minutes">Проверено %1$d мин назад</string>
+    <string name="apex7_last_activity">Последняя активность</string>
+    <string name="apex7_activity_duration_short">Длительность %1$d мин</string>
+    <string name="apex7_activity_ended_ago">Завершена %1$d мин назад</string>
     <string name="apex7_target_short">Цель</string>
     <string name="apex7_temp_target_short">Врем. цель</string>
     <string name="apex7_base_short">база %1$s</string>

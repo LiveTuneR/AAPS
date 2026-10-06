@@ -31,6 +31,7 @@ data class ActivityContext(
     val watchReachable: Boolean? = null,
     val clockSkew: Boolean = false,
     val readLatencyMs: Long? = null,
+    val lastReadAttempt: Long? = null,
 ) {
     val usedForDosing: Boolean get() = false
 }
@@ -41,10 +42,12 @@ class ActivityContextStore(restored: List<ActivityEvent> = emptyList()) {
     private var access = ActivityAccess.HEALTH_CONNECT_UNAVAILABLE
     private var lastRead: Long? = null
     private var readLatencyMs: Long? = null
+    private var lastReadAttempt: Long? = null
     init { restored.forEach { accept(it) } }
 
-    @Synchronized fun sourceHealth(access: ActivityAccess, successfulReadAt: Long? = null, latencyMs: Long? = null) {
+    @Synchronized fun sourceHealth(access: ActivityAccess, successfulReadAt: Long? = null, latencyMs: Long? = null, checkedAt: Long? = successfulReadAt) {
         this.access = access
+        lastReadAttempt = checkedAt ?: lastReadAttempt
         if (access == ActivityAccess.AVAILABLE || access == ActivityAccess.NO_DATA) lastRead = successfulReadAt ?: lastRead
         readLatencyMs = latencyMs ?: readLatencyMs
     }
@@ -68,7 +71,7 @@ class ActivityContextStore(restored: List<ActivityEvent> = emptyList()) {
     @Synchronized fun snapshot(now: Long): ActivityContext {
         val identified = records.values.filter { it.category != ActivityCategory.UNKNOWN }
         val selected = (identified.ifEmpty { records.values.toList() }).maxWithOrNull(compareBy<ActivityEvent> { it.endTime ?: it.lastUpdatedAt }.thenBy { it.startTime })
-            ?: return ActivityContext(access = access, lastSuccessfulRead = lastRead, readLatencyMs = readLatencyMs)
+            ?: return ActivityContext(access = access, lastSuccessfulRead = lastRead, readLatencyMs = readLatencyMs, lastReadAttempt = lastReadAttempt)
         val skew = selected.startTime > now || selected.lastUpdatedAt > now || selected.receivedAt > now || selected.endTime?.let { it > now } == true
         val state = when {
             skew || access != ActivityAccess.AVAILABLE || selected.category == ActivityCategory.UNKNOWN -> ActivityState.STALE_ACTIVITY
@@ -76,7 +79,7 @@ class ActivityContextStore(restored: List<ActivityEvent> = emptyList()) {
             now - selected.lastUpdatedAt > SIGNAL_MAX_AGE_MS -> ActivityState.STALE_ACTIVITY
             else -> ActivityState.ACTIVE
         }
-        return ActivityContext(state, selected, access, lastRead, clockSkew = skew, readLatencyMs = readLatencyMs)
+        return ActivityContext(state, selected, access, lastRead, clockSkew = skew, readLatencyMs = readLatencyMs, lastReadAttempt = lastReadAttempt)
     }
 
     companion object {

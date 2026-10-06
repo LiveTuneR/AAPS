@@ -120,8 +120,8 @@ fun EnhancedOverviewContent(
                         v.activityDetail?.let { Text(it, fontSize = 10.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                     activityAge?.let { age ->
-                        Text(if (age < 60_000) stringResource(R.string.apex7_updated_seconds, age / 1000)
-                            else stringResource(R.string.apex7_updated_minutes, age / 60_000),
+                        Text(if (age < 60_000) stringResource(R.string.apex7_checked_seconds, age / 1000)
+                            else stringResource(R.string.apex7_checked_minutes, age / 60_000),
                             Modifier.testTag("activity-updated"), fontSize = 9.sp, lineHeight = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

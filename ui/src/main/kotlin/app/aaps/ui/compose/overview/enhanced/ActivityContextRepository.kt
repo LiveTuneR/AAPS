@@ -27,6 +27,7 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
     private val preferences = context.getSharedPreferences("activity_context_shadow", Context.MODE_PRIVATE)
     private val store = ActivityContextStore(ActivityEventCodec.decode(preferences.getString("events_v1", null)))
     private val revision = MutableStateFlow(0L)
+    private val reader = kotlinx.coroutines.sync.Mutex()
     val changes = revision.asStateFlow()
     val requiredPermissions = setOf(
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
@@ -42,13 +43,15 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
         return true
     }
     @Synchronized fun sourceHealth(access: ActivityAccess, lastRead: Long? = null, latencyMs: Long? = null) {
-        store.sourceHealth(access, lastRead, latencyMs)
+        store.sourceHealth(access, lastRead, latencyMs, checkedAt = System.currentTimeMillis())
         revision.value++
         recordTelemetry()
     }
 
     suspend fun refresh(now: Long = System.currentTimeMillis()) {
+        if (!reader.tryLock()) { app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("healthConnect.concurrentReadSkipped"); return }
         val started = SystemClock.elapsedRealtime()
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("healthConnect.refreshes")
         try {
             val status = HealthConnectClient.getSdkStatus(context)
             if (status != HealthConnectClient.SDK_AVAILABLE) {
@@ -67,6 +70,7 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
             val exercises = client.readRecords(ReadRecordsRequest(ExerciseSessionRecord::class, filter)).records
             val steps = client.readRecords(ReadRecordsRequest(StepsRecord::class, filter)).records
             val heartRates = client.readRecords(ReadRecordsRequest(HeartRateRecord::class, filter)).records
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("healthConnect.records", (exercises.size + steps.size + heartRates.size).toLong())
             exercises.forEach { exercise -> accept(exercise.toActivityEvent(now, steps, heartRates)) }
             sourceHealth(
                 if (exercises.isEmpty()) ActivityAccess.NO_DATA else ActivityAccess.AVAILABLE,
@@ -79,6 +83,9 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
             sourceHealth(ActivityAccess.PERMISSION_REQUIRED, latencyMs = SystemClock.elapsedRealtime() - started)
         } catch (_: Exception) {
             sourceHealth(ActivityAccess.ERROR, latencyMs = SystemClock.elapsedRealtime() - started)
+        } finally {
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.duration("healthConnect.read", SystemClock.elapsedRealtime() - started)
+            reader.unlock()
         }
     }
 
@@ -91,7 +98,10 @@ class ActivityContextRepository @Inject constructor(@ApplicationContext private 
                     .put("source",value.event?.source?.name ?: JSONObject.NULL).put("usedForDosing",false)
                     .put("sourcePackage", value.event?.sourcePackage ?: JSONObject.NULL)
                     .put("eventTimestamp",value.event?.startTime ?: JSONObject.NULL).put("endTimestamp",value.event?.endTime ?: JSONObject.NULL)
-                    .put("lastUpdatedAt",value.event?.lastUpdatedAt ?: JSONObject.NULL).put("clockSkew",value.clockSkew))
+                    .put("lastUpdatedAt",value.event?.lastUpdatedAt ?: JSONObject.NULL).put("clockSkew",value.clockSkew)
+                    .put("lastReadAttempt",value.lastReadAttempt ?: JSONObject.NULL)
+                    .put("lastSuccessfulRead",value.lastSuccessfulRead ?: JSONObject.NULL)
+                    .put("readLatencyMs",value.readLatencyMs ?: JSONObject.NULL))
         } catch (_: Exception) { /* Never affect the shadow activity provider. */ }
     }
 }

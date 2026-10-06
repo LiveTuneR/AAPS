@@ -4,6 +4,22 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class ActivityContextTest {
+    @Test fun `fresh source check and eighteen minute historical workout remain distinct`() {
+        val now = 1791198086670L
+        val store = ActivityContextStore()
+        store.accept(ActivityEvent("old", ActivitySource.PHONE, "other", ActivityCategory.OTHER,
+            1791012980461L, 1791014069643L, 1791014443168L, 1791014443168L))
+        store.sourceHealth(ActivityAccess.NO_DATA, successfulReadAt = now, checkedAt = now)
+        val result = store.snapshot(now)
+        assertEquals(now, result.lastReadAttempt)
+        assertEquals(ActivityState.STALE_ACTIVITY, result.state)
+        assertEquals(18L, (result.event!!.endTime!! - result.event!!.startTime) / 60_000)
+        assertTrue(now - result.event!!.lastUpdatedAt > 2 * 86_400_000)
+        assertFalse(result.usedForDosing)
+        store.sourceHealth(ActivityAccess.PERMISSION_REQUIRED, checkedAt = now + 120_000)
+        assertEquals(now, store.snapshot(now + 120_000).lastSuccessfulRead)
+        assertEquals(now + 120_000, store.snapshot(now + 120_000).lastReadAttempt)
+    }
     private val now = 1_780_000_000_000L
     private fun event(category: ActivityCategory = ActivityCategory.POOL_SWIMMING) = ActivityEvent(
         "workout", ActivitySource.SAMSUNG_HEALTH, "pool", category, now - 600_000,

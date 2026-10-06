@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -127,22 +129,29 @@ class OverviewDashboardViewModel @Inject constructor(
         }
         observe(TT::class.java); observe(EPS::class.java); observe(PS::class.java); observe(TE::class.java); observe(CA::class.java)
         activities.changes.collectResilient(viewModelScope,logger,LTag.CORE,streamName="overview-activity") { refreshRequests.trySend(Unit) }
+        // Preserve Health Connect collection when the screen is hidden. Only display work
+        // depends on subscribers; activity collection must be assessed separately on-device.
         viewModelScope.launch(Dispatchers.IO) {
             preferences.observe(BooleanKey.OverviewEnhanced).collectLatest { enabled ->
-                if (enabled) {
+                if (enabled) while (true) {
                     activities.refresh()
-                    var lastActivityRefresh = System.currentTimeMillis()
+                    kotlinx.coroutines.delay(120_000L)
+                }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(preferences.observe(BooleanKey.OverviewEnhanced), mutableState.subscriptionCount) { enabled, subscribers ->
+                enabled && subscribers > 0
+            }.distinctUntilChanged().collectLatest { enabled ->
+                if (enabled) {
                     while (true) {
                         withTimeoutOrNull(2_000L) { refreshRequests.receive() }
+                        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("timer.overviewVisible")
                         try { refresh() }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) {
                             mutableState.value = OverviewDashboardState()
                             logger.error(LTag.AUTOSENS, "Overview diagnostics unavailable: ${error.javaClass.simpleName}")
-                        }
-                        if (System.currentTimeMillis() - lastActivityRefresh >= 120_000L) {
-                            activities.refresh()
-                            lastActivityRefresh = System.currentTimeMillis()
                         }
                     }
                 }
@@ -460,13 +469,18 @@ class OverviewDashboardViewModel @Inject constructor(
                 else -> R.string.apex7_smb
             },
             activity = when (activity.access) {
-                ActivityAccess.AVAILABLE -> activityName(event?.category) ?: rh.gs(R.string.apex7_activity_none)
+                ActivityAccess.AVAILABLE -> if (activity.state == ActivityState.ACTIVE) activityName(event?.category) ?: rh.gs(R.string.apex7_activity_none)
+                    else rh.gs(R.string.apex7_activity_none)
                 ActivityAccess.NO_DATA -> rh.gs(R.string.apex7_activity_none)
                 ActivityAccess.PERMISSION_REQUIRED -> rh.gs(R.string.apex7_activity_permission)
                 ActivityAccess.HEALTH_CONNECT_UNAVAILABLE, ActivityAccess.ERROR -> rh.gs(R.string.apex7_activity_unavailable)
             },
-            activityDetail = event?.let { listOfNotNull(activitySource(it)?.substringBefore('\n'),activityName(it.category),compactAge(it.startTime,it.endTime ?: now)).joinToString(" · ") },
-            activityUpdatedAt = event?.lastUpdatedAt ?: activity.lastSuccessfulRead,
+            activityDetail = event?.let { listOfNotNull(
+                if (activity.state == ActivityState.ACTIVE) null else rh.gs(R.string.apex7_last_activity),
+                activitySource(it)?.substringBefore('\n'), activityName(it.category),
+                rh.gs(R.string.apex7_activity_duration_short, ((it.endTime ?: now) - it.startTime) / 60_000),
+                it.endTime?.takeIf { end -> end <= now }?.let { end -> rh.gs(R.string.apex7_activity_ended_ago, (now - end) / 60_000) }).joinToString(" · ") },
+            activityUpdatedAt = activity.lastReadAttempt,
             smbState = if (pumpDiagnostics?.bolusReconciliationRequired == true) OverviewSmbState.BLOCKED else overviewSmbState(decision.takeIf { recent(request?.date) }),
             bgTimestamp = snapshot.newestRawBgTimestamp,
             loopTimestamp = snapshot.lastCalculationSuccessTimestamp,

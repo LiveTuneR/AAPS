@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_checked_seconds">Checked %1$d s ago</string>
+    <string name="apex7_checked_minutes">Checked %1$d min ago</string>
+    <string name="apex7_last_activity">Last activity</string>
+    <string name="apex7_activity_duration_short">Duration %1$d min</string>
+    <string name="apex7_activity_ended_ago">Ended %1$d min ago</string>
     <string name="apex7_disf">dISF</string>
     <string name="apex7_tdd">TDD used (U)</string>
     <string name="apex7_insulin_divisor">Insulin divisor</string>
