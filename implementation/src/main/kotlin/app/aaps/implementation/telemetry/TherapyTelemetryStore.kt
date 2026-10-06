@@ -29,6 +29,28 @@ internal class TherapyTelemetryStore(
 ) : AutoCloseable {
     private val sessionId = UUID.randomUUID().toString()
     private var sequence = 0L
+    private val knownFileSizes = mutableMapOf<String, Long>()
+    private var diskBytes = 0L
+    private var lastReconciliation = monotonic()
+    private var directoryScans = 0L
+    private var durableSyncs = 0L
+    private var appendCalls = 0L
+    internal data class IoStats(val appendCalls: Long, val durableSyncs: Long, val directoryScans: Long)
+    internal fun ioStats() = IoStats(appendCalls, durableSyncs, directoryScans)
+    private fun filesInDirectory(): Array<out File> { directoryScans++; return directory.listFiles().orEmpty() }
+    private fun account(file: File) {
+        val size = if (file.isFile) file.length() else 0L
+        diskBytes += size - (knownFileSizes.put(file.name, size) ?: 0L)
+    }
+    internal fun reconcileDiskBytes(): Long {
+        knownFileSizes.clear()
+        filesInDirectory().filter { it.isFile }.forEach { knownFileSizes[it.name] = it.length() }
+        diskBytes = knownFileSizes.values.sum()
+        lastReconciliation = monotonic()
+        return diskBytes
+    }
+    private fun sync(fd: java.io.FileDescriptor) { fd.sync(); durableSyncs++ }
+    fun flush() { if (active.isFile && active.length() > 0) FileOutputStream(active, true).use { sync(it.fd) } }
     private val control = File(directory,"control.json")
     private var state: JSONObject
     private val active = File(directory,"active.jsonl")
@@ -68,10 +90,11 @@ internal class TherapyTelemetryStore(
         recoverActiveTail()
         if (active.length() > 0) rotate()
         // Rotation always leaves active intact until the completed gzip is committed.
-        directory.listFiles()?.filter { it.name.endsWith(".jsonl.gz.part") }?.forEach { check(it.delete()) }
+        filesInDirectory()?.filter { it.name.endsWith(".jsonl.gz.part") }?.forEach { check(it.delete()) }
         backfillSegmentIndex()
         state.put("open",true).put("sessionStartUtc",wallClock())
         persistState()
+        reconcileDiskBytes()
     }
 
     fun setRetention(days: Int) {
@@ -81,11 +104,16 @@ internal class TherapyTelemetryStore(
         persistState()
     }
 
-    fun bytesOnDisk(): Long = directory.listFiles()?.filter { it.isFile }?.sumOf { it.length() } ?: 0
+    fun bytesOnDisk(): Long {
+        // External filesystem changes and recovery are reconciled off the per-record path.
+        if (monotonic() - lastReconciliation >= 15 * 60 * 1_000_000_000L) reconcileDiskBytes()
+        return diskBytes
+    }
 
     fun append(type: String, data: JSONObject, generation: Long? = null, correlationId: String? = null,
-               observedUtc: Long = wallClock(), observedMonotonic: Long = monotonic(), observedZone: ZoneId = zone()): Boolean {
+               observedUtc: Long = wallClock(), observedMonotonic: Long = monotonic(), observedZone: ZoneId = zone(), durable: Boolean = true): Boolean {
         check(!closed)
+        appendCalls++
         val now = observedUtc
         val oldWall = previousWall
         val oldMono = previousMono
@@ -118,10 +146,11 @@ internal class TherapyTelemetryStore(
             return false
         }
         val originalLength = active.length()
-        try { FileOutputStream(active,true).use { it.write(bytes); it.fd.sync() } }
+        try { FileOutputStream(active,true).use { it.write(bytes); if (durable) sync(it.fd) }; account(active) }
         catch (error: Exception) {
-            try { RandomAccessFile(active,"rw").use { it.setLength(originalLength); it.fd.sync() } }
+            try { RandomAccessFile(active,"rw").use { it.setLength(originalLength); sync(it.fd) }; account(active) }
             catch (_: Exception) { state.put("uncertainHistory",true) }
+            reconcileDiskBytes()
             throw error
         }
         if (pressure) { state.put("storagePressure",false); persistState() }
@@ -143,8 +172,9 @@ internal class TherapyTelemetryStore(
         val row = JSONObject().put("schemaVersion", 1).put("type", type).put("fromUtc", fromUtc)
             .put("toUtc", toUtc).put("count", count).put("details", details ?: JSONObject.NULL)
         FileOutputStream(integrityLedger, true).use { output ->
-            output.write((row.toString() + "\n").toByteArray(Charsets.UTF_8)); output.flush(); output.fd.sync()
+            output.write((row.toString() + "\n").toByteArray(Charsets.UTF_8)); output.flush(); sync(output.fd)
         }
+        account(integrityLedger)
     }
 
     private fun recoverActiveTail() {
@@ -158,7 +188,7 @@ internal class TherapyTelemetryStore(
                     if (file.readByte().toInt() == 10) { end++; break }
                 }
                 file.setLength(end)
-                file.fd.sync()
+                sync(file.fd)
                 increment("corruptedRecords")
                 state.put("uncertainHistory",true)
                 integrity("CORRUPTION", wallClock(), wallClock(), 1, "truncated_active_tail")
@@ -182,13 +212,15 @@ internal class TherapyTelemetryStore(
         val destination = File(directory,"segment-${wallClock()}-$sessionId-${segmentSequence++}.jsonl.gz")
         val temporary = File(directory,destination.name + ".part")
         GZIPOutputStream(FileOutputStream(temporary)).use { compressed -> active.inputStream().use { it.copyTo(compressed) } }
-        FileOutputStream(temporary,true).use { it.fd.sync() }
+        FileOutputStream(temporary,true).use { sync(it.fd) }
         // On a crash before deletion both copies may exist; export deduplicates immutable event IDs.
         Files.move(temporary.toPath(),destination.toPath(),StandardCopyOption.ATOMIC_MOVE)
+        account(destination)
         segmentIndex[destination.name] = JSONObject().put("firstUtc", firstUtc).put("lastUtc", lastUtc)
             .put("recordCount", recordCount).put("compressedSize", destination.length()).put("sha256", sha(destination))
         persistSegmentIndex()
         check(active.delete()) { "Unable to retire telemetry active file" }
+        account(active)
         activeHour = null
     }
 
@@ -196,10 +228,11 @@ internal class TherapyTelemetryStore(
         // A wall-clock jump must not age out real recent data. Fail conservatively to disk pressure.
         if (state.optBoolean("retentionClockUncertain")) return
         val cutoff = highWater - (retentionDays + 1L) * 86_400_000L
-        directory.listFiles()?.filter { it.name.endsWith(".jsonl.gz") }?.forEach { file ->
+        segmentIndex.keys.toList().map { File(directory, it) }.forEach { file ->
             val newest = segmentIndex[file.name]?.optLong("lastUtc", Long.MAX_VALUE) ?: Long.MAX_VALUE
             if (newest < cutoff) {
                 check(file.delete())
+                account(file)
                 segmentIndex.remove(file.name)
             }
         }
@@ -234,7 +267,7 @@ internal class TherapyTelemetryStore(
             var periodLast: Long? = null
             val unreadable = JSONArray()
             try {
-                val files = directory.listFiles()?.filter {
+                val files = filesInDirectory()?.filter {
                     it.name == "active.jsonl" || it.name.endsWith(".jsonl.gz") && segmentIndex[it.name]?.let { metadata ->
                         metadata.optLong("lastUtc") >= from && metadata.optLong("firstUtc") <= to
                     } != false
@@ -347,7 +380,7 @@ internal class TherapyTelemetryStore(
     }
     private fun backfillSegmentIndex() {
         var changed = false
-        directory.listFiles()?.filter { it.name.endsWith(".jsonl.gz") && it.name !in segmentIndex }?.forEach { file ->
+        filesInDirectory()?.filter { it.name.endsWith(".jsonl.gz") && it.name !in segmentIndex }?.forEach { file ->
             var first = Long.MAX_VALUE; var last = Long.MIN_VALUE; var count = 0L
             runCatching { records(file) { row -> val time=row.getLong("timestampUtc"); first=minOf(first,time); last=maxOf(last,time); count++ } }
                 .onSuccess {
@@ -361,14 +394,16 @@ internal class TherapyTelemetryStore(
         val rows = JSONArray()
         segmentIndex.forEach { (name, metadata) -> rows.put(JSONObject(metadata.toString()).put("name", name)) }
         val temporary = File(directory, "segments.part")
-        FileOutputStream(temporary).use { it.write(JSONObject().put("schemaVersion",1).put("segments",rows).toString().toByteArray()); it.fd.sync() }
+        FileOutputStream(temporary).use { it.write(JSONObject().put("schemaVersion",1).put("segments",rows).toString().toByteArray()); sync(it.fd) }
         Files.move(temporary.toPath(), segmentIndexFile.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        account(segmentIndexFile)
     }
     private fun persistState() {
         state.put("schemaVersion",1).put("highWater",highWater).put("retentionDays",retentionDays)
         val temporary = File(directory,"control.part")
-        FileOutputStream(temporary).use { it.write(state.toString().toByteArray(Charsets.UTF_8)); it.fd.sync() }
+        FileOutputStream(temporary).use { it.write(state.toString().toByteArray(Charsets.UTF_8)); sync(it.fd) }
         Files.move(temporary.toPath(),control.toPath(),StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE)
+        account(control)
     }
     private fun increment(key: String) { state.put(key,state.optLong(key)+1) }
     override fun close() {

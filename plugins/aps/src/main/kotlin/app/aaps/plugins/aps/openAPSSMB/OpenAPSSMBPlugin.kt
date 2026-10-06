@@ -485,9 +485,9 @@ open class OpenAPSSMBPlugin @Inject constructor(
         aapsLogger.debug(LTag.APS, "Glucose status:     $effectiveGlucoseStatus")
         aapsLogger.debug(LTag.APS, "Current temp:       $currentTemp")
         aapsLogger.debug(LTag.APS, "IOB forecast count=${iobArray.size} currentIob=${iobArray.firstOrNull()?.iob}")
-        aapsLogger.debug(LTag.APS, "Profile:            $oapsProfile")
-        aapsLogger.debug(LTag.APS, "Autosens data:      $autosensResult")
-        aapsLogger.debug(LTag.APS, "Meal data:          $mealData")
+        aapsLogger.debug(LTag.APS) { "Profile basal=${oapsProfile.current_basal} maxIob=${oapsProfile.max_iob} maxBasal=${oapsProfile.max_basal}" }
+        aapsLogger.debug(LTag.APS) { "Autosens ratio=${autosensResult.ratio}" }
+        aapsLogger.debug(LTag.APS) { "Meal carbs=${mealData.carbs} cob=${mealData.mealCOB}" }
         aapsLogger.debug(LTag.APS, "MicroBolusAllowed:  $microBolusAllowed")
         aapsLogger.debug(LTag.APS, "flatBGsDetected:    $flatBGsDetected")
         aapsLogger.debug(LTag.APS, "DynIsfMode:         $dynIsfMode")
@@ -512,7 +512,8 @@ open class OpenAPSSMBPlugin @Inject constructor(
                 tddLast4hU=dynIsfResult.tddLast4H,tddLast8to4hU=dynIsfResult.tddLast8to4H,
                 maxIobU=oapsProfile.max_iob,maxBasalUph=oapsProfile.max_basal
             )
-            it.decision?.let { decision -> aapsLogger.info(LTag.APS, "AlgorithmDecision ${decision.toJson()}") }
+            it.decision?.let { decision -> aapsLogger.info(LTag.APS,
+                "AlgorithmDecision algorithm=${decision.algorithm} smb=${decision.requestedSmbU} tbr=${decision.requestedTbrUph} minutes=${decision.requestedTbrMinutes} block=${decision.blockReason}") }
             val determineBasalResult = apsResultProvider.get().with(it)
             // Preserve input data
             determineBasalResult.inputConstraints = inputConstraints

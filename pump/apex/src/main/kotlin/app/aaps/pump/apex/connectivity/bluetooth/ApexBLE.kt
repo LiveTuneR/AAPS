@@ -224,7 +224,7 @@ class ApexBLE @Inject constructor(
             val chunk = data.copyOfRange(start, end)
             val ack = CompletableDeferred<Int>()
             writeAck = ack
-            aapsLogger.debug(LTag.PUMPBTCOMM, "DEVICE[$start] -> ${chunk.toHex()}")
+            aapsLogger.debug(LTag.PUMPBTCOMM, "DEVICE[$start] -> bytes=${chunk.size}")
 
             val issued = try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -267,7 +267,7 @@ class ApexBLE @Inject constructor(
     private fun onPumpData(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
         scope.launch {
             if (!isCurrent(gatt) || characteristic.uuid != READ_UUID) return@launch
-            aapsLogger.debug(LTag.PUMPBTCOMM, "PUMP <- ${value.toHex()}")
+            aapsLogger.debug(LTag.PUMPBTCOMM, "PUMP <- bytes=${value.size}")
             try {
                 if (lastCommand?.isCompleteCommand() == false) {
                     lastCommand?.update(value)

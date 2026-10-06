@@ -10,7 +10,7 @@ internal object TelemetrySanitizer {
         "isfbasis", "futureisfbasis", "type", "eventtype", "state", "model", "firmware", "protocol", "profilename", "profileid", "insulintype",
         "commandtype", "errortype", "stage", "status", "timezone", "buildsha", "appversion", "class", "method", "file", "setting", "unit",
         "activitystate", "decisionid", "requestid", "queuerequestid", "correlationid", "runningmode", "schema", "outcome", "availability", "name", "oldvalue", "newvalue", "changeclassification",
-        "command", "commandname", "safety", "priority", "gapreason", "linkstate", "pendingcommand", "expected")
+        "command", "commandname", "safety", "priority", "gapreason", "linkstate", "pendingcommand", "expected", "pumpmodel", "pumpalias", "operationuuid", "calculationrole")
     private val arrays = setOf("iobforecast", "basalschedule", "isfschedule", "crschedule", "targetschedule", "predictions", "iob", "zt", "cob", "acob", "uam", "constraints", "stack", "changes", "components")
     private val bearer = Regex("(?i)(bearer\\s+|(?:access[_-]?token|api[_-]?secret|password)\\s*[:=]\\s*)[^\\s,;]+")
     private val url = Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE)
@@ -31,7 +31,9 @@ internal object TelemetrySanitizer {
                 is Number, is Boolean -> value
                 is JSONObject -> objectValue(value,depth+1)
                 is JSONArray -> if (key.lowercase() in arrays) arrayValue(value,depth+1) else JSONObject.NULL
-                is String -> if (key.lowercase() in texts) safeText(value) else JSONObject.NULL
+                is String -> if (key.equals("operationUuid", true)) {
+                    if (runCatching { java.util.UUID.fromString(value).toString() }.getOrNull() == value.lowercase()) value else JSONObject.NULL
+                } else if (key.lowercase() in texts) safeText(value) else JSONObject.NULL
                 else -> JSONObject.NULL
             })
         }

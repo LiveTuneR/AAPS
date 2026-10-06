@@ -35,6 +35,7 @@ class ApexTrace @Inject constructor(
     private val traceDirectory = File(context.filesDir, "apex-diagnostics")
     private val exportDirectory = File(context.cacheDir, "apex-diagnostics")
     private var activeFile: File? = null
+    private val ring = app.aaps.core.data.diagnostics.BoundedDiagnosticTrace()
     private val commandOrigins = linkedMapOf<Long,app.aaps.core.interfaces.telemetry.PumpCommandRunContext>()
 
     fun nextOperationId(): Long = operationSequence.incrementAndGet()
@@ -45,7 +46,7 @@ class ApexTrace @Inject constructor(
         operationId: Long? = null,
         fields: Map<String, Any?> = emptyMap(),
     ) {
-        if (::therapyTelemetry.isInitialized) try {
+        if (::therapyTelemetry.isInitialized && event !in setOf("frame_received", "ble_write_started")) try {
             val command=synchronized(commandOrigins) {
                 val current=app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
                 if (operationId!=null && current!=null) commandOrigins[operationId]=current
@@ -54,7 +55,7 @@ class ApexTrace @Inject constructor(
                 while (commandOrigins.size>256) commandOrigins.remove(commandOrigins.keys.first())
                 origin
             }
-            val record=JSONObject().put("source","APEX_DRIVER").put("stage",event).put("linkGeneration",generation ?: JSONObject.NULL)
+            val record=JSONObject().put("source","APEX_DRIVER").put("pumpModel","apex").put("pumpAlias","apex-local").put("stage",event).put("linkGeneration",generation ?: JSONObject.NULL)
                 .put("driverOperationId",operationId ?: JSONObject.NULL).put("queueRequestId",command?.requestId ?: JSONObject.NULL)
                 .put("decisionId",command?.decisionId ?: JSONObject.NULL)
             fields.forEach { (key,value) -> record.put(key,ApexTraceSanitizer.sanitize(key,value,MAX_FIELD_LENGTH)) }
@@ -63,11 +64,12 @@ class ApexTrace @Inject constructor(
                 event=="command_queued" -> app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_QUEUE
                 event.endsWith("history_reconciled") -> app.aaps.core.interfaces.telemetry.TherapyEventType.HISTORY_RECONCILIATION
                 event.endsWith("timeout") || event.endsWith("failed") || event=="watchdog_stall" -> app.aaps.core.interfaces.telemetry.TherapyEventType.ERROR
+                event.startsWith("bolus_") || event.startsWith("command_") || event in setOf("pump_command_response", "therapy_enactment_attempt", "therapy_command_blocked") -> app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_RESULT
                 else -> app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_STATE
             }
             therapyTelemetry.get().record(type,record,command?.generation,command?.decisionId ?: operationId?.let { "apex-operation:$it" })
         } catch (_: Exception) { /* Diagnostic export cannot interrupt a pump conversation. */ }
-        scope.launch {
+        run {
             val data = JSONObject()
                 .put("wallMs", System.currentTimeMillis())
                 .put("elapsedMs", SystemClock.elapsedRealtime())
@@ -75,7 +77,7 @@ class ApexTrace @Inject constructor(
             generation?.let { data.put("generation", it) }
             operationId?.let { data.put("operationId", it) }
             fields.forEach { (key, value) -> data.put(key, ApexTraceSanitizer.sanitize(key, value, MAX_FIELD_LENGTH)) }
-            append(data.toString())
+            ring.offer(data.toString())
         }
     }
 
@@ -104,6 +106,10 @@ class ApexTrace @Inject constructor(
     }
 
     suspend fun export(): File = withContext(dispatcher) {
+        val recent = ring.drain()
+        append(JSONObject().put("event", "diagnostic_ring_export").put("records", recent.lines.size)
+            .put("dropped", recent.dropped).put("bufferedBytes", recent.bytes).put("wallMs", System.currentTimeMillis()).toString())
+        recent.lines.forEach(::append)
         traceDirectory.mkdirs()
         exportDirectory.mkdirs()
         val output = File(exportDirectory, "apex-diagnostics-${System.currentTimeMillis()}.zip")

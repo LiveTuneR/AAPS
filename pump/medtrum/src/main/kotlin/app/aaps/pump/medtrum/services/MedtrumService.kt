@@ -986,12 +986,12 @@ class MedtrumService : DaggerService(), MedtrumBleCallback {
     }
 
     override fun onNotification(data: ByteArray) {
-        aapsLogger.debug(LTag.PUMPCOMM, "<<<<< onNotification ${data.contentToString()}")
+        aapsLogger.debug(LTag.PUMPCOMM, "<<<<< onNotification bytes=${data.size}")
         NotificationPacket(injector).handleNotification(data)
     }
 
     override fun onIndication(data: ByteArray) {
-        aapsLogger.debug(LTag.PUMPCOMM, "<<<<< onIndication ${data.contentToString()}")
+        aapsLogger.debug(LTag.PUMPCOMM, "<<<<< onIndication bytes=${data.size}")
         currentState.onIndication(data)
     }
 

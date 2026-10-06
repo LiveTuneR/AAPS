@@ -12,6 +12,19 @@ import java.security.MessageDigest
 class TherapyTelemetryStoreTest {
     @TempDir lateinit var directory: File
     private val start = 1_800_000_000_000L
+
+    @Test fun `local operation uuid and pump family survive sanitizing without serials or credentials`() {
+        val uuid = "14d9af16-a333-4df9-94b5-b33d3677ddc5"
+        val clean = TelemetrySanitizer.clean(JSONObject().put("operationUuid", uuid)
+            .put("pumpModel", "Medtrum Nano").put("pumpAlias", "medtrum")
+            .put("serialNumber", "123456").put("accessToken", "secret"))
+        assertEquals(uuid, clean.getString("operationUuid"))
+        assertEquals("Medtrum Nano", clean.getString("pumpModel"))
+        assertEquals("medtrum", clean.getString("pumpAlias"))
+        assertFalse(clean.has("serialNumber"))
+        assertFalse(clean.has("accessToken"))
+        assertTrue(TelemetrySanitizer.clean(JSONObject().put("operationUuid", "not-a-uuid")).isNull("operationUuid"))
+    }
     private fun bg(time: Long) = JSONObject().put("rawBgTimestamp",time).put("glucoseMgdl",120.0).put("isValid",true)
         .put("metadataOnly",false).put("displayUnits","mmol").put("trend","FLAT")
     private fun records(zip: ZipFile, name: String) = zip.getInputStream(zip.getEntry(name)).bufferedReader().useLines { lines ->

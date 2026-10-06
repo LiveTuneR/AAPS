@@ -32,27 +32,36 @@ class MedtrumBleTrace @Inject constructor(
     private val traceDirectory = File(context.filesDir, "medtrum-ble-diagnostics")
     private val exportDirectory = File(context.cacheDir, "medtrum-ble-diagnostics")
     private var activeFile: File? = null
+    private val ring = app.aaps.core.data.diagnostics.BoundedDiagnosticTrace()
 
     fun record(event: String, fields: Map<String, Any?> = emptyMap()) {
-        if (::therapyTelemetry.isInitialized) try {
+        val error = event.contains("error", true) || event.contains("failed", true) ||
+            (event in setOf("tx_chunk_complete", "connection_state") && (fields["status"] as? Number)?.toInt()?.let { it != 0 } == true)
+        val raw = event in setOf("rx_message", "rx_notification_chunk", "rx_indication_chunk", "tx_message", "tx_chunk", "tx_chunk_complete")
+        if (::therapyTelemetry.isInitialized && (!raw || error)) try {
             val command=app.aaps.core.interfaces.telemetry.PumpCommandRunContext.current.get()
-            val data=JSONObject().put("source","MEDTRUM_DRIVER").put("stage",event)
+            val data=JSONObject().put("source","MEDTRUM_DRIVER").put("pumpModel","medtrum").put("pumpAlias","medtrum-local").put("stage",event)
                 .put("queueRequestId",command?.requestId ?: JSONObject.NULL).put("decisionId",command?.decisionId ?: JSONObject.NULL)
             fields.forEach { (key,value) -> if (value !is ByteArray) data.put(key,encode(value)) }
-            therapyTelemetry.get().record(if (event=="tx_chunk_accepted") app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_SENT
+            therapyTelemetry.get().record(if (error) app.aaps.core.interfaces.telemetry.TherapyEventType.ERROR
+                else if (event=="tx_chunk_accepted") app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_SENT
                 else app.aaps.core.interfaces.telemetry.TherapyEventType.PUMP_STATE,data,command?.generation,command?.decisionId)
         } catch (_: Exception) { /* Observational only. */ }
-        scope.launch {
+        run {
             val data = JSONObject()
                 .put("wallMs", System.currentTimeMillis())
                 .put("elapsedMs", SystemClock.elapsedRealtime())
                 .put("event", event)
             fields.forEach { (key, value) -> data.put(key,MedtrumTraceRedaction.clean(key,value)) }
-            append(data.toString())
+            ring.offer(data.toString())
         }
     }
 
     suspend fun export(additionalEntries: Map<String, String> = emptyMap()): File = withContext(dispatcher) {
+        val recent = ring.drain()
+        append(JSONObject().put("event", "diagnostic_ring_export").put("records", recent.lines.size)
+            .put("dropped", recent.dropped).put("bufferedBytes", recent.bytes).put("wallMs", System.currentTimeMillis()).toString())
+        recent.lines.forEach(::append)
         traceDirectory.mkdirs()
         exportDirectory.mkdirs()
         val output = File(exportDirectory, "medtrum-ble-${System.currentTimeMillis()}.zip")

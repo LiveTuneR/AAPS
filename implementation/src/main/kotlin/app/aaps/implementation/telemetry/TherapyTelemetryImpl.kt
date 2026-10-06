@@ -46,6 +46,14 @@ class TherapyTelemetryImpl @Inject constructor(
     private val admissionLedger by lazy { TelemetryAdmissionLedger(File(context.filesDir,"therapy-telemetry-admission-v1.jsonl")) }
     private val writer = ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,ArrayBlockingQueue(4096),
         { action -> Thread(action,"TherapyTelemetry").apply { isDaemon = true } }, ThreadPoolExecutor.AbortPolicy())
+    private val diagnostics = DiagnosticBatchBuffer()
+    private val diagnosticFlushQueued = AtomicBoolean()
+    private var lastHealthRefresh = Long.MIN_VALUE
+    private val diagnosticClock = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { action ->
+        Thread(action, "TherapyDiagnosticFlush").apply { isDaemon = true }
+    }
+    private val diagnosticTypes = setOf(TherapyEventType.PUMP_STATE, TherapyEventType.ACTIVITY,
+        TherapyEventType.CALCULATION, TherapyEventType.SCHEDULER)
     private val store by lazy { TherapyTelemetryStore(File(context.filesDir,"therapy-telemetry-v1"),config.HEAD,
         monotonic = { SystemClock.elapsedRealtimeNanos() }) }
 
@@ -61,6 +69,7 @@ class TherapyTelemetryImpl @Inject constructor(
             }
             catch (error: Exception) { failed(error) }
         }
+        diagnosticClock.scheduleAtFixedRate({ requestDiagnosticFlush() }, 1, 1, TimeUnit.SECONDS)
         record(TherapyEventType.PROCESS_START,JSONObject().put("appVersion",config.VERSION_NAME).put("model",Build.MODEL)
             .put("androidApi",Build.VERSION.SDK_INT).put("buildSha",config.HEAD))
         val previous=Thread.getDefaultUncaughtExceptionHandler()
@@ -76,9 +85,17 @@ class TherapyTelemetryImpl @Inject constructor(
             val observedUtc = System.currentTimeMillis()
             val observedMonotonic = SystemClock.elapsedRealtimeNanos()
             val observedZone = ZoneId.systemDefault()
+            if (type in diagnosticTypes) {
+                val accepted = diagnostics.offer(DiagnosticRecord(type.name, copied, generation, correlationId,
+                    observedUtc, observedMonotonic, observedZone))
+                if (!accepted) { drops.incrementAndGet(); requestDiagnosticFlush() }
+                else if (diagnostics.stats().records >= 128 || diagnostics.stats().bufferedBytes >= 60 * 1024) requestDiagnosticFlush()
+                return
+            }
             updateQueueHighWater(writer.queue.size + 1)
             writer.execute {
                 try {
+                    flushDiagnostics()
                     val admissionStarted = SystemClock.elapsedRealtimeNanos()
                     val admission = admissionLedger.admit(observedUtc, type.name)
                     admissionLatency.add(SystemClock.elapsedRealtimeNanos() - admissionStarted)
@@ -109,12 +126,14 @@ class TherapyTelemetryImpl @Inject constructor(
         try { writer.execute {
             var output: File? = null
             try {
+                flushDiagnostics()
                 flushDrops()
                 output = File(context.cacheDir, "AAPS_APEX_DEVICE_TEST_${System.currentTimeMillis()}_${config.HEAD.take(7)}.zip")
                 val supportFiles = buildList {
                     File(loggerUtils.logDirectory).listFiles()?.filter { it.isFile && it.lastModified() >= startUtc && it.lastModified() <= endUtc + 86_400_000L }?.let(::addAll)
                     File(context.filesDir, "apex/bolus-operations.json").takeIf(File::isFile)?.let(::add)
                     File(context.filesDir, "apex-diagnostics").listFiles()?.filter { it.isFile && it.lastModified() >= startUtc }?.let(::addAll)
+                    File(context.filesDir, "medtrum-ble-diagnostics").listFiles()?.filter { it.isFile && it.lastModified() >= startUtc }?.let(::addAll)
                 }
                 store.export(
                     output, startUtc, endUtc, expectedCgmIntervalMs, supportFiles,
@@ -122,6 +141,13 @@ class TherapyTelemetryImpl @Inject constructor(
                         .put("phoneModel", Build.MODEL).put("androidApi", Build.VERSION.SDK_INT)
                         .put("sessionStartUtc", startUtc).put("sessionEndUtc", endUtc)
                         .put("status", "EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED")
+                        .put("diagnosticPolicy", JSONObject()
+                            .put("batchedTypes", org.json.JSONArray(diagnosticTypes.map { it.name }.sorted()))
+                            .put("maxRecords",128).put("maxBytes",65536).put("flushIntervalMs",1000)
+                            .put("aggregation", "consecutive identical PUMP_STATE; firstSeenUtc/lastSeenUtc/repeatCount")
+                            .put("crashCoverage", "Unflushed RAM diagnostics may be lost; unclean session is marked uncertain. Accepted durable batches use counted admission WAL.")
+                            .put("rawBleCoverage", "Bounded in-memory ring; explicit driver export reports truncation. Full BLE history is not promised.")
+                            .put("criticalEvents", "Serialized writer admission and per-record fsync; record API asynchronous; bolus-operation journal unchanged"))
                         .put("telemetryPerformance", performanceJson()),
                 )
                 refreshHealth()
@@ -134,6 +160,28 @@ class TherapyTelemetryImpl @Inject constructor(
         } } catch (error: Exception) { continuation.resumeWithException(error) }
     }
 
+    private fun requestDiagnosticFlush() {
+        if (!started.get() || !diagnosticFlushQueued.compareAndSet(false, true)) return
+        try { writer.execute {
+            try { flushDiagnostics(); flushDrops(); refreshHealth() }
+            catch (error: Exception) { failed(error) }
+            finally { diagnosticFlushQueued.set(false) }
+        } } catch (error: RejectedExecutionException) { diagnosticFlushQueued.set(false) }
+    }
+
+    private fun flushDiagnostics() {
+        val batch = diagnostics.drain()
+        if (batch.isEmpty()) return
+        // One admission per bounded batch; persisted counts also cover a partial append after a crash.
+        val observations = batch.sumOf { it.data.optJSONObject("diagnosticAggregation")?.optLong("repeatCount", 1L) ?: 1L }
+        val lastUtc = batch.maxOf { it.data.optJSONObject("diagnosticAggregation")?.optLong("lastSeenUtc", it.utc) ?: it.utc }
+        val admission = admissionLedger.admit(batch.minOf { it.utc }, "DIAGNOSTIC_BATCH", observations, lastUtc)
+        for (record in batch) store.append(record.type, record.data, record.generation, record.correlationId,
+            record.utc, record.monotonic, record.zone, durable = false)
+        store.flush()
+        admissionLedger.commit(admission.sequence)
+    }
+
     private fun flushDrops() {
         val count=drops.getAndSet(0)
         if (count > 0) try { store.dropped(count=count) } catch (error: Exception) { drops.addAndGet(count); throw error }
@@ -144,6 +192,9 @@ class TherapyTelemetryImpl @Inject constructor(
         logger.error(LTag.CORE,"TherapyTelemetry failure type=${error.javaClass.simpleName}")
     }
     private fun refreshHealth() {
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (lastHealthRefresh != Long.MIN_VALUE && now - lastHealthRefresh < 1_000_000_000L) return
+        lastHealthRefresh = now
         val admission = admissionLatency.snapshot()
         val append = storeAppendLatency.snapshot()
         _health.value=TherapyTelemetryHealth(retentionDays=store.retentionDays,bytesOnDisk=store.bytesOnDisk(),writerDrops=store.writerDrops,
@@ -169,6 +220,14 @@ class TherapyTelemetryImpl @Inject constructor(
         return JSONObject().put("admissionLatency",latency(admission)).put("storeAppendLatency",latency(append))
             .put("queueDepth",writer.queue.size).put("queueHighWater",queueHighWater.get())
             .put("admissionFailures",admissionFailures.get())
+            .put("diagnosticBuffer", JSONObject().apply { val stats=diagnostics.stats()
+                put("maxRecords",128).put("maxBytes",65536).put("flushIntervalMs",1000)
+                put("records",stats.records).put("bufferedBytes",stats.bufferedBytes)
+                put("offeredBytes",stats.offeredBytes).put("aggregatedRepeats",stats.repeats).put("rejected",stats.rejected)
+            })
+            .put("storeIo",JSONObject().apply { val stats=store.ioStats()
+                put("appendCalls",stats.appendCalls).put("durableSyncs",stats.durableSyncs).put("directoryScans",stats.directoryScans)
+            })
     }
 }
 
