@@ -100,6 +100,10 @@ class TherapyTelemetryImpl @Inject constructor(
                     diagnostics.offer(DiagnosticRecord(type.name, copied, generation, correlationId,
                         observedUtc, observedMonotonic, observedZone)).also { if (it.accepted) diagnosticDeadline.pendingRecord() }
                 }
+                if (!accepted.accepted) {
+                    app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.diagnosticDrops")
+                    app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.diagnosticDrops.${type.name}")
+                }
                 if (accepted.pressure) requestDiagnosticFlush()
                 return
             }

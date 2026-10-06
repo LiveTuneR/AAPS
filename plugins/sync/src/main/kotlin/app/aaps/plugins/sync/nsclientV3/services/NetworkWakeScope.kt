@@ -10,8 +10,9 @@ internal class NetworkWakeScope(private val now: () -> Long = { System.nanoTime(
     private var timedOut = 0L
     data class Stats(val count: Long, val active: Int, val totalMs: Long, val maxMs: Long, val timedOut: Long)
     @Synchronized fun stats() = Stats(count, active.size, totalMs, maxMs, timedOut)
-    @Synchronized fun lease(): AutoCloseable {
-        if (closed) return AutoCloseable { }
+    fun lease(): AutoCloseable = leaseOrNull() ?: AutoCloseable { }
+    @Synchronized fun leaseOrNull(): AutoCloseable? {
+        if (closed) return null
         val underlying = acquire(30_000L)
         val started = now()
         count++

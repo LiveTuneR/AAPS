@@ -71,6 +71,9 @@ class NSClientV3ServiceTest : TestBaseWithProfile() {
         ack.call(org.json.JSONObject().put("success", true))
         assertThat(sut.networkWakeScope.stats().active).isEqualTo(0)
         org.mockito.kotlin.verify(nsClientV3Plugin).executeLoop("WS_CONNECT")
+        sut.networkWakeScope.close()
+        ack.call(org.json.JSONObject().put("success", true))
+        org.mockito.kotlin.verify(nsClientV3Plugin, org.mockito.kotlin.times(1)).executeLoop("WS_CONNECT")
     }
 
     @Mock lateinit var nsIncomingDataProcessor: NsIncomingDataProcessor

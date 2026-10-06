@@ -32,7 +32,7 @@ class OverviewEnergyLifecycleTest : TestBaseWithProfile() {
         fun ticks() = ((EnergyRuntimeCounters.snapshot()["counters"] as Map<*, *>)["timer.overviewVisible"] as Long?) ?: 0L
         try {
             val before = ticks()
-            val vm = OverviewDashboardViewModel(iobCobCalculator, loop, activePlugin, profileFunction, profileUtil,
+            val vm = OverviewDashboardViewModel(iobCobCalculator, mock(), activePlugin, profileFunction, profileUtil,
                 persistence, preferences, rh, aapsLogger, activities, rxBus)
             owner.put("overview", vm)
             verifyBlocking(activities, org.mockito.Mockito.timeout(5000)) { refresh(any()) }

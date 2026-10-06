@@ -114,11 +114,11 @@ class NSClientV3Service : DaggerService() {
     var alarmSocket: Socket? = null
 
     private fun awakeListener(block: (Array<Any>) -> Unit) = Emitter.Listener { args ->
-        networkWakeScope.lease().use { block(args) }
+        networkWakeScope.leaseOrNull()?.use { block(args) }
     }
 
     private fun awakeAck(block: (Array<Any>) -> Unit) = Ack { args ->
-        networkWakeScope.lease().use { block(args) }
+        networkWakeScope.leaseOrNull()?.use { block(args) }
     }
 
     /**
