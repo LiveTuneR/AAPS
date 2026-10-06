@@ -39,11 +39,15 @@ class NSClientV3ServiceTest : TestBaseWithProfile() {
     fun init() {
         nsClientMvvmRepository = NSClientRepositoryImpl(rxBus, aapsLogger)
         wsConnectedState.value = false
+        whenever(nsClientV3Plugin.isEnabled()).thenReturn(true)
         whenever(nsClientV3Plugin.wsConnectedFlow).thenReturn(wsConnectedState)
         whenever(nsClientV3Plugin.setWsConnected(any())).thenAnswer { invocation ->
             wsConnectedState.value = invocation.arguments[0] as Boolean
         }
         sut = NSClientV3Service().also {
+            // These socket lifecycle tests have no attached Android Context. Operation lease
+            // timeout/failure/destroy behavior is tested separately in NetworkWakeScopeTest.
+            it.networkWakeScope = NetworkWakeScope { AutoCloseable { } }
             it.aapsLogger = aapsLogger
             it.preferences = preferences
             it.fabricPrivacy = fabricPrivacy
@@ -55,6 +59,18 @@ class NSClientV3ServiceTest : TestBaseWithProfile() {
             it.nsDeviceStatusHandler = nsDeviceStatusHandler
             it.nsClientRepository = nsClientMvvmRepository
         }
+    }
+
+    @Test
+    fun `disabled plugin opens no socket even with valid URL and allowed connectivity`() {
+        whenever(nsClientV3Plugin.isEnabled()).thenReturn(false)
+        whenever(preferences.get(StringKey.NsClientUrl)).thenReturn("http://something")
+        whenever(preferences.get(BooleanKey.NsClient3UseWs)).thenReturn(true)
+        whenever(nsClientV3Plugin.isAllowed).thenReturn(true)
+        sut.initializeWebSockets("Disabled")
+        assertThat(sut.storageSocket).isNull()
+        assertThat(sut.alarmSocket).isNull()
+        assertThat(sut.wsConnected).isFalse()
     }
 
     @Test

@@ -1,6 +1,5 @@
 package app.aaps.plugins.sync.nsclientV3.services
 
-import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
@@ -71,14 +70,16 @@ class NSClientV3Service : DaggerService() {
 
     private val disposable = CompositeDisposable()
 
-    private var wakeLock: PowerManager.WakeLock? = null
+    internal var networkWakeScope = NetworkWakeScope { timeout ->
+        val lock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidAPS:NSClientOperation")
+        lock.acquire(timeout)
+        AutoCloseable { synchronized(lock) { if (lock.isHeld) lock.release() } }
+    }
     private val binder: IBinder = LocalBinder(this)
 
-    @SuppressLint("WakelockTimeout")
     override fun onCreate() {
         super.onCreate()
-        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidAPS:NSClientService")
-        wakeLock?.acquire()
         initializeWebSockets("onCreate")
     }
 
@@ -86,7 +87,7 @@ class NSClientV3Service : DaggerService() {
         super.onDestroy()
         shutdownWebsockets()
         disposable.clear()
-        if (wakeLock?.isHeld == true) wakeLock?.release()
+        networkWakeScope.close()
     }
 
     class LocalBinder(service: NSClientV3Service) : Binder() {
@@ -102,6 +103,10 @@ class NSClientV3Service : DaggerService() {
 
     var storageSocket: Socket? = null
     var alarmSocket: Socket? = null
+
+    private fun awakeListener(block: (Array<Any>) -> Unit) = Emitter.Listener { args ->
+        networkWakeScope.lease().use { block(args) }
+    }
 
     /**
      * WS connection state. Pass-through to [NSClientV3Plugin.wsConnectedFlow] — the plugin is
@@ -134,6 +139,10 @@ class NSClientV3Service : DaggerService() {
 
     @Suppress("SameParameterValue")
     fun initializeWebSockets(reason: String) {
+        if (!nsClientV3Plugin.isEnabled()) {
+            shutdownWebsockets()
+            return
+        }
         if (preferences.get(StringKey.NsClientUrl).isEmpty()) {
             shutdownWebsockets()
             return
@@ -197,7 +206,7 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onConnectStorage = Emitter.Listener {
+    private val onConnectStorage = awakeListener {
         val socketId = storageSocket?.id() ?: "NULL"
         nsClientRepository.addLog("◄ WS", "connected storage ID: $socketId")
         if (storageSocket != null) {
@@ -223,7 +232,7 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onConnectAlarms = Emitter.Listener {
+    private val onConnectAlarms = awakeListener {
         val socket = alarmSocket
         val socketId = socket?.id() ?: "NULL"
         nsClientRepository.addLog("◄ WS", "connected alarms ID: $socketId")
@@ -240,7 +249,7 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onDisconnectStorage = Emitter.Listener { args ->
+    private val onDisconnectStorage = awakeListener { args ->
         aapsLogger.debug(LTag.NSCLIENT, "disconnect storage reason: ${args[0]}")
         nsClientRepository.addLog("◄ WS", "disconnect storage event")
         wsConnected = false
@@ -248,12 +257,12 @@ class NSClientV3Service : DaggerService() {
         nsClientRepository.updateStatus(nsClientV3Plugin.status)
     }
 
-    private val onDisconnectAlarm = Emitter.Listener { args ->
+    private val onDisconnectAlarm = awakeListener { args ->
         aapsLogger.debug(LTag.NSCLIENT, "disconnect alarm reason: ${args[0]}")
         nsClientRepository.addLog("◄ WS", "disconnect alarm event")
     }
 
-    private val onDataCreateUpdate = Emitter.Listener { args ->
+    private val onDataCreateUpdate = awakeListener { args ->
         val response = args[0] as JSONObject
         aapsLogger.debug(LTag.NSCLIENT, "onDataCreateUpdate: $response")
         val collection = response.getString("colName")
@@ -285,7 +294,7 @@ class NSClientV3Service : DaggerService() {
             }
 
             "profile"      ->
-                appScope.launch { nsIncomingDataProcessor.processProfile(docJson, doFullSync = false) }
+                appScope.launch { networkWakeScope.lease().use { nsIncomingDataProcessor.processProfile(docJson, doFullSync = false) } }
 
             "treatments"   -> docString.toNSTreatment()?.let {
                 nsIncomingDataProcessor.processTreatments(listOf(it), doFullSync = false)
@@ -335,11 +344,11 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onDataDelete = Emitter.Listener { args ->
+    private val onDataDelete = awakeListener { args ->
         val response = args[0] as JSONObject
         aapsLogger.debug(LTag.NSCLIENT, "onDataDelete: $response")
-        val collection = response.optString("colName") ?: return@Listener
-        val identifier = response.optString("identifier") ?: return@Listener
+        val collection = response.optString("colName") ?: return@awakeListener
+        val identifier = response.optString("identifier") ?: return@awakeListener
         nsClientRepository.addLog("◄ WS DELETE", "$collection $identifier")
         if (collection == "treatments") {
             storeDataForDb.addToDeleteTreatment(identifier)
@@ -351,7 +360,7 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onAnnouncement = Emitter.Listener { args ->
+    private val onAnnouncement = awakeListener { args ->
 
         /*
         {
@@ -370,7 +379,7 @@ class NSClientV3Service : DaggerService() {
         if (preferences.get(BooleanKey.NsClientNotificationsFromAnnouncements))
             postNsAlarm(NSAlarmObject(data))
     }
-    private val onAlarm = Emitter.Listener { args ->
+    private val onAlarm = awakeListener { args ->
 
         /*
         {
@@ -395,7 +404,7 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onUrgentAlarm = Emitter.Listener { args: Array<Any> ->
+    private val onUrgentAlarm = awakeListener { args: Array<Any> ->
         val data = args[0] as JSONObject
         nsClientRepository.addLog("◄ URGENT ALARM", data.optString("message"))
         aapsLogger.debug(LTag.NSCLIENT, data.toString())
@@ -406,7 +415,7 @@ class NSClientV3Service : DaggerService() {
         }
     }
 
-    private val onClearAlarm = Emitter.Listener { args ->
+    private val onClearAlarm = awakeListener { args ->
 
         /*
         {
