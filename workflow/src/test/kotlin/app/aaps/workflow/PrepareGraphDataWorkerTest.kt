@@ -124,7 +124,7 @@ class PrepareGraphDataWorkerTest : TestBaseWithProfile() {
 
         assertIs<ListenableWorker.Result.Success>(result)
         verify(mockedRxBus).send(any<EventBucketedDataCreated>())
-        verify(dataIobCob).clearCache()
+        verify(dataIobCob).bgDataReloaded()
         // Terminal-only progress not emitted when emitFinalProgress = false
         verify(signals, org.mockito.kotlin.never()).emitProgress(eq(ProgressData.DRAW_FINAL), any())
     }

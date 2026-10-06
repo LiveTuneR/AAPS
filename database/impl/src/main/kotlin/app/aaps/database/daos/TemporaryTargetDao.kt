@@ -32,6 +32,9 @@ internal interface TemporaryTargetDao : TraceableDao<TemporaryTarget> {
     @Query("SELECT * FROM $TABLE_TEMPORARY_TARGETS WHERE (timestamp <= :timestamp) AND ((timestamp + duration) > :timestamp) AND (referenceId IS NULL) AND (isValid = 1) ORDER BY timestamp DESC LIMIT 1")
     suspend fun getTemporaryTargetActiveAt(timestamp: Long): TemporaryTarget?
 
+    @Query("SELECT * FROM $TABLE_TEMPORARY_TARGETS WHERE timestamp <= :to AND (timestamp + duration) > :from AND referenceId IS NULL AND isValid = 1 ORDER BY timestamp DESC")
+    suspend fun getTemporaryTargetsActiveBetweenTimeAndTime(from: Long, to: Long): List<TemporaryTarget>
+
     @Query("SELECT * FROM $TABLE_TEMPORARY_TARGETS WHERE (timestamp >= :timestamp) AND (isValid = 1) AND (referenceId IS NULL) ORDER BY timestamp ASC")
     suspend fun getTemporaryTargetDataFromTime(timestamp: Long): List<TemporaryTarget>
 

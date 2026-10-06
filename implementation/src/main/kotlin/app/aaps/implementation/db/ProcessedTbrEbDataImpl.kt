@@ -27,4 +27,20 @@ class ProcessedTbrEbDataImpl @Inject constructor(
 
     override suspend fun getTempBasalIncludingConvertedExtended(timestamp: Long): TB? =
         persistenceLayer.getTemporaryBasalActiveAt(timestamp) ?: getConvertedExtended(timestamp)
+
+    override suspend fun getTempBasalsIncludingConvertedExtended(startTime: Long, endTime: Long): ProcessedTbrEbData.TempBasalsInRange {
+        val basals = persistenceLayer.getTemporaryBasalsActiveBetweenTimeAndTime(startTime, endTime).map { it.copy() }.sortedByDescending { it.timestamp }
+        val extended = if (activePlugin.activePump.isFakingTempsByExtendedBoluses)
+            persistenceLayer.getExtendedBolusesActiveBetweenTimeAndTime(startTime, endTime).map { it.copy() }.sortedByDescending { it.timestamp }
+        else emptyList()
+        return object : ProcessedTbrEbData.TempBasalsInRange {
+            override suspend fun at(timestamp: Long): TB? {
+                require(timestamp in startTime..endTime)
+                basals.firstOrNull { it.timestamp <= timestamp && it.end > timestamp }?.let { return it.copy() }
+                val eb = extended.firstOrNull { it.timestamp <= timestamp && it.end > timestamp } ?: return null
+                val profile = profileFunction.getProfile(timestamp) ?: return null
+                return eb.toTemporaryBasal(profile)
+            }
+        }
+    }
 }

@@ -69,7 +69,9 @@ class TddCalculatorImplTest : TestBase() {
         whenever(persistenceLayer.getCalculatedTotalDailyDose(any())).thenReturn(null)
         whenever(persistenceLayer.getBolusesFromTimeToTime(any(), any(), any())).thenReturn(emptyList())
         whenever(persistenceLayer.getCarbsFromTimeToTimeExpanded(any(), any(), any())).thenReturn(emptyList())
-        whenever(iobCobCalculator.getBasalData(any(), any())).thenReturn(BasalData().apply { tempBasalAbsolute = 1.0 })
+        whenever(iobCobCalculator.getBasalDataForRange(any(), any())).thenReturn(object : IobCobCalculator.BasalDataInRange {
+            override suspend fun at(profile: app.aaps.core.interfaces.profile.Profile, fromTime: Long) = BasalData().apply { tempBasalAbsolute = 1.0 }
+        })
         val start = MidnightTime.calcDaysBack(now, 7)
         val available = MidnightTime.calc(start + T.days(profileAvailableFromDay.toLong()).msecs())
         whenever(profileFunction.getProfile(any())).thenAnswer { if (it.getArgument<Long>(0) >= available) profile else null }

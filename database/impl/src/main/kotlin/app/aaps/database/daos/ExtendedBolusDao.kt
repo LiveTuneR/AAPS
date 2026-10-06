@@ -42,6 +42,9 @@ internal interface ExtendedBolusDao : TraceableDao<ExtendedBolus> {
     @Query("SELECT * FROM $TABLE_EXTENDED_BOLUSES WHERE (timestamp <= :timestamp) AND ((timestamp + duration) > :timestamp) AND (referenceId IS NULL) AND (isValid = 1) ORDER BY timestamp DESC LIMIT 1")
     suspend fun getExtendedBolusActiveAt(timestamp: Long): ExtendedBolus?
 
+    @Query("SELECT * FROM $TABLE_EXTENDED_BOLUSES WHERE timestamp <= :to AND (timestamp + duration) > :from AND referenceId IS NULL AND isValid = 1 ORDER BY timestamp DESC")
+    suspend fun getExtendedBolusesActiveBetweenTimeAndTime(from: Long, to: Long): List<ExtendedBolus>
+
     @Query("SELECT * FROM $TABLE_EXTENDED_BOLUSES WHERE (timestamp >= :timestamp) AND (isValid = 1) AND (referenceId IS NULL) ORDER BY timestamp ASC")
     suspend fun getExtendedBolusesStartingFromTime(timestamp: Long): List<ExtendedBolus>
 

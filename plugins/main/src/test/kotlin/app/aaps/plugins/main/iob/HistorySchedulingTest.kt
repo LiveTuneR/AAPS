@@ -52,6 +52,7 @@ class HistorySchedulingTest : TestBaseWithProfile() {
         val persistence = mock<PersistenceLayer>()
         val workflow = mock<CalculationWorkflow>()
         val bus = mock<app.aaps.core.interfaces.rx.bus.RxBus>()
+        whenever(persistence.databaseClearedFlow).thenReturn(kotlinx.coroutines.flow.emptyFlow())
         whenever(bus.toObservable(any<Class<Any>>())).thenReturn(io.reactivex.rxjava3.core.Observable.never())
         val schedulers = mock<app.aaps.core.interfaces.rx.AapsSchedulers>()
         whenever(schedulers.io).thenReturn(io.reactivex.rxjava3.schedulers.Schedulers.trampoline())

@@ -152,17 +152,21 @@ class TddCalculatorImpl @Inject constructor(
                 if (ic > 0) tdd.carbInsulin += t.amount / ic
             }
         }
+        val basals = iobCobCalculator.getBasalDataForRange(startTimeAligned, endTimeAligned)
+        val extended = if (!activePlugin.activePump.isFakingTempsByExtendedBoluses)
+            persistenceLayer.getExtendedBolusesActiveBetweenTimeAndTime(startTimeAligned, endTimeAligned).sortedByDescending { it.timestamp }
+        else emptyList()
         val calculationStep = T.mins(5).msecs()
         for (t in startTimeAligned until endTimeAligned step calculationStep) {
 
             val profile = profileFunction.getProfile(t) ?: if (allowMissingData) continue else return null
-            val tbr = iobCobCalculator.getBasalData(profile, t)
+            val tbr = basals.at(profile, t)
             if (tbr.isTempBasalRunning) tbrFound = true
             val absoluteRate = tbr.tempBasalAbsolute
             tdd.basalAmount += absoluteRate / 60.0 * 5.0
 
             if (!activePlugin.activePump.isFakingTempsByExtendedBoluses) {
-                val eb = persistenceLayer.getExtendedBolusActiveAt(t)
+                val eb = extended.firstOrNull { it.timestamp <= t && it.end > t }
                 val absoluteEbRate = eb?.rate ?: 0.0
                 tdd.bolusAmount += absoluteEbRate / 60.0 * 5.0
             }

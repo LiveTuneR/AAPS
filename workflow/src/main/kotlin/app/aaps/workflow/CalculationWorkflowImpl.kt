@@ -260,8 +260,23 @@ class CalculationWorkflowImpl @Inject constructor(
             observerScope.launch { delay(5000); synchronized(enqueueLock) { startPendingMain() } }
             return@synchronized
         }
+        if (succeeded) enqueueOptionalGraph(generation)
         logMainState(if (succeeded) "FINISH" else "CANCEL_OR_FAILURE")
         startPendingMain()
+    }
+
+    override fun requestOptionalGraph(cache: OverviewDataCache) = synchronized(enqueueLock) {
+        val generation = workflowChainData.activeGeneration(MAIN_CALCULATION) ?: return@synchronized
+        if (workflowChainData.graphFor(generation)?.cache === cache) enqueueOptionalGraph(generation)
+    }
+
+    private fun enqueueOptionalGraph(generation: Long) {
+        val prepare = workflowChainData.graphFor(generation) ?: return
+        if (!prepare.cache.hasIobGraphConsumers) return
+        val input = Data.Builder().putString(WorkflowChainData.JOB_KEY, MAIN_CALCULATION)
+            .putLong(WorkflowChainData.GEN_KEY, generation).putBoolean(WorkflowChainData.GRAPH_ONLY_KEY, true).build()
+        WorkManager.getInstance(context).enqueueUniqueWork("$MAIN_CALCULATION:optionalGraph", ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequest.Builder(PrepareGraphDataWorker::class.java).setInputData(input).build())
     }
 
     private fun logMainState(stage: String) {

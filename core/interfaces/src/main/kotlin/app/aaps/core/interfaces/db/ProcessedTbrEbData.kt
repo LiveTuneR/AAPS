@@ -13,4 +13,8 @@ interface ProcessedTbrEbData {
      */
     suspend fun getTempBasalIncludingConvertedExtended(timestamp: Long): TB?
 
+    interface TempBasalsInRange { suspend fun at(timestamp: Long): TB? }
+    /** Same real-TBR-before-faked-EB precedence as the point lookup. */
+    suspend fun getTempBasalsIncludingConvertedExtended(startTime: Long, endTime: Long): TempBasalsInRange
+
 }

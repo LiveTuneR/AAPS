@@ -385,6 +385,9 @@ class AppRepository @Inject internal constructor(
     suspend fun getTemporaryTargetDataIncludingInvalidFromTime(timestamp: Long, ascending: Boolean): List<TemporaryTarget> =
         database.temporaryTargetDao.getTemporaryTargetDataIncludingInvalidFromTime(timestamp).reversedIf(!ascending)
 
+    suspend fun getTemporaryTargetsActiveBetweenTimeAndTime(from: Long, to: Long): List<TemporaryTarget> =
+        database.temporaryTargetDao.getTemporaryTargetsActiveBetweenTimeAndTime(from, to)
+
     suspend fun getTemporaryTargetActiveAt(timestamp: Long): TemporaryTarget? =
         database.temporaryTargetDao.getTemporaryTargetActiveAt(timestamp)
 
@@ -838,6 +841,9 @@ class AppRepository @Inject internal constructor(
             historic?.let { it to nextIdElement }
         }
     }
+
+    suspend fun getExtendedBolusesActiveBetweenTimeAndTime(from: Long, to: Long): List<ExtendedBolus> =
+        database.extendedBolusDao.getExtendedBolusesActiveBetweenTimeAndTime(from, to)
 
     suspend fun getExtendedBolusActiveAt(timestamp: Long): ExtendedBolus? =
         database.extendedBolusDao.getExtendedBolusActiveAt(timestamp)

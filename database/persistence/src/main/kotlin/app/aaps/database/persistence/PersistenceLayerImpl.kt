@@ -1764,6 +1764,10 @@ class PersistenceLayerImpl @Inject constructor(
     }
 
     // EB
+    override suspend fun getExtendedBolusesActiveBetweenTimeAndTime(startTime: Long, endTime: Long): List<EB> = withContext(Dispatchers.IO) {
+        repository.getExtendedBolusesActiveBetweenTimeAndTime(startTime, endTime).map { it.fromDb() }
+    }
+
     override suspend fun getExtendedBolusActiveAt(timestamp: Long): EB? = withContext(Dispatchers.IO) {
         repository.getExtendedBolusActiveAt(timestamp)?.fromDb()
     }
@@ -1892,6 +1896,10 @@ class PersistenceLayerImpl @Inject constructor(
     }
 
     // TT
+    override suspend fun getTemporaryTargetsActiveBetweenTimeAndTime(startTime: Long, endTime: Long): List<TT> = withContext(Dispatchers.IO) {
+        repository.getTemporaryTargetsActiveBetweenTimeAndTime(startTime, endTime).map { it.fromDb() }
+    }
+
     override suspend fun getTemporaryTargetActiveAt(timestamp: Long): TT? =
         repository.getTemporaryTargetActiveAt(timestamp)?.fromDb()
 

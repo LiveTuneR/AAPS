@@ -9,6 +9,8 @@ import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.pump.Pump
+import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventCalculationTimeChanged
 import app.aaps.core.utils.receivers.BundleLogger
 import dagger.android.DaggerBroadcastReceiver
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +24,7 @@ class TimeDateOrTZChangeReceiver : DaggerBroadcastReceiver() {
     @Inject lateinit var aapsLogger: AAPSLogger
     @Inject lateinit var activePlugin: ActivePlugin
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
+    @Inject lateinit var rxBus: RxBus
 
     private var isDST = calculateDST()
 
@@ -43,6 +46,9 @@ class TimeDateOrTZChangeReceiver : DaggerBroadcastReceiver() {
     @VisibleForTesting
     fun processIntent(intent: Intent) {
         val action = intent.action
+        if (action == Intent.ACTION_TIME_CHANGED || action == Intent.ACTION_TIMEZONE_CHANGED) {
+            if (::rxBus.isInitialized) rxBus.send(EventCalculationTimeChanged())
+        }
         val activePump: Pump = activePlugin.activePump
 
         aapsLogger.debug(LTag.PUMP, "TimeDateOrTZChangeReceiver::Date, Time and/or TimeZone changed. [action={}]", action)

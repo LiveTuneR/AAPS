@@ -25,11 +25,21 @@ interface IobCobCalculator {
 
     suspend fun getBasalData(profile: Profile, fromTime: Long): BasalData
 
+    interface BasalDataInRange { suspend fun at(profile: Profile, fromTime: Long): BasalData }
+    suspend fun getBasalDataForRange(startTime: Long, endTime: Long): BasalDataInRange
+
     suspend fun calculateIobArrayInDia(profile: EffectiveProfile): Array<IobTotal>
     suspend fun calculateIobArrayForSMB(lastAutosensResult: AutosensResult, exerciseMode: Boolean, halfBasalExerciseTarget: Int, isTempTarget: Boolean): Array<IobTotal>
     fun iobArrayToString(array: Array<IobTotal>): String
 
     fun clearCache()
+
+    /** Preserve insulin history on a BG-only reload; evict bounded, obsolete entries. */
+    fun bgDataReloaded() { clearCache() }
+    fun historicalIobCacheMetrics(): Map<String, Long> = emptyMap()
+
+    /** Invalidate derived insulin values inclusively; implementations without a range cache reset. */
+    fun invalidateCacheFrom(timestamp: Long) { clearCache() }
 
     /**
      *  Calculate CobInfo to now()

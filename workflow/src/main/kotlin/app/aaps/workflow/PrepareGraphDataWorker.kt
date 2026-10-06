@@ -145,7 +145,9 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val startedAt = dateUtil.now()
         var outcome = "INTERRUPTED"
         try {
-            val result = if (inputData.getString(WorkflowChainData.JOB_KEY) == CalculationWorkflow.MAIN_CALCULATION)
+            val result = if (inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false))
+                workflowChainData.withGraphCalculation { executeOptionalGraph() }
+            else if (inputData.getString(WorkflowChainData.JOB_KEY) == CalculationWorkflow.MAIN_CALCULATION)
                 workflowChainData.withMainCalculation { executeWork() }
             else executeWork()
             outcome = if (result is Result.Success) "SUCCEEDED" else "FAILED"
@@ -155,8 +157,11 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             val sections = timings.entries.joinToString(" ") { "${it.key}Calls=${it.value.calls} ${it.key}Ms=${it.value.nanos / 1_000_000}" }
             aapsLogger.info(LTag.WORKER, "CalculationTiming job=${inputData.getString(WorkflowChainData.JOB_KEY)} generation=${inputData.getLong(WorkflowChainData.GEN_KEY, -1L)} startedAt=$startedAt finishedAt=${dateUtil.now()} stopped=$isStopped totalMs=${(System.nanoTime() - started) / 1_000_000} adsCacheHits=$adsCacheHits adsCacheMisses=$adsCacheMisses $sections")
             telemetry { (publishedEvidence ?: org.json.JSONObject()).put("stage","FINISHED").put("outcome",outcome)
+                .put("calculationRole", if (inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false)) "OPTIONAL_GRAPH" else "MANDATORY_OR_HISTORY")
                 .put("calculationStartedAt",startedAt).put("calculationFinishedAt",dateUtil.now()).put("stopped",isStopped)
                 .put("calculationMs",(System.nanoTime()-started)/1_000_000).put("adsCacheHits",adsCacheHits).put("adsCacheMisses",adsCacheMisses)
+                .put("historicalIobCache", org.json.JSONObject(workflowChainData.graphFor(inputData.getLong(WorkflowChainData.GEN_KEY, -1L))
+                    ?.iobCobCalculator?.historicalIobCacheMetrics().orEmpty()))
                 .put("components",org.json.JSONArray().apply { timings.forEach { (name,timing) ->
                     put(org.json.JSONObject().put("name",name).put("calls",timing.calls).put("durationMs",timing.nanos/1_000_000))
                 } }) }
@@ -171,7 +176,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
 
         data.invalidateFrom?.let {
             data.ads.newHistoryData(it, aapsLogger, dateUtil)
-            data.iobCobCalculator.clearCache()
+            data.iobCobCalculator.invalidateCacheFrom(it)
         }
 
         // ===== Phase 1: Load BG into ads + smooth (was LoadBgDataWorker) =====
@@ -179,7 +184,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             measured("load") { data.ads.loadBgData(data.end) }
             measured("smoothing") { data.ads.smoothData() }
             rxBus.send(EventBucketedDataCreated())
-            data.iobCobCalculator.clearCache()
+            data.iobCobCalculator.bgDataReloaded()
         }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
 
@@ -196,6 +201,11 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         // ===== Phases 4 & 5: IOB/COB autosens + graph data prep (was IobCobOref* + PrepareIobAutosens) =====
         measured("autosensTotal") { if (activePlugin.activeSensitivity.isOref1) runIobCobOref1(data) else runIobCobOref(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
+        if (inputData.getString(WorkflowChainData.JOB_KEY) == CalculationWorkflow.MAIN_CALCULATION) {
+            // The loop reads the published ADS/current insulin history, never these display series.
+            workflowChainData.graphReady(inputData.getLong(WorkflowChainData.GEN_KEY, -1L))
+            return Result.success()
+        }
         measured("iobGraph") { prepareIobAutosensGraphData(data) }
         if (isStopped) return Result.failure(workDataOf("Error" to "stopped"))
         data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_IOB, 100)
@@ -206,6 +216,14 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             data.signals.emitProgress(CalculationWorkflow.ProgressData.DRAW_FINAL, 100)
         }
 
+        return Result.success()
+    }
+
+    private suspend fun executeOptionalGraph(): Result {
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        val data = workflowChainData.graphFor(generation) ?: return Result.success()
+        if (!data.cache.hasIobGraphConsumers) return Result.success()
+        measured("optionalIobGraph") { prepareIobAutosensGraphData(data) }
         return Result.success()
     }
 
@@ -772,7 +790,8 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val adsData = data.ads.clone()
 
         while (time <= endTime) {
-            if (isStopped) return
+            if (isStopped || inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false) &&
+                workflowChainData.graphFor(inputData.getLong(WorkflowChainData.GEN_KEY, -1L)) == null) return
             val progress = (time - fromTime).toDouble() / (endTime - fromTime) * 100.0
             data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, progress.toInt())
             val profile = profileFunction.getProfile(time)
@@ -780,8 +799,8 @@ class PrepareGraphDataWorker @AssistedInject constructor(
                 time += 5 * 60 * 1000L
                 continue
             }
-            val iob = data.iobCobCalculator.calculateFromTreatmentsAndTemps(time, profile)
-            val baseBasalIob = data.iobCobCalculator.calculateAbsoluteIobFromBaseBasals(time)
+            val iob = measured("historyIob") { data.iobCobCalculator.calculateFromTreatmentsAndTemps(time, profile) }
+            val baseBasalIob = measured("historyBaseBasalIob") { data.iobCobCalculator.calculateAbsoluteIobFromBaseBasals(time) }
             val absIob = IobTotal.combine(iob, baseBasalIob)
             val autosensData = adsData.getAutosensDataAtTime(time)
 
@@ -826,14 +845,14 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val lastAutosensData = adsData.getLastAutosensData("GraphData", aapsLogger, dateUtil)
         val lastAutosensResult = lastAutosensData?.autosensResult ?: AutosensResult()
         val isTempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now()) != null
-        val iobPredictionArray = data.iobCobCalculator.calculateIobArrayForSMB(lastAutosensResult, SMBDefaults.exercise_mode, SMBDefaults.half_basal_exercise_target, isTempTarget)
+        val iobPredictionArray = measured("forecastIob") { data.iobCobCalculator.calculateIobArrayForSMB(lastAutosensResult, SMBDefaults.exercise_mode, SMBDefaults.half_basal_exercise_target, isTempTarget) }
         for (i in iobPredictionArray) {
             iobPredictionsListCompose.add(GraphDataPoint(i.time, i.iob))
         }
         aapsLogger.debug(LTag.AUTOSENS, "IOB prediction for AS=" + decimalFormatter.to2Decimal(lastAutosensResult.ratio) + ": " + data.iobCobCalculator.iobArrayToString(iobPredictionArray))
 
         val varSensListCompose: MutableList<GraphDataPoint> = ArrayList()
-        val apsResults = persistenceLayer.getApsResults(fromTime, endTime)
+        val apsResults = measured("apsResultReadDecode") { persistenceLayer.getApsResults(fromTime, endTime) }
         apsResults.forEach {
             it.variableSens?.let { variableSens ->
                 val varSens = profileUtil.fromMgdlToUnits(variableSens)
@@ -841,6 +860,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             }
         }
 
+        val publish = {
         data.cache.updateIobGraph(IobGraphData(iob = iobListCompose, predictions = iobPredictionsListCompose))
         data.cache.updateAbsIobGraph(AbsIobGraphData(absIob = absIobListCompose))
         data.cache.updateCobGraph(CobGraphData(cob = cobListCompose, failOverPoints = cobFailOverListCompose))
@@ -856,6 +876,16 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         data.cache.updateRatioGraph(RatioGraphData(ratio = ratioListCompose))
         data.cache.updateDevSlopeGraph(DevSlopeGraphData(dsMax = dsMaxListCompose, dsMin = dsMinListCompose))
         data.cache.updateVarSensGraph(VarSensGraphData(varSens = varSensListCompose))
+        }
+        // Window changes are independently owned by history navigation/predictions.
+        var rangePublished = false
+        val publishForRange = { rangePublished = data.cache.publishIobGraphForRange(cacheTimeRange, publish) }
+        val job = inputData.getString(WorkflowChainData.JOB_KEY)
+        val generation = inputData.getLong(WorkflowChainData.GEN_KEY, -1L)
+        val published = if (inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false))
+            workflowChainData.publishGraphIfCurrent(generation, { isStopped }, publishForRange)
+        else workflowChainData.publishIfCurrent(job, generation, { isStopped }, publishForRange)
+        if (!published || !rangePublished) return
 
         data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 100)
     }

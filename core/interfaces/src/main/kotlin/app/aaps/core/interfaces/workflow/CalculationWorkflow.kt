@@ -74,4 +74,6 @@ interface CalculationWorkflow {
      * Update predictions in graph ofter new data from device status
      */
     fun runOnReceivedPredictions(overviewData: OverviewData)
+
+    fun requestOptionalGraph(cache: OverviewDataCache)
 }

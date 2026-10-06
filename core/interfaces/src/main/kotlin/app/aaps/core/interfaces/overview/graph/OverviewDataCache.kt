@@ -16,12 +16,20 @@ import kotlinx.coroutines.flow.StateFlow
  * After migration complete, OverviewDataImpl will be deleted.
  */
 interface OverviewDataCache {
+    /** Includes every flow consumer, regardless of screen visibility. Legacy caches stay conservative. */
+    val hasIobGraphConsumers: Boolean get() = true
 
     // =========================================================================
     // Time range
     // =========================================================================
     val timeRangeFlow: StateFlow<TimeRange?>
     fun updateTimeRange(range: TimeRange?)
+    /** Range check and all graph updates share the range-owner monitor in the live cache. */
+    fun publishIobGraphForRange(range: TimeRange?, publish: () -> Unit): Boolean {
+        if (timeRangeFlow.value != range) return false
+        publish()
+        return true
+    }
 
     // Calculation progress (0-100)
     val calcProgressFlow: StateFlow<Int>

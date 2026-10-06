@@ -205,6 +205,10 @@ class OverviewDataCacheImpl @AssistedInject constructor(
         scope.launch { updateTbrFromDatabase() }
     }
 
+    override val hasIobGraphConsumers: Boolean
+        get() = listOf(_iobGraphFlow, _absIobGraphFlow, _cobGraphFlow, _activityGraphFlow, _bgiGraphFlow,
+            _deviationsGraphFlow, _ratioGraphFlow, _devSlopeGraphFlow, _varSensGraphFlow).any { it.subscriptionCount.value > 0 }
+
     // Secondary graph flows
     private val _iobGraphFlow = MutableStateFlow(IobGraphData(emptyList(), emptyList()))
     override val iobGraphFlow: StateFlow<IobGraphData> = _iobGraphFlow.asStateFlow()
@@ -244,6 +248,14 @@ class OverviewDataCacheImpl @AssistedInject constructor(
     override val nsClientStatusFlow: StateFlow<AapsClientStatusData> = _nsClientStatusFlow.asStateFlow()
 
     init {
+        scope.launch {
+            merge(_iobGraphFlow.subscriptionCount, _absIobGraphFlow.subscriptionCount, _cobGraphFlow.subscriptionCount,
+                _activityGraphFlow.subscriptionCount, _bgiGraphFlow.subscriptionCount, _deviationsGraphFlow.subscriptionCount,
+                _ratioGraphFlow.subscriptionCount, _devSlopeGraphFlow.subscriptionCount, _varSensGraphFlow.subscriptionCount)
+                .map { hasIobGraphConsumers }.distinctUntilChanged().collect { active ->
+                    if (active) rxBus.send(app.aaps.core.interfaces.rx.events.EventIobGraphRequested(this@OverviewDataCacheImpl))
+                }
+        }
         // Scope-agnostic: always bridge calculation progress into the flow.
         scope.launch {
             signals.progress.collect { _calcProgressFlow.value = it }
@@ -264,6 +276,7 @@ class OverviewDataCacheImpl @AssistedInject constructor(
                     rebuildBasalGraph()
                     rebuildHeartRateGraph()
                     rebuildStepsGraph()
+                    if (hasIobGraphConsumers) rxBus.send(app.aaps.core.interfaces.rx.events.EventIobGraphRequested(this@OverviewDataCacheImpl))
                 }
         }
 
@@ -671,8 +684,14 @@ class OverviewDataCacheImpl @AssistedInject constructor(
     // Update methods
     // =========================================================================
 
-    override fun updateTimeRange(range: TimeRange?) {
+    @Synchronized override fun updateTimeRange(range: TimeRange?) {
         _timeRangeFlow.value = range
+    }
+
+    @Synchronized override fun publishIobGraphForRange(range: TimeRange?, publish: () -> Unit): Boolean {
+        if (_timeRangeFlow.value != range) return false
+        publish()
+        return true
     }
 
     override fun updateBgReadings(data: List<BgDataPoint>) {
@@ -880,10 +899,11 @@ class OverviewDataCacheImpl @AssistedInject constructor(
         loop.lastRun?.constraintsProcessed?.let { endTime = max(it.latestPredictionsTime, endTime) }
 
         val targets = mutableListOf<GraphDataPoint>()
+        val temporaryTargets = persistenceLayer.getTemporaryTargetsActiveBetweenTimeAndTime(fromTime, endTime).sortedByDescending { it.timestamp }
         var lastTarget = -1.0
         var time = fromTime
         while (time < endTime) {
-            val tt = persistenceLayer.getTemporaryTargetActiveAt(time)
+            val tt = temporaryTargets.firstOrNull { it.timestamp <= time && it.timestamp + it.duration > time }
             val value = if (tt != null) {
                 profileUtil.fromMgdlToUnits(tt.target())
             } else {
@@ -905,6 +925,7 @@ class OverviewDataCacheImpl @AssistedInject constructor(
         val (fromTime, toTime) = graphTimeRange() ?: return
         val profileBasal = mutableListOf<GraphDataPoint>()
         val actualBasal = mutableListOf<GraphDataPoint>()
+        val basals = iobCobCalculator.getBasalDataForRange(fromTime, toTime)
         var lastProfileBasal = -1.0
         var lastActualBasal = -1.0
         var maxBasal = 0.0
@@ -916,7 +937,7 @@ class OverviewDataCacheImpl @AssistedInject constructor(
                 time += 60 * 1000L
                 continue
             }
-            val basalData = iobCobCalculator.getBasalData(profile, time)
+            val basalData = basals.at(profile, time)
             val profileBasalValue = basalData.basal
             val actualBasalValue = if (basalData.isTempBasalRunning) basalData.tempBasalAbsolute else profileBasalValue
 
@@ -1060,7 +1081,7 @@ class OverviewDataCacheImpl @AssistedInject constructor(
     }
 
     override fun reset() {
-        _timeRangeFlow.value = null
+        updateTimeRange(null)
         _bgReadingsFlow.value = emptyList()
         _bucketedDataFlow.value = emptyList()
         _predictionsFlow.value = emptyList()

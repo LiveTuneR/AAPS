@@ -1054,6 +1054,9 @@ interface PersistenceLayer {
      */
     suspend fun getExtendedBolusActiveAt(timestamp: Long): EB?
 
+    /** Valid current records overlapping the window, newest first. */
+    suspend fun getExtendedBolusesActiveBetweenTimeAndTime(startTime: Long, endTime: Long): List<EB>
+
     /**
      * Get latest extended bolus
      *
@@ -1165,6 +1168,9 @@ interface PersistenceLayer {
      * @return running temporary target or null if none is running
      */
     suspend fun getTemporaryTargetActiveAt(timestamp: Long): TT?
+
+    /** Includes records that started before the left boundary. */
+    suspend fun getTemporaryTargetsActiveBetweenTimeAndTime(startTime: Long, endTime: Long): List<TT>
 
     /**
      *  Get highest id in database

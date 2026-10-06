@@ -67,6 +67,26 @@ class WorkflowChainData @Inject constructor(
     private val generator = AtomicLong()
     internal var mainScheduler: LatestPendingCalculation? = null
     private val mainCalculationMutex = Mutex()
+    private val graphCalculationMutex = Mutex()
+    private var graphReadyGeneration: Long? = null
+
+    internal suspend fun <T> withGraphCalculation(block: suspend () -> T): T = graphCalculationMutex.withLock { block() }
+
+    @Synchronized fun graphReady(generation: Long): Boolean {
+        if (activeGeneration(MAIN_CALCULATION) != generation || mainScheduler?.isCurrent(generation) == false) return false
+        graphReadyGeneration = generation
+        return true
+    }
+
+    @Synchronized fun graphFor(generation: Long): PrepareGraphDataWorker.PrepareGraphData? =
+        mainChain?.takeIf { it.generation == generation && graphReadyGeneration == generation }?.prepare
+
+    /** Display publication survives scheduler completion, but never a slot replacement/history fence. */
+    @Synchronized fun publishGraphIfCurrent(generation: Long, stopped: () -> Boolean, publish: () -> Unit): Boolean {
+        if (stopped() || graphFor(generation) == null) return false
+        publish()
+        return true
+    }
 
     internal suspend fun <T> withMainCalculation(block: suspend () -> T): T = mainCalculationMutex.withLock { block() }
 
@@ -175,5 +195,6 @@ class WorkflowChainData @Inject constructor(
 
         const val JOB_KEY = "job"
         const val GEN_KEY = "gen"
+        const val GRAPH_ONLY_KEY = "graphOnly"
     }
 }

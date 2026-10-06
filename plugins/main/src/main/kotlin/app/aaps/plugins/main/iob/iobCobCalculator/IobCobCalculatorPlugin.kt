@@ -1,6 +1,5 @@
 package app.aaps.plugins.main.iob.iobCobCalculator
 
-import androidx.collection.LongSparseArray
 import app.aaps.core.data.aps.BasalData
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.iob.CobInfo
@@ -112,8 +111,7 @@ class IobCobCalculatorPlugin @Inject constructor(
     private val disposable = CompositeDisposable()
     private var scope: CoroutineScope? = null
 
-    private var iobTable = LongSparseArray<IobTotal>() // oldest at index 0
-    private var basalDataTable = LongSparseArray<BasalData>() // oldest at index 0
+    private val historicalIobCache = HistoricalIobCache()
 
     @Volatile override var ads: AutosensDataStore = AutosensDataStoreObject()
     override val loopHealth = app.aaps.core.data.diagnostics.LoopHealthTracker()
@@ -125,6 +123,13 @@ class IobCobCalculatorPlugin @Inject constructor(
         historyWorker = Executors.newSingleThreadScheduledExecutor()
         val newScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         scope = newScope
+        disposable += rxBus.toObservable(app.aaps.core.interfaces.rx.events.EventCalculationTimeChanged::class.java)
+            .subscribe({ resetDataAndRunCalculation("timeChange") }, fabricPrivacy::logException)
+        persistenceLayer.databaseClearedFlow.collectInput(newScope, "databaseCleared") {
+            resetDataAndRunCalculation("databaseCleared")
+        }
+        disposable += rxBus.toObservable(app.aaps.core.interfaces.rx.events.EventIobGraphRequested::class.java)
+            .subscribe({ calculationWorkflow.requestOptionalGraph(it.cache) }, fabricPrivacy::logException)
         // EventConfigBuilderChange
         disposable += rxBus
             .toObservable(EventConfigBuilderChange::class.java)
@@ -251,9 +256,16 @@ class IobCobCalculatorPlugin @Inject constructor(
     override fun clearCache() {
         synchronized(dataLock) {
             aapsLogger.debug(LTag.AUTOSENS, "Clearing cached data.")
-            iobTable = LongSparseArray()
-            basalDataTable = LongSparseArray()
+            historicalIobCache.invalidate("reset")
         }
+    }
+
+    override fun bgDataReloaded() { historicalIobCache.prune(dateUtil.now()) }
+    override fun invalidateCacheFrom(timestamp: Long) { historicalIobCache.invalidate("range", timestamp) }
+    internal fun cacheStats() = historicalIobCache.stats()
+    override fun historicalIobCacheMetrics(): Map<String, Long> = historicalIobCache.stats().let { stats ->
+        mapOf("hits" to stats.hits, "misses" to stats.misses, "entries" to stats.entries.toLong(), "rejectedWrites" to stats.rejectedWrites) +
+            stats.invalidations.mapKeys { "invalidation_${it.key}" }
     }
 
     private suspend fun oldestDataAvailable(): Long {
@@ -285,13 +297,18 @@ class IobCobCalculatorPlugin @Inject constructor(
     }
 
     override suspend fun calculateFromTreatmentsAndTemps(toTime: Long, profile: EffectiveProfile): IobTotal {
-        val now = System.currentTimeMillis()
+        repeat(3) {
+            val result = calculateHistoricalIob(toTime, profile)
+            if (result != null) return result
+        }
+        throw CancellationException("Insulin history changed during calculation")
+    }
+
+    private suspend fun calculateHistoricalIob(toTime: Long, profile: EffectiveProfile): IobTotal? {
+        val now = dateUtil.now()
         val time = ads.roundUpTime(toTime)
-        val cacheHit = iobTable[time]
-        if (time < now && cacheHit != null) {
-            //og.debug(">>> calculateFromTreatmentsAndTemps Cache hit " + new Date(time).toLocaleString());
-            return cacheHit
-        } // else log.debug(">>> calculateFromTreatmentsAndTemps Cache miss " + new Date(time).toLocaleString());
+        val lookup = historicalIobCache.lookup(time, now)
+        lookup.value?.let { return it }
         val bolusIob = calculateIobFromBolusToTime(time).round()
         val basalIob = calculateIobToTimeFromTempBasalsIncludingConvertedExtended(time).round()
         // OpenAPSSMB only
@@ -310,12 +327,7 @@ class IobCobCalculatorPlugin @Inject constructor(
         }
         basalIob.iobWithZeroTemp = IobTotal.combine(bolusIob, basalIobWithZeroTemp).round()
         val iobTotal = IobTotal.combine(bolusIob, basalIob).round()
-        if (time < System.currentTimeMillis()) {
-            synchronized(dataLock) {
-                iobTable.put(time, iobTotal)
-            }
-        }
-        return iobTotal
+        return if (historicalIobCache.store(time, now, lookup.revision, iobTotal)) iobTotal else null
     }
 
     private suspend fun calculateFromTreatmentsAndTemps(time: Long, lastAutosensResult: AutosensResult, exerciseMode: Boolean, halfBasalExerciseTarget: Int, isTempTarget: Boolean): IobTotal {
@@ -344,12 +356,8 @@ class IobCobCalculatorPlugin @Inject constructor(
     }
 
     override suspend fun getBasalData(profile: Profile, fromTime: Long): BasalData {
-        val now = System.currentTimeMillis()
         val time = ads.roundUpTime(fromTime)
-        var retVal = basalDataTable[time]
-        if (retVal == null) {
-            //log.debug(">>> getBasalData Cache miss " + new Date(time).toLocaleString());
-            retVal = BasalData()
+        return BasalData().also { retVal ->
             val tb = processedTbrEbData.getTempBasalIncludingConvertedExtended(time)
             retVal.basal = profile.getBasal(time)
             if (tb != null) {
@@ -359,13 +367,25 @@ class IobCobCalculatorPlugin @Inject constructor(
                 retVal.isTempBasalRunning = false
                 retVal.tempBasalAbsolute = retVal.basal
             }
-            if (time < now) {
-                synchronized(dataLock) {
-                    basalDataTable.append(time, retVal)
+        }
+    }
+
+    override suspend fun getBasalDataForRange(startTime: Long, endTime: Long): IobCobCalculator.BasalDataInRange {
+        // Preserve the point API's bucket rounding and the caller's profile.
+        val store = ads
+        val temps = processedTbrEbData.getTempBasalsIncludingConvertedExtended(startTime - 300_000L, endTime + 300_000L)
+        return object : IobCobCalculator.BasalDataInRange {
+            override suspend fun at(profile: Profile, fromTime: Long): BasalData {
+                require(fromTime in startTime..endTime)
+                val time = store.roundUpTime(fromTime)
+                val temp = temps.at(time)
+                return BasalData().apply {
+                    basal = profile.getBasal(time)
+                    isTempBasalRunning = temp != null
+                    tempBasalAbsolute = temp?.convertedToAbsolute(time, profile) ?: basal
                 }
             }
-        } //else log.debug(">>> getBasalData Cache hit " +  new Date(time).toLocaleString());
-        return retVal
+        }
     }
 
     override fun getLastAutosensDataWithWaitForCalculationFinish(reason: String): AutosensData? {
@@ -474,6 +494,9 @@ class IobCobCalculatorPlugin @Inject constructor(
     @Synchronized
     fun scheduleHistoryDataChange(oldDataTimestamp: Long, reloadBgData: Boolean, triggeredByNewBG: Boolean = false,
                                   therapyChange: Boolean = !triggeredByNewBG, newestBgTimestamp: Long? = null) {
+        // Before the debounce, fence any suspended reader. Changed records can have moved their
+        // timestamp, so a therapy mutation conservatively resets the entire insulin cache.
+        if (therapyChange) historicalIobCache.invalidate("historyMutation")
         val executor = historyWorker ?: run {
             aapsLogger.warn(LTag.AUTOSENS, "History scheduler unavailable")
             return
@@ -538,22 +561,7 @@ class IobCobCalculatorPlugin @Inject constructor(
             // clear up 5 min back for proper COB calculation
             val time = oldDataTimestamp - 5 * 60 * 1000L
             aapsLogger.debug(LTag.AUTOSENS, "Invalidating cached data to: " + dateUtil.dateAndTimeAndSecondsString(time))
-            for (index in iobTable.size() - 1 downTo 0) {
-                if (iobTable.keyAt(index) > time) {
-                    aapsLogger.debug(LTag.AUTOSENS, "Removing from iobTable: " + dateUtil.dateAndTimeAndSecondsString(iobTable.keyAt(index)))
-                    iobTable.removeAt(index)
-                } else {
-                    break
-                }
-            }
-            for (index in basalDataTable.size() - 1 downTo 0) {
-                if (basalDataTable.keyAt(index) > time) {
-                    aapsLogger.debug(LTag.AUTOSENS, "Removing from basalDataTable: " + dateUtil.dateAndTimeAndSecondsString(basalDataTable.keyAt(index)))
-                    basalDataTable.removeAt(index)
-                } else {
-                    break
-                }
-            }
+            historicalIobCache.invalidate("historyReload", time)
             ads.newHistoryData(time, aapsLogger, dateUtil)
         }
         calculationWorkflow.runCalculation(
