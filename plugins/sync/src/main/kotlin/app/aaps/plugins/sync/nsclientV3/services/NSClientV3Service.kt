@@ -45,6 +45,8 @@ import io.socket.client.Socket
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
@@ -69,6 +71,8 @@ class NSClientV3Service : DaggerService() {
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private val disposable = CompositeDisposable()
+    private val incomingMutex = Mutex()
+    private val durableOperations by lazy { DurableNetworkOperations(appScope, networkWakeScope) }
 
     internal var networkWakeScope = NetworkWakeScope { timeout ->
         val lock = (getSystemService(POWER_SERVICE) as PowerManager)
@@ -87,6 +91,7 @@ class NSClientV3Service : DaggerService() {
         super.onDestroy()
         shutdownWebsockets()
         disposable.clear()
+        durableOperations.close()
         networkWakeScope.close()
     }
 
@@ -105,6 +110,10 @@ class NSClientV3Service : DaggerService() {
     var alarmSocket: Socket? = null
 
     private fun awakeListener(block: (Array<Any>) -> Unit) = Emitter.Listener { args ->
+        networkWakeScope.lease().use { block(args) }
+    }
+
+    private fun awakeAck(block: (Array<Any>) -> Unit) = Ack { args ->
         networkWakeScope.lease().use { block(args) }
     }
 
@@ -215,7 +224,7 @@ class NSClientV3Service : DaggerService() {
                 it.put("collections", JSONArray(arrayOf("devicestatus", "entries", "profile", "treatments", "foods", "settings")))
             }
             nsClientRepository.addLog("► WS", "requesting auth for storage")
-            storageSocket?.emit("subscribe", authMessage, Ack { args ->
+            storageSocket?.emit("subscribe", authMessage, awakeAck { args ->
                 val response = args[0] as JSONObject
                 wsConnected = if (response.optBoolean("success")) {
                     nsClientRepository.addLog("◄ WS", "Subscribed for: ${response.optString("collections")}")                    // during disconnection updated data is not received
@@ -241,7 +250,7 @@ class NSClientV3Service : DaggerService() {
                 it.put("accessToken", preferences.get(StringKey.NsClientAccessToken))
             }
             nsClientRepository.addLog("► WS", "requesting auth for alarms")
-            socket.emit("subscribe", authMessage, Ack { args ->
+            socket.emit("subscribe", authMessage, awakeAck { args ->
                 val response = args[0] as JSONObject
                 if (response.optBoolean("success")) nsClientRepository.addLog("◄ WS", response.optString("message"))
                 else nsClientRepository.addLog("◄ WS", "Auth failed")
@@ -264,46 +273,49 @@ class NSClientV3Service : DaggerService() {
 
     private val onDataCreateUpdate = awakeListener { args ->
         val response = args[0] as JSONObject
-        aapsLogger.debug(LTag.NSCLIENT, "onDataCreateUpdate: $response")
+        aapsLogger.debug(LTag.NSCLIENT) { "onDataCreateUpdate collection=${response.optString("colName")}" }
         val collection = response.getString("colName")
         val docJson = response.getJSONObject("doc")
         val docString = response.getString("doc")
         nsClientRepository.addLog("◄ WS CREATE/UPDATE", collection, docJson)
         val srvModified = docJson.getLong("srvModified")
-        // Don't advance the high-water-mark until the initial catch-up load chain
-        // has finished after a (re)connect. Otherwise the Load*Worker chain would
-        // query "modifiedSince (just-bumped pointer)" and skip exactly the offline
-        // window we need to backfill.
-        if (nsClientV3Plugin.initialLoadFinished) {
-            nsClientV3Plugin.lastLoadedSrvModified.set(collection, srvModified)
-            nsClientV3Plugin.storeLastLoadedSrvModified()
-        }
+        // WebSocket delivery is incremental and may arrive out of order. Only the REST
+        // catch-up workers commit the durable high-water mark. Even after initial load,
+        // advancing it here can skip earlier in-flight or lost RAM entries on restart.
+        // Reconnect replays the durable REST window through the existing idempotent upserts.
         when (collection) {
             "devicestatus" -> docString.toNSDeviceStatus().let { nsDeviceStatusHandler.handleNewData(arrayOf(it), live = true) }
 
             "entries"      -> {
-                docString.toNSSgvV3()?.let {
-                    nsIncomingDataProcessor.processSgvs(listOf(it), doFullSync = false)
-                    storeDataForDb.requestStoreGlucoseValues()
-                }
-                // Same entries collection also carries AAPS calibration mbg entries (marked).
-                docString.toCalibrationMbg()?.let {
-                    nsIncomingDataProcessor.processCalibrations(listOf(it), doFullSync = false)
-                    storeDataForDb.requestStoreCalibrationEntries()
+                durableOperations.launch {
+                    incomingMutex.withLock {
+                        docString.toNSSgvV3()?.let {
+                            nsIncomingDataProcessor.processSgvs(listOf(it), doFullSync = false)
+                            storeDataForDb.storeGlucoseValuesToDb()
+                        }
+                        docString.toCalibrationMbg()?.let {
+                            nsIncomingDataProcessor.processCalibrations(listOf(it), doFullSync = false)
+                            storeDataForDb.storeCalibrationEntriesToDb()
+                        }
+                    }
                 }
             }
 
             "profile"      ->
-                appScope.launch { networkWakeScope.lease().use { nsIncomingDataProcessor.processProfile(docJson, doFullSync = false) } }
+                durableOperations.launch { incomingMutex.withLock { nsIncomingDataProcessor.processProfile(docJson, doFullSync = false) } }
 
             "treatments"   -> docString.toNSTreatment()?.let {
-                nsIncomingDataProcessor.processTreatments(listOf(it), doFullSync = false)
-                storeDataForDb.requestStoreTreatments(fullSync = false)
+                durableOperations.launch { incomingMutex.withLock {
+                    nsIncomingDataProcessor.processTreatments(listOf(it), doFullSync = false)
+                    storeDataForDb.storeTreatmentsToDb(fullSync = false)
+                } }
             }
 
             "foods"        -> docString.toNSFood()?.let {
-                nsIncomingDataProcessor.processFood(listOf(it))
-                storeDataForDb.requestStoreFoods()
+                durableOperations.launch { incomingMutex.withLock {
+                    nsIncomingDataProcessor.processFood(listOf(it))
+                    storeDataForDb.storeFoodsToDb()
+                } }
             }
 
             "settings"     -> {
@@ -346,17 +358,21 @@ class NSClientV3Service : DaggerService() {
 
     private val onDataDelete = awakeListener { args ->
         val response = args[0] as JSONObject
-        aapsLogger.debug(LTag.NSCLIENT, "onDataDelete: $response")
+        aapsLogger.debug(LTag.NSCLIENT) { "onDataDelete collection=${response.optString("colName")}" }
         val collection = response.optString("colName") ?: return@awakeListener
         val identifier = response.optString("identifier") ?: return@awakeListener
         nsClientRepository.addLog("◄ WS DELETE", "$collection $identifier")
         if (collection == "treatments") {
-            storeDataForDb.addToDeleteTreatment(identifier)
-            storeDataForDb.requestUpdateDeletedTreatments()
+            durableOperations.launch { incomingMutex.withLock {
+                storeDataForDb.addToDeleteTreatment(identifier)
+                storeDataForDb.updateDeletedTreatmentsInDb()
+            } }
         }
         if (collection == "entries") {
-            storeDataForDb.addToDeleteGlucoseValue(identifier)
-            storeDataForDb.requestUpdateDeletedGlucoseValues()
+            durableOperations.launch { incomingMutex.withLock {
+                storeDataForDb.addToDeleteGlucoseValue(identifier)
+                storeDataForDb.updateDeletedGlucoseValuesInDb()
+            } }
         }
     }
 
