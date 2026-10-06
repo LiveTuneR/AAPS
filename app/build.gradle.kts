@@ -93,6 +93,7 @@ android {
         buildConfigField("String", "BUILDVERSION", "\"${generateGitBuild()}-${generateDate()}\"")
         buildConfigField("String", "REMOTE", "\"${generateGitRemote()}\"")
         buildConfigField("String", "HEAD", "\"${generateGitBuild()}\"")
+        buildConfigField("String", "SOURCE_SHA", "\"${providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText.get().trim()}\"")
         buildConfigField("String", "COMMITTED", "\"${allCommitted()}\"")
 
         // For Hilt injected instrumentation tests in app module

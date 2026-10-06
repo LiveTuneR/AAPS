@@ -6,7 +6,7 @@ object Versions {
 
     // On change edit aaps-ci.yml
     const val appVersion = "4.0.0-beta-apex7"
-    const val versionCode = 2006
+    const val versionCode = 2007
 
     const val compileSdk = 37
     const val minSdk = 31

@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "source": "SYNTHETIC_IN_MEMORY_SQLITE",
+  "sqliteVersion": "3.50.4",
+  "roomSchema": "database\\impl\\schemas\\app.aaps.database.AppDatabase\\35.json",
+  "roomSchemaSha256": "eda6e6ee8c0378ea8b6504dacc8afad8489df65d3b5a3552d9c14c9c54bf096d",
+  "clock": "perf_counter_ns",
+  "batteryMeasured": false,
+  "samplesPerScenario": 12,
+  "results": [
+    {
+      "table": "temporaryBasals",
+      "rows": 10809,
+      "slots": 2881,
+      "equalityAssertions": 2885,
+      "pointQueries": 2881,
+      "rangeQueries": 1,
+      "point": "SELECT * FROM temporaryBasals WHERE (timestamp <= :timestamp) AND ((timestamp + duration) > :timestamp) AND (referenceId IS NULL) AND (isValid = 1) ORDER BY timestamp DESC LIMIT 1",
+      "range": "SELECT * FROM temporaryBasals WHERE (timestamp <= :to) AND ((timestamp + duration) > :from) AND (referenceId IS NULL) AND (isValid = 1) ORDER BY timestamp DESC",
+      "pointPlan": [
+        [
+          5,
+          0,
+          68,
+          "SEARCH temporaryBasals USING INDEX index_temporaryBasals_referenceId (referenceId=?)"
+        ],
+        [
+          47,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ],
+      "rangePlan": [
+        [
+          4,
+          0,
+          68,
+          "SEARCH temporaryBasals USING INDEX index_temporaryBasals_referenceId (referenceId=?)"
+        ],
+        [
+          41,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ],
+      "pointTiming": {
+        "n": 12,
+        "p50Ms": 2925.128,
+        "p95Ms": 3173.4276,
+        "p99Ms": 3173.4276,
+        "maxMs": 3338.9981
+      },
+      "rangeTiming": {
+        "n": 12,
+        "p50Ms": 12.937100000000001,
+        "p95Ms": 18.1172,
+        "p99Ms": 18.1172,
+        "maxMs": 21.8898
+      },
+      "querySha256": "676e9504e8572c556dc20f52af715f5d1822a96951c6d57cb18811a9e6c0e30c"
+    },
+    {
+      "table": "temporaryTargets",
+      "rows": 10809,
+      "slots": 2881,
+      "equalityAssertions": 2885,
+      "pointQueries": 2881,
+      "rangeQueries": 1,
+      "point": "SELECT * FROM temporaryTargets WHERE (timestamp <= :timestamp) AND ((timestamp + duration) > :timestamp) AND (referenceId IS NULL) AND (isValid = 1) ORDER BY timestamp DESC LIMIT 1",
+      "range": "SELECT * FROM temporaryTargets WHERE timestamp <= :to AND (timestamp + duration) > :from AND referenceId IS NULL AND isValid = 1 ORDER BY timestamp DESC",
+      "pointPlan": [
+        [
+          5,
+          0,
+          68,
+          "SEARCH temporaryTargets USING INDEX index_temporaryTargets_referenceId (referenceId=?)"
+        ],
+        [
+          48,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ],
+      "rangePlan": [
+        [
+          4,
+          0,
+          68,
+          "SEARCH temporaryTargets USING INDEX index_temporaryTargets_referenceId (referenceId=?)"
+        ],
+        [
+          42,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ],
+      "pointTiming": {
+        "n": 12,
+        "p50Ms": 2344.3202499999998,
+        "p95Ms": 2829.8085,
+        "p99Ms": 2829.8085,
+        "maxMs": 2942.1559
+      },
+      "rangeTiming": {
+        "n": 12,
+        "p50Ms": 12.31785,
+        "p95Ms": 18.7731,
+        "p99Ms": 18.7731,
+        "maxMs": 31.2912
+      },
+      "querySha256": "0d87bb7ec3babf04a17e428c9ed6c198b29460502ac75dd011fb4191e8673587"
+    },
+    {
+      "table": "extendedBoluses",
+      "rows": 10809,
+      "slots": 2881,
+      "equalityAssertions": 2885,
+      "pointQueries": 2881,
+      "rangeQueries": 1,
+      "point": "SELECT * FROM extendedBoluses WHERE (timestamp <= :timestamp) AND ((timestamp + duration) > :timestamp) AND (referenceId IS NULL) AND (isValid = 1) ORDER BY timestamp DESC LIMIT 1",
+      "range": "SELECT * FROM extendedBoluses WHERE timestamp <= :to AND (timestamp + duration) > :from AND referenceId IS NULL AND isValid = 1 ORDER BY timestamp DESC",
+      "pointPlan": [
+        [
+          5,
+          0,
+          68,
+          "SEARCH extendedBoluses USING INDEX index_extendedBoluses_referenceId (referenceId=?)"
+        ],
+        [
+          46,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ],
+      "rangePlan": [
+        [
+          4,
+          0,
+          68,
+          "SEARCH extendedBoluses USING INDEX index_extendedBoluses_referenceId (referenceId=?)"
+        ],
+        [
+          40,
+          0,
+          0,
+          "USE TEMP B-TREE FOR ORDER BY"
+        ]
+      ],
+      "pointTiming": {
+        "n": 12,
+        "p50Ms": 2292.99125,
+        "p95Ms": 2757.4736,
+        "p99Ms": 2757.4736,
+        "maxMs": 2879.7911
+      },
+      "rangeTiming": {
+        "n": 12,
+        "p50Ms": 11.32975,
+        "p95Ms": 19.5955,
+        "p99Ms": 19.5955,
+        "maxMs": 26.0127
+      },
+      "querySha256": "7d26bcd554bd38c432e5af7e4fa51b965a0659de21ea81c5d7515f10beb0809b"
+    }
+  ],
+  "hostPlatform": "Windows-11-10.0.26200-SP0",
+  "pythonVersion": "3.13.14",
+  "conditions": "Windows host, other Gradle validation active; synthetic fixture, elapsed timings, not release/device energy comparison"
+}

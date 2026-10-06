@@ -48,6 +48,7 @@ android {
         targetSdk = Versions.wearTargetSdk
 
         buildConfigField("String", "BUILDVERSION", "\"${generateGitBuild()}-${generateDate()}\"")
+        buildConfigField("String", "SOURCE_SHA", "\"${providers.exec { commandLine("git", "rev-parse", "HEAD") }.standardOutput.asText.get().trim()}\"")
     }
 
     android {

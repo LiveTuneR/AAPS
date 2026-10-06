@@ -188,7 +188,7 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
         super.onCreate()
 
         // Here should be everything injected
-        aapsLogger.debug("onCreate")
+        aapsLogger.debug("onCreate source=${BuildConfig.SOURCE_SHA}")
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleListener.get())
 
         // Background fallback for EventShowSnackbar: when no activity is STARTED

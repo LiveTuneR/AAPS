@@ -1,0 +1,12 @@
+{
+  "observations": 100,
+  "newJsonlBytes": 491,
+  "newStoreSyncs": 3,
+  "scope": "store only; admission WAL syncs separate",
+  "oldJsonlBytes": 38176,
+  "oldAppends": 100,
+  "source": "SYNTHETIC_REPEATED_STATE_BURST",
+  "oldStoreSyncs": 102,
+  "batteryMeasured": false,
+  "newAppends": 1
+}

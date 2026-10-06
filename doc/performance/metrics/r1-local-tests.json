@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "da3220a5982000b63940f03004fa3a51af531017",
+  "branch": "codex/energy-r1-2026-10-06",
+  "runUtc": "2026-10-06T07:37:04.165548+00:00",
+  "buildVariant": "fullDebugUnitTest",
+  "java": 21,
+  "sourceStatus": "tested R1 working tree, pre-publication",
+  "gradleResult": "BUILD SUCCESSFUL",
+  "elapsed": "3m53s",
+  "modules": [
+    {
+      "module": "workflow",
+      "suites": 7,
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/main",
+      "suites": 13,
+      "tests": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/sensitivity",
+      "suites": 6,
+      "tests": 58,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/interfaces",
+      "suites": 9,
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/sync",
+      "suites": 107,
+      "tests": 851,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "pump/apex",
+      "suites": 8,
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "suites": 8,
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "pump/medtrum",
+      "suites": 34,
+      "tests": 145,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/aps",
+      "suites": 34,
+      "tests": 296,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/smoothing",
+      "suites": 1,
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "implementation",
+      "suites": 81,
+      "tests": 743,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "shared/impl",
+      "suites": 5,
+      "tests": 102,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "ui",
+      "suites": 112,
+      "tests": 415,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "wear",
+      "suites": 48,
+      "tests": 265,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "database/impl",
+      "suites": 79,
+      "tests": 393,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "database/persistence",
+      "suites": 16,
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "totals": {
+    "tests": 3562,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "logSha256": "76b279f4bab03dc46fde88b8bb035e631120fd2eda1d3599f82592ef5195f8d8",
+  "unchangedTasksMayBeUpToDate": true,
+  "priorTransientFailure": {
+    "test": "Garmin HttpServerTest.testRequest_NotFound",
+    "error": "Connection reset",
+    "baselinePassed": true,
+    "finalFullSuitePassed": true,
+    "excluded": false
+  },
+  "deviceEnergyValidation": "PENDING"
+}

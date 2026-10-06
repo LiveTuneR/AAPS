@@ -32,7 +32,7 @@ class WearApp : DaggerApplication() {
     override fun onCreate() {
         super.onCreate()
         exceptionHandlerWear.register()
-        aapsLogger.debug(LTag.WEAR, "onCreate")
+        aapsLogger.debug(LTag.WEAR, "onCreate source=${BuildConfig.SOURCE_SHA}")
         // Keep an installed Watch Face Push face in sync with the app version (Wear OS 6+ only)
         CoroutineScope(Dispatchers.IO).launch { watchFacePushHelper.syncOnStartup() }
         PreferenceManager.getDefaultSharedPreferences(this).registerOnSharedPreferenceChangeListener { _, key ->

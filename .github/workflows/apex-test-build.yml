@@ -1,6 +1,8 @@
 name: Apex test build
 
 on:
+  push:
+    branches: [codex/energy-r1-2026-10-06]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -10,7 +12,6 @@ on:
 
 permissions:
   contents: read
-
 concurrency:
   group: apex-test-build-${{ github.ref }}
   cancel-in-progress: true
@@ -24,22 +25,20 @@ jobs:
         env:
           BUILD_VARIANT: ${{ inputs.buildVariant || 'fullRelease' }}
         run: test "$BUILD_VARIANT" = fullRelease
-
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
         with:
           distribution: temurin
           java-version: '21'
-
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
         with:
           cache-read-only: false
-
       - name: Prepare Gradle
         run: chmod +x gradlew
-
-      - name: Test reliability and diagnostic modules
+      - name: Test reliability and energy modules
         env:
           APEX7_CAPTURE_SCREENSHOTS: 'true'
         run: |
@@ -47,35 +46,68 @@ jobs:
             :plugins:sensitivity:testFullDebugUnitTest :core:interfaces:testFullDebugUnitTest \
             :plugins:sync:testFullDebugUnitTest :pump:apex:testFullDebugUnitTest :core:data:test \
             :pump:medtrum:testFullDebugUnitTest :plugins:aps:testFullDebugUnitTest \
-            :plugins:smoothing:testFullDebugUnitTest \
-            :implementation:testFullDebugUnitTest :shared:impl:testFullDebugUnitTest \
-            :ui:testFullDebugUnitTest \
+            :plugins:smoothing:testFullDebugUnitTest :implementation:testFullDebugUnitTest \
+            :shared:impl:testFullDebugUnitTest :ui:testFullDebugUnitTest :wear:testFullDebugUnitTest \
+            :database:impl:testFullDebugUnitTest :database:persistence:testFullDebugUnitTest \
             --no-daemon --max-workers=2 --console=plain -I doc/apex7-validation.init.gradle \
             -Pkotlin.compiler.execution.strategy=in-process \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -Xss1m"
-
+      - name: Profile synthetic SQL fixture
+        run: python3 doc/performance/measure_energy_fixture.py --output build/reports/energy-fixtures/sql-fixture.json
       - name: Upload test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: apex7-tests-${{ github.run_number }}
           path: |
-            workflow/build/test-results/**/*.xml
-            plugins/*/build/test-results/**/*.xml
-            core/*/build/test-results/**/*.xml
-            pump/apex/build/test-results/**/*.xml
-            pump/medtrum/build/test-results/**/*.xml
-            implementation/build/test-results/**/*.xml
-            shared/impl/build/test-results/**/*.xml
-            ui/build/test-results/**/*.xml
+            **/build/test-results/**/*.xml
+            **/build/reports/energy-fixtures/*.json
             ui/build/reports/apex7-screenshots/*.png
             ui/build/reports/tests/**
+            doc/performance/metrics/*.json
             doc/APEX7_BOLUS_BASELINE.md
             doc/APEX_BOLUS_DEVICE_ACCEPTANCE_RU.md
             pump/apex/src/test/resources/apex/incidents/*.json
-          retention-days: 14
+          retention-days: 30
+      - name: Build unsigned Phone and Wear APKs
+        run: |
+          ./gradlew :app:assembleFullRelease :wear:assembleFullRelease --no-daemon --max-workers=2 --console=plain \
+            -Pkotlin.compiler.execution.strategy=in-process \
+            -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseParallelGC -Xss1m"
+          mkdir -p unsigned
+          cp app/build/outputs/apk/full/release/*-unsigned.apk unsigned/phone-unsigned.apk
+          cp wear/build/outputs/apk/full/release/*-unsigned.apk unsigned/wear-unsigned.apk
+          printf '%s\n' "$GITHUB_SHA" > unsigned/source-sha.txt
+          sha256sum unsigned/*.apk > unsigned/sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: energy-unsigned-${{ github.run_number }}
+          path: unsigned/
+          if-no-files-found: error
+          retention-days: 3
 
-      - name: Decode signing key
+  sign:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # Fresh runner: no Gradle or repository build process ever receives the signing secrets.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: energy-unsigned-${{ github.run_number }}
+          path: unsigned
+      - name: Validate unsigned provenance
+        run: |
+          test "$(cat unsigned/source-sha.txt)" = "$GITHUB_SHA"
+          sha256sum -c unsigned/sha256.txt
+      - name: Sign APK pair with existing key
         shell: bash
         env:
           KEYSTORE_SET: ${{ secrets.KEYSTORE_SET }}
@@ -86,77 +118,73 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          signing_dir="$RUNNER_TEMP/apex-signing"
+          mkdir -p "$signing_dir"
+          trap 'rm -f -- "$signing_dir/keystore.jks"' EXIT
           if [[ -n "$KEYSTORE_SET" ]]; then
             decoded=$(printf '%s' "$KEYSTORE_SET" | base64 --decode)
-            keystore_base64=$(printf '%s' "$decoded" | cut -d'|' -f1)
-            keystore_password=$(printf '%s' "$decoded" | cut -d'|' -f2)
-            key_alias=$(printf '%s' "$decoded" | cut -d'|' -f3)
-            key_password=$(printf '%s' "$decoded" | cut -d'|' -f4)
+            IFS='|' read -r keystore_base64 SIGN_STORE_PASS SIGN_ALIAS SIGN_KEY_PASS <<< "$decoded"
           else
             keystore_base64="$KEYSTORE_BASE64_SECRET"
-            keystore_password="$KEYSTORE_PASSWORD_SECRET"
-            key_alias="$KEY_ALIAS_SECRET"
-            key_password="$KEY_PASSWORD_SECRET"
+            SIGN_STORE_PASS="$KEYSTORE_PASSWORD_SECRET"
+            SIGN_ALIAS="$KEY_ALIAS_SECRET"
+            SIGN_KEY_PASS="$KEY_PASSWORD_SECRET"
           fi
-          for value in "$keystore_base64" "$keystore_password" "$key_alias" "$key_password"; do
+          for value in "$keystore_base64" "$SIGN_STORE_PASS" "$SIGN_ALIAS" "$SIGN_KEY_PASS"; do
             [[ -n "$value" ]] || { echo "Signing secret is missing"; exit 1; }
             echo "::add-mask::$value"
           done
-          mkdir -p "$RUNNER_TEMP/apex-signing"
-          printf '%s' "$keystore_base64" | base64 --decode > "$RUNNER_TEMP/apex-signing/keystore.jks"
-          {
-            echo "KEYSTORE_FILE=$RUNNER_TEMP/apex-signing/keystore.jks"
-            echo "KEYSTORE_PASSWORD=$keystore_password"
-            echo "KEY_ALIAS=$key_alias"
-            echo "KEY_PASSWORD=$key_password"
-          } >> "$GITHUB_ENV"
-
-      - name: Build signed APK
-        run: |
-          ./gradlew :app:assembleFullRelease :wear:assembleFullRelease --no-daemon --max-workers=2 --console=plain \
-            -Dorg.gradle.jvmargs="-Xmx6g -XX:+UseParallelGC -Xss1m" \
-            -Pandroid.injected.signing.store.file="$KEYSTORE_FILE" \
-            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
-
-      - name: Verify and stage APK
+          export SIGN_STORE_PASS SIGN_KEY_PASS
+          printf '%s' "$keystore_base64" | base64 --decode > "$signing_dir/keystore.jks"
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          mkdir -p signed
+          short_sha=${GITHUB_SHA:0:7}
+          for spec in "phone:unsigned/phone-unsigned.apk:aaps-4.0-apex-$short_sha.apk" "wear:unsigned/wear-unsigned.apk:aaps-4.0-apex-wear-$short_sha.apk"; do
+            kind=${spec%%:*}; rest=${spec#*:}; apk=${rest%%:*}; output=${rest#*:}
+            "$apksigner" sign --ks "$signing_dir/keystore.jks" --ks-key-alias "$SIGN_ALIAS" \
+              --ks-pass env:SIGN_STORE_PASS --key-pass env:SIGN_KEY_PASS --out "signed/$output" "$apk"
+          done
+      - name: Verify signed upgrade identity and embedded source
         shell: bash
         run: |
           set -euo pipefail
-          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          build_tools=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n 1 | xargs dirname)
           short_sha=${GITHUB_SHA:0:7}
-          expected_cert=1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084
-          app_apk=$(find app/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
-          wear_apk=$(find wear/build/outputs/apk/full/release -maxdepth 1 -name '*.apk' -type f | head -n 1)
-          [[ -n "$app_apk" && -n "$wear_apk" ]] || { echo "Phone or Wear APK was not produced"; exit 1; }
-          for spec in "phone:$app_apk:aaps-4.0-apex-$short_sha.apk" "wear:$wear_apk:aaps-4.0-apex-wear-$short_sha.apk"; do
-            kind=${spec%%:*}; rest=${spec#*:}; apk=${rest%%:*}; output=${rest#*:}
-            "$apksigner" verify --verbose --print-certs "$apk" | tee "$output.signature.txt"
-            actual_cert=$(awk '/certificate SHA-256 digest:/ { print $NF }' "$output.signature.txt" | sort -u)
-            [[ "$actual_cert" = "$expected_cert" ]] || { echo "$kind signing certificate mismatch"; exit 1; }
-            cp "$apk" "$output"
-            sha256sum "$output" > "$output.sha256"
-            printf 'artifact=%s\ncommit=%s\nrun=%s\nstatus=EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED\n' \
-              "$kind" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$output.provenance.txt"
+          python3 doc/performance/verify_apk_pair.py \
+            --phone "signed/aaps-4.0-apex-$short_sha.apk" --wear "signed/aaps-4.0-apex-wear-$short_sha.apk" \
+            --build-tools "$build_tools" --commit "$GITHUB_SHA" --output signed/apk-verification.json
+          apksigner="$build_tools/apksigner"
+          for apk in signed/*.apk; do
+            "$apksigner" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+            sha256sum "$apk" > "$apk.sha256"
+            printf 'commit=%s\nrun=%s\nstatus=EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED\n' \
+              "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$apk.provenance.txt"
           done
-          echo "APK_OUTPUT=aaps-4.0-apex-$short_sha.apk" >> "$GITHUB_ENV"
-          echo "WEAR_OUTPUT=aaps-4.0-apex-wear-$short_sha.apk" >> "$GITHUB_ENV"
-
-      - uses: actions/upload-artifact@v4
+          echo 'Phone and Wear signed and verified; device upgrade and energy measurements pending.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: aaps-4.0-apex-${{ github.run_number }}
-          path: |
-            ${{ env.APK_OUTPUT }}
-            ${{ env.APK_OUTPUT }}.sha256
-            ${{ env.APK_OUTPUT }}.provenance.txt
-            ${{ env.APK_OUTPUT }}.signature.txt
-            ${{ env.WEAR_OUTPUT }}
-            ${{ env.WEAR_OUTPUT }}.sha256
-            ${{ env.WEAR_OUTPUT }}.provenance.txt
-            ${{ env.WEAR_OUTPUT }}.signature.txt
+          path: signed/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/apex-signing/keystore.jks"
+
+  drive-delivery:
+    needs: sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: aaps-4.0-apex-${{ github.run_number }}
+          path: signed
+      - name: Locate signed pair
+        run: |
+          short_sha=${GITHUB_SHA:0:7}
+          echo "APK_OUTPUT=signed/aaps-4.0-apex-$short_sha.apk" >> "$GITHUB_ENV"
+          echo "WEAR_OUTPUT=signed/aaps-4.0-apex-wear-$short_sha.apk" >> "$GITHUB_ENV"
 
       - name: Upload signed phone and Wear APKs to Google Drive
         shell: bash
@@ -227,12 +255,7 @@ jobs:
           short_sha=${GITHUB_SHA:0:7}
           release_id=$(ensure_folder "$short_sha" "$apex_id")
           for file in "$APK_OUTPUT" "$APK_OUTPUT.sha256" "$APK_OUTPUT.signature.txt" "$APK_OUTPUT.provenance.txt" \
-                      "$WEAR_OUTPUT" "$WEAR_OUTPUT.sha256" "$WEAR_OUTPUT.signature.txt" "$WEAR_OUTPUT.provenance.txt"; do
+                      "$WEAR_OUTPUT" "$WEAR_OUTPUT.sha256" "$WEAR_OUTPUT.signature.txt" "$WEAR_OUTPUT.provenance.txt" signed/apk-verification.json; do
             upload_file "$file" "$release_id"
           done
           echo "Google Drive folder: https://drive.google.com/drive/folders/$release_id" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove temporary signing material
-        if: always()
-        shell: bash
-        run: rm -f -- "$RUNNER_TEMP/apex-signing/keystore.jks"
