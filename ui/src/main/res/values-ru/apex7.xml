@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_bg_age">Давность показания СК</string>
+    <string name="apex7_plan_not_set">Не задано</string>
+    <string name="apex7_plan_invalid">Замена должна быть позже начала сенсора</string>
+    <string name="apex7_plan_clear">Убрать плановую замену</string>
+    <string name="apex7_plan_overdue">Просрочено на %1$d мин</string>
+    <string name="apex7_sensor_plan_confirmation">Плановая замена сенсора: %1$s</string>
     <string name="apex7_pump_management">Управление помпой</string>
     <string name="apex7_calculated_isf">ISF в расчёте</string>
     <string name="apex7_smb_requested_short">Запрошено, Е</string>

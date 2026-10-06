@@ -66,6 +66,10 @@ fun overviewCalculatedIsfMgdl(decision: AlgorithmDecisionSnapshot?, sensitivityR
     return valid(Math.round(base / ratio * 10.0) / 10.0)
 }
 
+fun overviewSensorPlannedEnd(sensor: TE?): Long? = sensor?.takeIf { it.isValid && it.duration > 0 }?.let {
+    try { Math.addExact(it.timestamp, it.duration) } catch (_: ArithmeticException) { null }
+}
+
 fun overviewAdjustmentFactor(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): String? =
     decision?.let { if (it.algorithm == "AUTO_ISF") it.autoIsfFactor else if (it.dynamicIsf) it.dynIsfAdjustmentFactor else null }
         ?.takeIf { it.isFinite() && it > 0 }
@@ -316,9 +320,7 @@ class OverviewDashboardViewModel @Inject constructor(
         val lastCarb = persistence.getNewestCarbs()
         val futureCarbs = persistence.getCarbsFromTimeExpanded(now, true).filter { it.timestamp > now }.sumOf { it.amount }
         val ads = calculator.ads
-        val cob = synchronized(ads.dataLock) {
-            ads.autosensDataTable.let { table -> if (table.size() > 0) table.valueAt(table.size() - 1).let { it.time to it.cob } else null }
-        }
+        val cob = cobSnapshot(ads)
         val activity = activities.snapshot(now)
         val activityState = rh.gs(when (activity.state) {
             ActivityState.ACTIVE -> R.string.apex7_state_active
@@ -448,9 +450,7 @@ class OverviewDashboardViewModel @Inject constructor(
             tile(R.string.apex7_site, age(site?.timestamp, now), R.string.apex7_time to time(site?.timestamp),
                 R.string.apex7_warning to preferences.get(IntKey.OverviewCageWarning).toString(),
                 R.string.apex7_critical to preferences.get(IntKey.OverviewCageCritical).toString(), R.string.apex7_remaining to null),
-            tile(R.string.apex7_sensor, age(sensor?.timestamp, now), R.string.apex7_start to time(sensor?.timestamp),
-                R.string.apex7_raw to time(snapshot.newestRawBgTimestamp), R.string.apex7_age to age(snapshot.newestRawBgTimestamp, now),
-                R.string.apex7_expiry to null, R.string.apex7_remaining to null),
+            sensorTile(sensor, snapshot.newestRawBgTimestamp, now),
             tile(R.string.apex7_loop, healthText,
                 R.string.apex7_raw to time(snapshot.newestRawBgTimestamp), R.string.apex7_bucket to time(snapshot.newestBucketedBgTimestamp),
                 R.string.apex7_calculation to time(snapshot.lastCalculationSuccessTimestamp), R.string.apex7_loop_run to time(snapshot.lastBgTriggeredRun),
@@ -519,5 +519,28 @@ class OverviewDashboardViewModel @Inject constructor(
             profile = profile?.percentage?.let { "$it%" },
             activityPermissionRequired = activity.access == ActivityAccess.PERMISSION_REQUIRED,
         ))
+    }
+
+    private fun sensorTile(sensor: TE?, rawBgTimestamp: Long?, now: Long): DashboardTile {
+        val end = overviewSensorPlannedEnd(sensor)
+        val remaining = when {
+            end == null -> rh.gs(R.string.apex7_plan_not_set)
+            end >= now -> compactAge(now, end)
+            else -> rh.gs(R.string.apex7_plan_overdue, (now - end) / 60_000)
+        }
+        return DashboardTile(R.string.apex7_sensor, age(sensor?.timestamp, now), listOf(
+            DashboardField(R.string.apex7_start, time(sensor?.timestamp)),
+            DashboardField(R.string.apex7_raw, time(rawBgTimestamp)),
+            DashboardField(R.string.apex7_bg_age, age(rawBgTimestamp, now)),
+            DashboardField(R.string.apex7_age, compactAge(sensor?.timestamp, now)),
+            DashboardField(R.string.apex7_expiry, time(end) ?: rh.gs(R.string.apex7_plan_not_set)),
+            DashboardField(R.string.apex7_remaining, remaining)
+        ))
+    }
+
+    // Keep this non-suspending monitor scope outside the large presentation coroutine.
+    private fun cobSnapshot(ads: app.aaps.core.interfaces.aps.AutosensDataStore): Pair<Long, Double>? = synchronized(ads.dataLock) {
+        val table = ads.autosensDataTable
+        if (table.size() > 0) table.valueAt(table.size() - 1).let { it.time to it.cob } else null
     }
 }

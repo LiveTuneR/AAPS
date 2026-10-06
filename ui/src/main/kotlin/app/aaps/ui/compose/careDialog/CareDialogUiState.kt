@@ -21,6 +21,8 @@ data class CareDialogUiState(
     // Date/Time (always visible)
     val eventTime: Long = System.currentTimeMillis(),
     val eventTimeChanged: Boolean = false,
+    // User-chosen replacement plan, stored as the sensor-change event's duration.
+    val plannedSensorEnd: Long? = null,
 
     // Config values
     val glucoseUnits: GlucoseUnit = GlucoseUnit.MGDL,
@@ -34,6 +36,18 @@ data class CareDialogUiState(
     val selectedSiteLocationString: String? = null,
     val siteRotationEntries: List<TE> = emptyList()
 )
+
+val CareDialogUiState.sensorPlanValid: Boolean
+    get() = plannedSensorEnd == null || plannedSensorDurationMinutes != null
+
+val CareDialogUiState.plannedSensorDurationMinutes: Int?
+    get() {
+        val end = plannedSensorEnd ?: return null
+        if (eventType != CareportalEventType.SENSOR_INSERT || end <= eventTime) return null
+        val difference = try { Math.subtractExact(end, eventTime) } catch (_: ArithmeticException) { return null }
+        val minutes = difference / 60_000L
+        return minutes.takeIf { it in 1..Int.MAX_VALUE.toLong() }?.toInt()
+    }
 
 /** BG section visible for BGCHECK, QUESTION, ANNOUNCEMENT */
 val CareDialogUiState.showBgSection: Boolean

@@ -50,6 +50,7 @@ class EnhancedOverviewContentTest {
         onSensorInsertClick: (() -> Unit)? = null,
         onFillClick: (() -> Unit)? = null,
         onPumpManageClick: (() -> Unit)? = null,
+        plannedSensor: Boolean = false,
     ) {
         val english = RuntimeEnvironment.getApplication().resources.configuration.locales[0].language == "en"
         val state = OverviewDashboardState(titles.map { title ->
@@ -88,6 +89,13 @@ class EnhancedOverviewContentTest {
                         add(DashboardField(R.string.apex7_bolus_gate, "Включена"))
                     }
                 }
+                R.string.apex7_sensor -> if (plannedSensor) listOf(
+                    DashboardField(R.string.apex7_start, "6 окт. 2026 г. 12:00"),
+                    DashboardField(R.string.apex7_bg_age, "0 мин"),
+                    DashboardField(R.string.apex7_age, "3 д 0 ч"),
+                    DashboardField(R.string.apex7_expiry, "20 окт. 2026 г. 12:00"),
+                    DashboardField(R.string.apex7_remaining, "11 д 0 ч")
+                ) else listOf(DashboardField(R.string.apex7_generation, null))
                 else -> listOf(DashboardField(R.string.apex7_generation, if (title == R.string.apex7_loop) "12" else null))
             }
             DashboardTile(title, null, fields)
@@ -161,7 +169,7 @@ class EnhancedOverviewContentTest {
             compose.waitForIdle()
         }
         compose.onNodeWithTag("detail-${R.string.apex7_autoisf}").performScrollTo().performClick()
-        compose.onNodeWithText(context.getString(R.string.apex7_unknown)).assertExists()
+        compose.onAllNodesWithText(context.getString(R.string.apex7_unknown)).assertCountEquals(2)
     }
 
     @Test @Config(qualifiers = "ru-w800dp-h480dp")
@@ -244,7 +252,7 @@ class EnhancedOverviewContentTest {
     @Test fun standardSmbCardShowsRequestAndOpensSmbDetails() {
         render(standardSmb = true)
         compose.onNodeWithText("0,15").assertIsDisplayed()
-        compose.onNodeWithTag("metric-smb").performClick()
+        compose.onNodeWithTag("detail-${R.string.apex7_autoisf}").performClick()
         compose.onNodeWithText("Активные углеводы (COB)").assertExists()
         capture("smb-standard-request-detail-ru-fixture")
     }
@@ -280,6 +288,15 @@ class EnhancedOverviewContentTest {
         compose.onNodeWithTag("detail-${R.string.apex7_pump}").performScrollTo().performClick()
         compose.onNodeWithTag("fill-action").assertDoesNotExist()
         compose.onNodeWithTag("pump-management-action").assertDoesNotExist()
+    }
+
+    @Test fun plannedSensorDetailKeepsStartEndRemainingAndSeparateGlucoseAge() {
+        render(plannedSensor = true, onSensorInsertClick = {})
+        compose.onNodeWithTag("detail-${R.string.apex7_sensor}").performScrollTo().performClick()
+        compose.onNodeWithText("20 окт. 2026 г. 12:00").assertExists()
+        compose.onNodeWithText("11 д 0 ч").assertExists()
+        compose.onNodeWithText("3 д 0 ч").assertExists()
+        capture("sensor-planned-replacement-ru-fixture")
     }
 
     @Test fun populatedPumpDetailHasNoFakeUnknownRows() {

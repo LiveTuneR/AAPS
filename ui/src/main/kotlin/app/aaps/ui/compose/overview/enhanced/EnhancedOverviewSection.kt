@@ -81,7 +81,11 @@ fun EnhancedOverviewContent(
     }
     val algorithmTitle = v.algorithmTitle
     fun summary(title: Int) = state.tiles.firstOrNull { it.title == title }?.summary
-    val details = state.tiles + DashboardTile(R.string.apex7_target_short, target, listOf(DashboardField(R.string.apex7_target_short, target))) +
+    val details = state.tiles.map { tile ->
+        if (tile.title == R.string.apex7_autoisf && algorithmTitle == R.string.apex7_smb)
+            tile.copy(fields = (tile.fields + state.tiles.firstOrNull { it.title == R.string.apex7_smb }?.fields.orEmpty()).distinctBy { it.label })
+        else tile
+    } + DashboardTile(R.string.apex7_target_short, target, listOf(DashboardField(R.string.apex7_target_short, target))) +
         DashboardTile(R.string.apex7_profile, v.profile, listOf(DashboardField(R.string.apex7_profile, v.profile)))
     val header: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -105,7 +109,7 @@ fun EnhancedOverviewContent(
                             Metric(R.string.apex7_cr_short, v.cr, amber, Icons.Default.Grain, Modifier.weight(1f)) { selected = R.string.apex7_isfcr }
                             if (algorithmTitle == R.string.apex7_smb) {
                                 Metric(R.string.apex7_smb, v.smbRequested.takeIf { decisionFresh }, cyan, Icons.Default.BarChart,
-                                    Modifier.weight(1f), "metric-smb", unit = stringResource(R.string.apex7_smb_requested_short)) { selected = R.string.apex7_smb }
+                                    Modifier.weight(1f), "detail-${R.string.apex7_autoisf}", unit = stringResource(R.string.apex7_smb_requested_short)) { selected = R.string.apex7_autoisf }
                             } else {
                                 Metric(algorithmTitle, v.autoIsf.takeIf { decisionFresh }, cyan, Icons.Default.BarChart, Modifier.weight(1f), "detail-${R.string.apex7_autoisf}") { selected = R.string.apex7_autoisf }
                             }

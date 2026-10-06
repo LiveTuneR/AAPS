@@ -28,6 +28,12 @@ import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.whenever
+import org.mockito.kotlin.argumentCaptor
+import org.mockito.kotlin.verify
+import app.aaps.core.interfaces.bolus.BatchAction
+import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import kotlinx.coroutines.runBlocking
+import app.aaps.ui.R
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal class CareDialogViewModelTest {
@@ -86,5 +92,32 @@ internal class CareDialogViewModelTest {
 
         assertThat(sut.uiState.value.eventTime).isEqualTo(123_456L)
         assertThat(sut.uiState.value.eventTimeChanged).isTrue()
+    }
+
+    @Test fun `sensor plan is persisted through existing batch with the confirmed start and duration`() = runBlocking {
+        val start = 1_791_288_000_000L
+        val end = start + 14 * 86_400_000L
+        whenever(dateUtil.now()).thenReturn(start)
+        whenever(dateUtil.dateAndTimeString(end)).thenReturn("20 Oct 2026 12:00")
+        whenever(rh.gs(R.string.confirm_treatment)).thenReturn("Confirm")
+        whenever(rh.gs(R.string.apex7_sensor_plan_confirmation, "20 Oct 2026 12:00")).thenReturn("Replacement: 20 Oct 2026 12:00")
+        whenever(rh.gs(app.aaps.core.ui.R.string.careportal)).thenReturn("Careportal")
+        whenever(batchExecutor.prepare(any(), any(), any())).thenReturn(ActionProgress.Prepared(1))
+        whenever(batchExecutor.commit(any(), any(), any(), any())).thenReturn(ActionProgress.Applied)
+        val vm = CareDialogViewModel(
+            SavedStateHandle(mapOf("eventTypeOrdinal" to CareportalEventType.SENSOR_INSERT.ordinal)),
+            persistenceLayer, batchExecutor, profileFunction, profileUtil, glucoseStatusProvider, translator,
+            preferences, rh, dateUtil, aapsLogger, CoroutineScope(UnconfinedTestDispatcher())
+        )
+        vm.updatePlannedSensorEnd(end)
+        vm.buildConfirmationSummary()
+        vm.updatePlannedSensorEnd(end + 86_400_000L) // must not alter the confirmed record
+        vm.confirmAndSave()
+        val captured = argumentCaptor<List<BatchAction>>()
+        verify(batchExecutor).prepare(captured.capture(), any(), any())
+        val event = captured.firstValue.single() as BatchAction.TherapyEvent
+        assertThat(event.teType).isEqualTo(TE.Type.SENSOR_CHANGE)
+        assertThat(event.timestamp).isEqualTo(start)
+        assertThat(event.durationMinutes).isEqualTo(14 * 24 * 60)
     }
 }

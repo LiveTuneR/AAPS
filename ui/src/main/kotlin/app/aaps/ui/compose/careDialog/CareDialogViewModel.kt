@@ -74,7 +74,7 @@ class CareDialogViewModel @Inject constructor(
                 bgValue = currentBg,
                 duration = 0.0,
                 notes = "",
-                eventTime = dateUtil.now(),
+                eventTime = dateUtil.now().let { if (eventType == CareportalEventType.SENSOR_INSERT) it - it % 60_000 else it },
                 eventTimeChanged = false,
                 glucoseUnits = units,
                 showNotesFromPreferences = showNotes,
@@ -144,16 +144,24 @@ class CareDialogViewModel @Inject constructor(
     }
 
     fun updateEventTime(timeMillis: Long) {
-        _uiState.update { it.copy(eventTime = timeMillis, eventTimeChanged = true) }
+        _uiState.update { it.copy(eventTime = if (it.eventType == CareportalEventType.SENSOR_INSERT) timeMillis - timeMillis % 60_000 else timeMillis, eventTimeChanged = true) }
+    }
+
+    fun updatePlannedSensorEnd(timeMillis: Long?) {
+        _uiState.update { it.copy(plannedSensorEnd = timeMillis?.let { time -> time - time % 60_000 }) }
     }
 
     private var confirmedState: CareDialogUiState? = null
 
     fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
-        confirmedState = state
+        confirmedState = state.takeIf { it.sensorPlanValid }
         return confirmationLines {
             line(ConfirmationRole.NORMAL, rh.gs(R.string.confirm_treatment))
+
+            if (state.eventType == CareportalEventType.SENSOR_INSERT && state.plannedSensorEnd != null) {
+                line(ConfirmationRole.NORMAL, rh.gs(R.string.apex7_sensor_plan_confirmation, dateUtil.dateAndTimeString(state.plannedSensorEnd)))
+            }
 
             if (state.showBgSection) {
                 line(
@@ -209,6 +217,7 @@ class CareDialogViewModel @Inject constructor(
 
     fun confirmAndSave() {
         val state = confirmedState ?: return
+        if (!state.sensorPlanValid) return
         val eventType = state.eventType
         val eventTime = state.eventTime - (state.eventTime % 1000)
 
@@ -224,7 +233,8 @@ class CareDialogViewModel @Inject constructor(
             timestamp = eventTime,
             glucoseMgdl = if (state.showBgSection) profileUtil.convertToMgdl(state.bgValue, state.glucoseUnits) else null,
             glucoseType = if (state.showBgSection) state.meterType else null,
-            durationMinutes = if (state.showDurationSection) state.duration.toInt() else 0,
+            durationMinutes = if (isSensorChange) state.plannedSensorDurationMinutes ?: 0
+                else if (state.showDurationSection) state.duration.toInt() else 0,
             note = state.notes.ifEmpty { null },
             location = location,
             arrow = arrow,

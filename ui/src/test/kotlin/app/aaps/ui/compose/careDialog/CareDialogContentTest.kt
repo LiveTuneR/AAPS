@@ -65,4 +65,24 @@ class CareDialogContentTest {
         compose.onNodeWithText(sensorLabel).performClick()
         assertThat(meterChanged).isTrue()
     }
+
+    @Test fun sensorPlanShowsSelectedEndAndKeepsDateAndTimeEditable() {
+        var dateClicks = 0; var timeClicks = 0
+        val start = 1_791_288_000_000L
+        compose.setContent { MaterialTheme {
+            CareDialogContent(
+                uiState = CareDialogUiState(eventType = CareportalEventType.SENSOR_INSERT, eventTime = start,
+                    plannedSensorEnd = start + 14 * 86_400_000L),
+                eventType = CareportalEventType.SENSOR_INSERT, dateString = "2026-10-06", timeString = "12:00",
+                onMeterTypeChange = {}, onBgValueChange = {}, onDurationChange = {}, onNotesChange = {},
+                onNavigateBack = {}, onConfirmClick = {}, onDateClick = {}, onTimeClick = {},
+                plannedEndDateString = "2026-10-20", plannedEndTimeString = "18:30",
+                onEndDateClick = { dateClicks++ }, onEndTimeClick = { timeClicks++ }
+            )
+        } }
+        compose.onNodeWithText("2026-10-20").assertIsDisplayed().performClick()
+        compose.onNodeWithText("18:30").assertIsDisplayed().performClick()
+        assertThat(dateClicks).isEqualTo(1)
+        assertThat(timeClicks).isEqualTo(1)
+    }
 }

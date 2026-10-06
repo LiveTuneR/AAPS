@@ -29,6 +29,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +99,11 @@ fun CareDialogScreen(
     var showConfirmation by rememberSaveable { mutableStateOf(false) }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showEndDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showEndTimePicker by rememberSaveable { mutableStateOf(false) }
+    val endPickerTime = uiState.plannedSensorEnd ?: uiState.eventTime + 86_400_000L
+    if (showEndDatePicker) EventDatePicker(endPickerTime, viewModel::updatePlannedSensorEnd) { showEndDatePicker = false }
+    if (showEndTimePicker) EventTimePicker(endPickerTime, viewModel::updatePlannedSensorEnd) { showEndTimePicker = false }
 
     // Confirmation dialog
     if (showConfirmation) {
@@ -143,7 +149,11 @@ fun CareDialogScreen(
         onConfirmClick = { showConfirmation = true },
         onDateClick = { showDatePicker = true },
         onTimeClick = { showTimePicker = true },
-        onPickSiteLocation = onPickSiteLocation
+        onPickSiteLocation = onPickSiteLocation,
+        plannedEndDateString = uiState.plannedSensorEnd?.let { viewModel.dateUtil.dateString(it) },
+        plannedEndTimeString = uiState.plannedSensorEnd?.let { viewModel.dateUtil.timeString(it) },
+        onEndDateClick = { showEndDatePicker = true }, onEndTimeClick = { showEndTimePicker = true },
+        onClearEndClick = { viewModel.updatePlannedSensorEnd(null) }
     )
 }
 
@@ -164,7 +174,12 @@ internal fun CareDialogContent(
     onConfirmClick: () -> Unit,
     onDateClick: () -> Unit,
     onTimeClick: () -> Unit,
-    onPickSiteLocation: () -> Unit = {}
+    onPickSiteLocation: () -> Unit = {},
+    plannedEndDateString: String? = null,
+    plannedEndTimeString: String? = null,
+    onEndDateClick: () -> Unit = {},
+    onEndTimeClick: () -> Unit = {},
+    onClearEndClick: () -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current
 
@@ -189,6 +204,7 @@ internal fun CareDialogContent(
                     focusManager.clearFocus()
                     onConfirmClick()
                 },
+                enabled = uiState.sensorPlanValid,
                 modifier = Modifier
                     .fillMaxWidth()
                     .bottomBarSafeArea()
@@ -272,6 +288,21 @@ internal fun CareDialogContent(
                         },
                         modifier = itemModifier
                     )
+
+                    if (eventType == CareportalEventType.SENSOR_INSERT) {
+                        Column(itemModifier) {
+                            Text(stringResource(R.string.apex7_expiry), style = MaterialTheme.typography.labelLarge)
+                            DateTimeSection(
+                                dateString = plannedEndDateString ?: stringResource(R.string.apex7_plan_not_set),
+                                timeString = plannedEndTimeString ?: "—", eventTimeChanged = uiState.plannedSensorEnd != null,
+                                onDateClick = onEndDateClick, onTimeClick = onEndTimeClick
+                            )
+                            if (!uiState.sensorPlanValid) Text(stringResource(R.string.apex7_plan_invalid), color = MaterialTheme.colorScheme.error)
+                            if (uiState.plannedSensorEnd != null) TextButton(onClick = onClearEndClick) {
+                                Text(stringResource(R.string.apex7_plan_clear))
+                            }
+                        }
+                    }
 
                     // Notes Section
                     if (uiState.showNotesSection) {

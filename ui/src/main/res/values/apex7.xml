@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_bg_age">Glucose reading age</string>
+    <string name="apex7_plan_not_set">Not set</string>
+    <string name="apex7_plan_invalid">Replacement must be after the sensor start</string>
+    <string name="apex7_plan_clear">Clear replacement plan</string>
+    <string name="apex7_plan_overdue">Overdue by %1$d min</string>
+    <string name="apex7_sensor_plan_confirmation">Planned sensor replacement: %1$s</string>
     <string name="apex7_pump_management">Manage pump</string>
     <string name="apex7_calculated_isf">ISF in calculation</string>
     <string name="apex7_smb_requested_short">Requested, U</string>
