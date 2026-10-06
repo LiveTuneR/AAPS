@@ -53,6 +53,19 @@ data class DashboardTile(val title: Int, val summary: String?, val fields: List<
 
 enum class OverviewSmbState { ON, WAIT, BLOCKED, OFF, UNKNOWN }
 
+/** Presentation only: prefer the ISF recorded at the insulin-requirement branch. */
+fun overviewCalculatedIsfMgdl(decision: AlgorithmDecisionSnapshot?, sensitivityRatio: Double?): Double? {
+    fun valid(value: Double?) = value?.takeIf { it.isFinite() && it > 0 }
+    decision ?: return null
+    valid(decision.insulinReqIsfMgdl)?.let { return it }
+    valid(decision.currentDynamicIsfMgdl)?.let { return it }
+    // Standard SMB records the ratio actually used; its dynamic-only field is deliberately null.
+    if (decision.algorithm != "SMB" || decision.dynamicIsf) return null
+    val base = valid(decision.profileIsfMgdl) ?: return null
+    val ratio = valid(sensitivityRatio) ?: return null
+    return valid(Math.round(base / ratio * 10.0) / 10.0)
+}
+
 fun overviewAdjustmentFactor(decision: app.aaps.core.interfaces.aps.AlgorithmDecisionSnapshot?): String? =
     decision?.let { if (it.algorithm == "AUTO_ISF") it.autoIsfFactor else if (it.dynamicIsf) it.dynIsfAdjustmentFactor else null }
         ?.takeIf { it.isFinite() && it > 0 }
@@ -93,6 +106,8 @@ data class OverviewVitals(
     val syncTimestamp: Long? = null,
     val decisionTimestamp: Long? = null,
     val activityPermissionRequired: Boolean = false,
+    val isfFromProfile: Boolean = false,
+    val smbRequested: String? = null,
 )
 
 data class OverviewDashboardState(val tiles: List<DashboardTile> = emptyList(), val capturedAt: Long? = null, val vitals: OverviewVitals = OverviewVitals())
@@ -284,7 +299,8 @@ class OverviewDashboardViewModel @Inject constructor(
         val profile = profileFunction.getProfile()
         val lastRun = loop.lastRun
         val request = lastRun?.request
-        val decision = (request?.rawData() as? RT)?.decision
+        val rawResult = request?.rawData() as? RT
+        val decision = rawResult?.decision
         val result = lastRun?.constraintsProcessed
         val snapshot = calculator.loopHealthSnapshot(loop)
         val health = snapshot.status(now)
@@ -319,6 +335,7 @@ class OverviewDashboardViewModel @Inject constructor(
         val baseIsf = isf(profile?.getProfileIsfMgdl())
         val currentDynamicIsf = isf(decision?.currentDynamicIsfMgdl)
         val dosingIsf = isf(decision?.insulinReqIsfMgdl)
+        val calculatedIsfMgdl = overviewCalculatedIsfMgdl(decision, rawResult?.sensitivityRatio)
         val autoIsfActive = decision?.algorithm == "AUTO_ISF"
         val factorLabel = if (autoIsfActive) R.string.apex7_factor else R.string.apex7_disf_factor
         val factorValue = if (autoIsfActive) number(decision?.autoIsfFactor) else decision?.dynIsfAdjustmentFactor?.let {
@@ -371,6 +388,7 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_insulin to profile?.iCfg?.insulinLabel, R.string.apex7_peak to profile?.iCfg?.peak?.toString(), R.string.apex7_dia to number(profile?.iCfg?.dia)),
             tile(R.string.apex7_isfcr, dosingIsf.takeIf { recent(request?.date) },
                 R.string.apex7_base_isf to baseIsf, R.string.apex7_current_dynamic_isf to currentDynamicIsf,
+                R.string.apex7_calculated_isf to isf(calculatedIsfMgdl),
                 R.string.apex7_dosing_isf to dosingIsf, R.string.apex7_future_isf to isf(decision?.futureIsfMgdl),
                 R.string.apex7_isf_basis to isfBasis(decision?.futureIsfBasis),
                 R.string.apex7_base_cr to number(profile?.getIc()), R.string.apex7_effective_cr to effectiveCr,
@@ -458,8 +476,11 @@ class OverviewDashboardViewModel @Inject constructor(
                 R.string.apex7_reason to if (pumpDiagnostics?.lastTherapyReason == "previous_apex_delivery_unconfirmed") rh.gs(R.string.apex7_bolus_unreconciled) else pumpDiagnostics?.lastTherapyReason)
         ), now, OverviewVitals(
             units = units.asText,
-            isf = decision?.currentDynamicIsfMgdl?.takeIf { it > 0 && recent(request?.date) }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
+            isf = (calculatedIsfMgdl.takeIf { recent(request?.date) } ?: profile?.getProfileIsfMgdl())
+                ?.takeIf { it.isFinite() && it > 0 }?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
             baseIsf = profile?.getProfileIsfMgdl()?.let { number(profileUtil.fromMgdlToUnits(it, units)) },
+            isfFromProfile = calculatedIsfMgdl == null || !recent(request?.date),
+            smbRequested = number(request?.smb)?.takeIf { recent(request?.date) },
             cr = effectiveCr.takeIf { recent(request?.date) },
             // Use only the factor belonging to the ISF actually consumed by the algorithm.
             autoIsf = overviewAdjustmentFactor(decision.takeIf { recent(request?.date) }),

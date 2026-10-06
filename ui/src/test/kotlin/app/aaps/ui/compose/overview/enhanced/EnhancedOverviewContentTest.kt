@@ -46,6 +46,10 @@ class EnhancedOverviewContentTest {
         activityPermission: Boolean = false,
         activityUnavailable: Boolean = false,
         onTargetClick: () -> Unit = {},
+        standardSmb: Boolean = false,
+        onSensorInsertClick: (() -> Unit)? = null,
+        onFillClick: (() -> Unit)? = null,
+        onPumpManageClick: (() -> Unit)? = null,
     ) {
         val english = RuntimeEnvironment.getApplication().resources.configuration.locales[0].language == "en"
         val state = OverviewDashboardState(titles.map { title ->
@@ -90,12 +94,15 @@ class EnhancedOverviewContentTest {
         }.map { tile -> tile.copy(summary = if (missingAll) null else when (tile.title) { R.string.apex7_iob -> "1,6 Е"; R.string.apex7_cob -> "22 г"; else -> null }) }, now,
             if (missingAll) OverviewVitals() else OverviewVitals(
                 units = if (english) "mmol/L" else "ммоль/л", isf = "2,4", baseIsf = "2,7", cr = "6,4", autoIsf = "90%", algorithmTitle = R.string.apex7_disf,
+                smbRequested = if (standardSmb) "0,15" else null,
                 activity = when { activityPermission -> "Требуется доступ"; activityUnavailable -> "Источник недоступен"; missingActivity -> "Нет текущей активности"; english -> "Walking"; else -> "Ходьба" },
                 activityDetail = if (missingActivity || activityPermission || activityUnavailable) null else if (english) "Samsung Health · Walking · 24 min" else "Samsung Health · Ходьба · 24 мин",
                 activityUpdatedAt = if (missingActivity) null else now - 32_000L, smbState = smb,
                 pumpConnected = !disconnected, reservoir = "142 Е", battery = "87%", siteAge = "2 д 10 ч", siteWarning = warning,
                 sensorAge = "5 д 16 ч", bgAge = if (warning) "14 мин" else "42 с", loopAge = "38 с", syncAge = "23 с", profile = "100%",
-                activityPermissionRequired = activityPermission))
+                activityPermissionRequired = activityPermission).let {
+                    if (standardSmb) it.copy(algorithmTitle = R.string.apex7_smb, autoIsf = null) else it
+                })
         val bg = BgInfoUiState(if (missingAll) null else BgInfoData(5.6, "5,6", BgRange.IN_RANGE, warning, now - 120_000,
             TrendArrow.FLAT, "Ровно", 0.0, "0,0", null, null, null, null), if (warning) "14 мин назад" else "2 мин назад")
         val vm = mock<GraphViewModel>()
@@ -122,6 +129,7 @@ class EnhancedOverviewContentTest {
         compose.setContent { CompositionLocalProvider(LocalPreferences provides preferences) { AapsTheme { Surface {
             EnhancedOverviewContent(state, bg, if (missingAll) null else if (tempTarget) "6,0 - 7,0 до 13:30" else "5,5 - 6,3", targetActive = tempTarget, smbEnabled = !warning,
                 modeNotice = if (warning) "Цикл приостановлен" else null, onTargetClick = onTargetClick,
+                onSensorInsertClick = onSensorInsertClick, onFillClick = onFillClick, onPumpManageClick = onPumpManageClick,
                 graphs = { GraphsSection(vm, false, minimumBgHeight = 180, referenceStyle = true) })
         } } } }
     }
@@ -231,6 +239,47 @@ class EnhancedOverviewContentTest {
         render(onTargetClick = { clicks++ })
         compose.onNodeWithTag("detail-${R.string.apex7_target_short}").performClick()
         compose.runOnIdle { assertTrue(clicks == 1) }
+    }
+
+    @Test fun standardSmbCardShowsRequestAndOpensSmbDetails() {
+        render(standardSmb = true)
+        compose.onNodeWithText("0,15").assertIsDisplayed()
+        compose.onNodeWithTag("metric-smb").performClick()
+        compose.onNodeWithText("Активные углеводы (COB)").assertExists()
+        capture("smb-standard-request-detail-ru-fixture")
+    }
+
+    @Test fun sensorAndPrimeActionsNavigateOnceAfterClosingDetails() {
+        var sensorClicks = 0; var fillClicks = 0
+        render(onSensorInsertClick = { sensorClicks++ }, onFillClick = { fillClicks++ })
+        compose.onNodeWithTag("detail-${R.string.apex7_sensor}").performScrollTo().performClick()
+        capture("sensor-maintenance-action-ru-fixture")
+        compose.onNodeWithTag("sensor-insert-action").performScrollTo().performClick()
+        compose.onNodeWithTag("sensor-insert-action").assertDoesNotExist()
+        compose.onNodeWithTag("detail-${R.string.apex7_site}").performScrollTo().performClick()
+        capture("cannula-prime-action-ru-fixture")
+        compose.onNodeWithTag("fill-action").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(sensorClicks == 1 && fillClicks == 1) }
+    }
+
+    @Test fun patchPumpUsesExistingManagementAndMissingPermissionHidesActions() {
+        var pumpClicks = 0
+        render(onPumpManageClick = { pumpClicks++ })
+        compose.onNodeWithTag("detail-${R.string.apex7_site}").performScrollTo().performClick()
+        compose.onNodeWithTag("fill-action").assertDoesNotExist()
+        compose.onNodeWithTag("sensor-insert-action").assertDoesNotExist()
+        compose.onNodeWithTag("pump-management-action").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(pumpClicks == 1) }
+    }
+
+    @Test fun overviewWithoutCommandCallbacksOffersNoMaintenanceActions() {
+        render()
+        compose.onNodeWithTag("detail-${R.string.apex7_sensor}").performScrollTo().performClick()
+        compose.onNodeWithTag("sensor-insert-action").assertDoesNotExist()
+        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.apex7_close)).performClick()
+        compose.onNodeWithTag("detail-${R.string.apex7_pump}").performScrollTo().performClick()
+        compose.onNodeWithTag("fill-action").assertDoesNotExist()
+        compose.onNodeWithTag("pump-management-action").assertDoesNotExist()
     }
 
     @Test fun populatedPumpDetailHasNoFakeUnknownRows() {

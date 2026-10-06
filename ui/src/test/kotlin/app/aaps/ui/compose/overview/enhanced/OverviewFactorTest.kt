@@ -7,6 +7,23 @@ import org.junit.Test
 class OverviewFactorTest {
     private val decision=AlgorithmDecisionSnapshot("SMB",true,1,1,40.0,35.0,10.0,true,dynIsfAdjustmentFactor=0.9)
 
+    @Test fun standardSmbDisplaysActualRatioAdjustedIsfAndDosingBranchTakesPriority() {
+        val standard = decision.copy(dynamicIsf = false, currentDynamicIsfMgdl = null)
+        assertEquals(50.0, overviewCalculatedIsfMgdl(standard, 0.8)!!, 0.0)
+        assertEquals(36.4, overviewCalculatedIsfMgdl(standard, 1.1)!!, 0.0)
+        assertEquals(28.0, overviewCalculatedIsfMgdl(decision.copy(insulinReqIsfMgdl = 28.0), 1.0)!!, 0.0)
+        assertEquals(35.0, overviewCalculatedIsfMgdl(decision, null)!!, 0.0)
+    }
+
+    @Test fun unavailableOrInvalidCalculationIsNotFabricatedFromProfile() {
+        assertNull(overviewCalculatedIsfMgdl(null, 1.0))
+        val standard = decision.copy(dynamicIsf = false, currentDynamicIsfMgdl = null)
+        for (ratio in listOf(null, 0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY))
+            assertNull(overviewCalculatedIsfMgdl(standard, ratio))
+        assertNull(overviewCalculatedIsfMgdl(standard.copy(algorithm = "AUTO_ISF"), 1.0))
+        assertNull(overviewCalculatedIsfMgdl(standard.copy(profileIsfMgdl = Double.NaN), 1.0))
+    }
+
     @Test fun adjustmentIsPercentageNotDuplicateIsf() {
         assertEquals("90%",overviewAdjustmentFactor(decision))
         assertEquals("90%",overviewAdjustmentFactor(decision.copy(currentDynamicIsfMgdl=100.0)))

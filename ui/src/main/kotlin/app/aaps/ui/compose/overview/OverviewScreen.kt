@@ -143,6 +143,7 @@ fun OverviewScreen(
         if (enhanced && !LocalConfig.current.AAPSCLIENT) {
             val state by dashboard.state.collectAsStateWithLifecycle()
             val bg by graphViewModel.bgInfoState.collectAsStateWithLifecycle()
+            val maintenance by statusViewModel.uiState.collectAsStateWithLifecycle()
             EnhancedOverviewContent(
                 state = state, bg = bg, target = tempTargetText, smbEnabled = smbEnabled,
                 targetActive = tempTargetState == TempTargetChipState.Active,
@@ -150,6 +151,15 @@ fun OverviewScreen(
                 modifier = Modifier.padding(paddingValues),
                 onTargetClick = { onNavigate(NavigationRequest.Element(ElementType.TEMP_TARGET_MANAGEMENT)) },
                 onActivityPermissionClick = { healthPermissionLauncher.launch(dashboard.activityPermissions) },
+                onSensorInsertClick = if (commandsAllowed) {
+                    { onNavigate(NavigationRequest.Element(ElementType.SENSOR_INSERT)) }
+                } else null,
+                onFillClick = if (commandsAllowed && maintenance.showFill) {
+                    { onNavigate(NavigationRequest.Element(ElementType.FILL)) }
+                } else null,
+                onPumpManageClick = if (commandsAllowed) {
+                    { onNavigate(NavigationRequest.Element(ElementType.PUMP)) }
+                } else null,
                 banner = { ActiveSceneBanner(activeState = activeSceneState, expired = sceneExpired,
                     onEndClick = onEndScene, onDismiss = onDismissScene, endEnabled = endSceneEnabled,
                     formatDuration = formatDuration) },

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_pump_management">Управление помпой</string>
+    <string name="apex7_calculated_isf">ISF в расчёте</string>
+    <string name="apex7_smb_requested_short">Запрошено, Е</string>
+    <string name="apex7_record_sensor_start">Указать начало сенсора</string>
+    <string name="apex7_fill_action">Праймирование / смена канюли</string>
     <string name="apex7_checked_seconds">Проверено %1$d с назад</string>
     <string name="apex7_checked_minutes">Проверено %1$d мин назад</string>
     <string name="apex7_last_activity">Последняя активность</string>

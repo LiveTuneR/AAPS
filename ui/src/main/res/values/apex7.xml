@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="apex7_pump_management">Manage pump</string>
+    <string name="apex7_calculated_isf">ISF in calculation</string>
+    <string name="apex7_smb_requested_short">Requested, U</string>
+    <string name="apex7_record_sensor_start">Record sensor start</string>
+    <string name="apex7_fill_action">Prime / cannula change</string>
     <string name="apex7_target_short">Target</string>
     <string name="apex7_temp_target_short">Temp target</string>
     <string name="apex7_base_short">base %1$s</string>

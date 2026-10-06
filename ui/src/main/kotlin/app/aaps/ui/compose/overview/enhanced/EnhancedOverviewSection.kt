@@ -38,7 +38,7 @@ private val cyan = Color(0xFF6DD9ED)
 private val amber = Color(0xFFFFBB68)
 private val violet = Color(0xFFB89AEC)
 
-/** Read-only operational overview; commands remain owned by the existing management UI. */
+/** Operational overview; maintenance actions navigate to the existing protected dialogs. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnhancedOverviewContent(
@@ -51,6 +51,9 @@ fun EnhancedOverviewContent(
     modifier: Modifier = Modifier,
     onTargetClick: () -> Unit = {},
     onActivityPermissionClick: () -> Unit = {},
+    onSensorInsertClick: (() -> Unit)? = null,
+    onFillClick: (() -> Unit)? = null,
+    onPumpManageClick: (() -> Unit)? = null,
     banner: @Composable () -> Unit = {},
     graphs: @Composable () -> Unit = {}
 ) {
@@ -94,12 +97,18 @@ fun EnhancedOverviewContent(
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Metric(R.string.apex7_cob, summary(R.string.apex7_cob), amber, Icons.Default.Restaurant, Modifier.weight(1f)) { selected = R.string.apex7_cob }
                             Metric(R.string.apex7_isf_short, v.isf, cyan, Icons.Default.Functions, Modifier.weight(1f), "detail-${R.string.apex7_isfcr}",
-                                v.baseIsf?.let { stringResource(R.string.apex7_base_short, it) },
+                                if (v.isfFromProfile) stringResource(R.string.apex7_profile_short)
+                                else v.baseIsf?.let { stringResource(R.string.apex7_base_short, it) },
                                 v.units?.let { stringResource(R.string.apex7_isf_unit_label, it) }) { selected = R.string.apex7_isfcr }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Metric(R.string.apex7_cr_short, v.cr, amber, Icons.Default.Grain, Modifier.weight(1f)) { selected = R.string.apex7_isfcr }
-                            Metric(algorithmTitle, v.autoIsf.takeIf { decisionFresh }, cyan, Icons.Default.BarChart, Modifier.weight(1f), "detail-${R.string.apex7_autoisf}") { selected = R.string.apex7_autoisf }
+                            if (algorithmTitle == R.string.apex7_smb) {
+                                Metric(R.string.apex7_smb, v.smbRequested.takeIf { decisionFresh }, cyan, Icons.Default.BarChart,
+                                    Modifier.weight(1f), "metric-smb", unit = stringResource(R.string.apex7_smb_requested_short)) { selected = R.string.apex7_smb }
+                            } else {
+                                Metric(algorithmTitle, v.autoIsf.takeIf { decisionFresh }, cyan, Icons.Default.BarChart, Modifier.weight(1f), "detail-${R.string.apex7_autoisf}") { selected = R.string.apex7_autoisf }
+                            }
                         }
                     }
                 }
@@ -193,6 +202,21 @@ fun EnhancedOverviewContent(
                 }
                 if (tile.title == R.string.apex7_activity && v.activityPermissionRequired) {
                     Button(onClick = onActivityPermissionClick, Modifier.fillMaxWidth()) { Text(stringResource(R.string.apex7_grant_access)) }
+                }
+                if (tile.title == R.string.apex7_sensor) onSensorInsertClick?.let { navigate ->
+                    Button(onClick = { selected = null; navigate() }, Modifier.fillMaxWidth().testTag("sensor-insert-action")) {
+                        Text(stringResource(R.string.apex7_record_sensor_start))
+                    }
+                }
+                if (tile.title == R.string.apex7_site || tile.title == R.string.apex7_pump) onFillClick?.let { navigate ->
+                    Button(onClick = { selected = null; navigate() }, Modifier.fillMaxWidth().testTag("fill-action")) {
+                        Text(stringResource(R.string.apex7_fill_action))
+                    }
+                }
+                if (tile.title == R.string.apex7_pump || tile.title == R.string.apex7_site && onFillClick == null) onPumpManageClick?.let { navigate ->
+                    Button(onClick = { selected = null; navigate() }, Modifier.fillMaxWidth().testTag("pump-management-action")) {
+                        Text(stringResource(R.string.apex7_pump_management))
+                    }
                 }
                 Spacer(Modifier.height(32.dp))
             }
