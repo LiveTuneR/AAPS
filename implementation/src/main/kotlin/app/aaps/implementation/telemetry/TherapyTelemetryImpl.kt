@@ -47,11 +47,19 @@ class TherapyTelemetryImpl @Inject constructor(
     private val writer = ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,ArrayBlockingQueue(4096),
         { action -> Thread(action,"TherapyTelemetry").apply { isDaemon = true } }, ThreadPoolExecutor.AbortPolicy())
     private val diagnostics = DiagnosticBatchBuffer()
+    private val diagnosticLock = Any()
     private val diagnosticFlushQueued = AtomicBoolean()
     private var lastHealthRefresh = Long.MIN_VALUE
     private val diagnosticClock = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { action ->
         Thread(action, "TherapyDiagnosticFlush").apply { isDaemon = true }
     }
+    private val diagnosticDeadline = DemandDiagnosticFlush(
+        schedule = { delay, action ->
+            val future = diagnosticClock.schedule(action, delay, TimeUnit.MILLISECONDS)
+            AutoCloseable { future.cancel(false) }
+        }, requestFlush = ::requestDiagnosticFlush,
+    )
+    private val diagnosticBatches = AtomicLong()
     private val diagnosticTypes = setOf(TherapyEventType.PUMP_STATE, TherapyEventType.ACTIVITY,
         TherapyEventType.CALCULATION, TherapyEventType.SCHEDULER)
     private val store by lazy { TherapyTelemetryStore(File(context.filesDir,"therapy-telemetry-v1"),config.HEAD,
@@ -69,7 +77,7 @@ class TherapyTelemetryImpl @Inject constructor(
             }
             catch (error: Exception) { failed(error) }
         }
-        diagnosticClock.scheduleAtFixedRate({ requestDiagnosticFlush() }, 1, 1, TimeUnit.SECONDS)
+        synchronized(diagnosticLock) { if (diagnostics.stats().records > 0) diagnosticDeadline.pendingRecord() }
         record(TherapyEventType.PROCESS_START,JSONObject().put("appVersion",config.VERSION_NAME).put("model",Build.MODEL)
             .put("androidApi",Build.VERSION.SDK_INT).put("buildSha",config.HEAD))
         val previous=Thread.getDefaultUncaughtExceptionHandler()
@@ -86,8 +94,10 @@ class TherapyTelemetryImpl @Inject constructor(
             val observedMonotonic = SystemClock.elapsedRealtimeNanos()
             val observedZone = ZoneId.systemDefault()
             if (type in diagnosticTypes) {
-                val accepted = diagnostics.offer(DiagnosticRecord(type.name, copied, generation, correlationId,
-                    observedUtc, observedMonotonic, observedZone))
+                val accepted = synchronized(diagnosticLock) {
+                    diagnostics.offer(DiagnosticRecord(type.name, copied, generation, correlationId,
+                        observedUtc, observedMonotonic, observedZone)).also { if (it) diagnosticDeadline.pendingRecord() }
+                }
                 if (!accepted) { drops.incrementAndGet(); requestDiagnosticFlush() }
                 else if (diagnostics.stats().records >= 128 || diagnostics.stats().bufferedBytes >= 60 * 1024) requestDiagnosticFlush()
                 return
@@ -170,8 +180,12 @@ class TherapyTelemetryImpl @Inject constructor(
     }
 
     private fun flushDiagnostics() {
-        val batch = diagnostics.drain()
+        val batch = synchronized(diagnosticLock) {
+            diagnosticDeadline.drained()
+            diagnostics.drain()
+        }
         if (batch.isEmpty()) return
+        diagnosticBatches.incrementAndGet()
         // One admission per bounded batch; persisted counts also cover a partial append after a crash.
         val observations = batch.sumOf { it.data.optJSONObject("diagnosticAggregation")?.optLong("repeatCount", 1L) ?: 1L }
         val lastUtc = batch.maxOf { it.data.optJSONObject("diagnosticAggregation")?.optLong("lastSeenUtc", it.utc) ?: it.utc }
@@ -220,6 +234,7 @@ class TherapyTelemetryImpl @Inject constructor(
         return JSONObject().put("admissionLatency",latency(admission)).put("storeAppendLatency",latency(append))
             .put("queueDepth",writer.queue.size).put("queueHighWater",queueHighWater.get())
             .put("admissionFailures",admissionFailures.get())
+            .put("diagnosticTimerCallbacks",diagnosticDeadline.callbacks).put("diagnosticBatches",diagnosticBatches.get())
             .put("diagnosticBuffer", JSONObject().apply { val stats=diagnostics.stats()
                 put("maxRecords",128).put("maxBytes",65536).put("flushIntervalMs",1000)
                 put("records",stats.records).put("bufferedBytes",stats.bufferedBytes)
