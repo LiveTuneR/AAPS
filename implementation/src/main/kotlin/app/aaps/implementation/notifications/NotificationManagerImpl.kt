@@ -74,11 +74,26 @@ class NotificationManagerImpl @Inject constructor(
     init {
         createNotificationChannel()
 
-        // Periodic cleanup for expiration when no new posts arrive
-        scope.launch {
-            while (true) {
-                delay(30_000L)
-                cleanUp()
+
+    }
+
+    private var expirationJob: kotlinx.coroutines.Job? = null
+    private var expirationGeneration = 0L
+
+    @Synchronized private fun scheduleExpiration() {
+        expirationJob?.cancel()
+        expirationJob = null
+        val generation = ++expirationGeneration
+        val active = _notifications.value
+        val wait = notificationExpiryDelay(active.map { it.validTo }, active.any { it.validityCheck != null }, System.currentTimeMillis()) ?: return
+        expirationJob = scope.launch {
+            delay(wait)
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("timer.notificationExpiry")
+            synchronized(this@NotificationManagerImpl) {
+                if (generation == expirationGeneration) {
+                    removeExpired()
+                    scheduleExpiration()
+                }
             }
         }
     }
@@ -86,6 +101,7 @@ class NotificationManagerImpl @Inject constructor(
     @Synchronized
     override fun cleanUp() {
         removeExpired()
+        scheduleExpiration()
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -181,6 +197,7 @@ class NotificationManagerImpl @Inject constructor(
         current.add(notification)
         current.sortBy { it.level.priority }
         _notifications.value = current
+        scheduleExpiration()
 
         // Alarm tier (URGENT + sound): the system notification is silent (heads-up + vibration, no
         // channel sound); the ramping audio is owned by AlarmSoundPlayer and driven by
@@ -235,6 +252,7 @@ class NotificationManagerImpl @Inject constructor(
                 cancelSilentAlarmNotification(n)
             }
             _notifications.value = filtered
+            scheduleExpiration()
             refreshAlarmSound()
             aapsLogger.debug(LTag.NOTIFICATION, "Notification dismissed: ${id.name}")
         }
@@ -250,6 +268,7 @@ class NotificationManagerImpl @Inject constructor(
                 cancelSilentAlarmNotification(n)
             }
             _notifications.value = filtered
+            scheduleExpiration()
             refreshAlarmSound()
             aapsLogger.debug(LTag.NOTIFICATION, "Notification dismissed by handle: ${handle.instanceKey}")
         }
@@ -273,6 +292,7 @@ class NotificationManagerImpl @Inject constructor(
             audible.forEach { cancelSilentAlarmNotification(it) }
             _notifications.value = current - audible.toSet()
         }
+        scheduleExpiration()
         refreshAlarmSound()
         alarmSoundPlayer.stop(AlarmSoundPlayer.OWNER_FULLSCREEN)
         alarmNotificationManager.cancelAlarm()

@@ -14,6 +14,10 @@ class SPImpl @Inject constructor(
     private val sharedPreferences: SharedPreferences,
     private val context: Context
 ) : SP {
+    private val revision = java.util.concurrent.atomic.AtomicLong()
+    private val revisionListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> revision.incrementAndGet() }
+    init { sharedPreferences.registerOnSharedPreferenceChangeListener(revisionListener) }
+    override val presentationRevision: Long get() = revision.get()
 
     @SuppressLint("ApplySharedPref")
     override fun edit(commit: Boolean, block: SP.Editor.() -> Unit) {

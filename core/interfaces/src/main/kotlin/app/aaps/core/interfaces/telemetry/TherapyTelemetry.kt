@@ -38,6 +38,8 @@ interface TherapyTelemetry {
     /** Payload is copied before returning. This never controls dosing or retries a pump command. */
     fun record(type: TherapyEventType, data: JSONObject, generation: Long? = null, correlationId: String? = null)
     fun start()
+    /** Process teardown only; cancels diagnostic deadlines and drains accepted writer work. */
+    fun stop() { }
     fun setRetentionDays(days: Int)
     suspend fun export(startUtc: Long, endUtc: Long, expectedCgmIntervalMs: Long? = null): File
 }

@@ -38,6 +38,7 @@ class DummyService : DaggerService() {
 
     override fun onCreate() {
         super.onCreate()
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("foregroundService.DummyService")
         try {
             aapsLogger.debug("Starting DummyService with ID ${notificationHolder.notificationID} notification ${notificationHolder.notification}")
             startForeground(notificationHolder.notificationID, notificationHolder.notification)

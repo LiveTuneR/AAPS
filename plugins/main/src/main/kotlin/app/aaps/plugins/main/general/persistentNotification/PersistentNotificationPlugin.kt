@@ -109,10 +109,15 @@ class PersistentNotificationPlugin @Inject constructor(
     private var notificationScope: CoroutineScope? = null
     private var refreshRequests: Channel<Unit>? = null
     private val autoRequested = AtomicBoolean(false)
+    @Inject lateinit var presentationKey: app.aaps.core.objects.PresentationRefreshKey
+    private val buildGate = app.aaps.core.data.diagnostics.PresentationBuildGate()
+    private var lastBuildIncludedAuto = false
 
     override suspend fun onStart() {
         super.onStart()
         notificationHolder.createNotificationChannel()
+        buildGate.reset()
+        lastBuildIncludedAuto = false
         val requests = Channel<Unit>(Channel.CONFLATED)
         refreshRequests = requests
         notificationScope = CoroutineScope(Dispatchers.IO + SupervisorJob()).also { scope ->
@@ -159,6 +164,11 @@ class PersistentNotificationPlugin @Inject constructor(
 
     private suspend fun updateNotification(includeAuto: Boolean = false) {
         if (!config.appInitialized) return
+        val refreshKey = if (::presentationKey.isInitialized) presentationKey.current(dateUtil.now()) else null
+        if (!buildGate.needsBuild(refreshKey) && (!includeAuto || lastBuildIncludedAuto)) {
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("notification.skippedUnchanged"); return
+        }
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("notification.builds")
         val pump = activePlugins.activePump
         var line1: String?
         var line2: String? = null
@@ -278,5 +288,7 @@ class PersistentNotificationPlugin @Inject constructor(
         val notification = builder.build()
         mNotificationManager.notify(notificationHolder.notificationID, notification)
         notificationHolder.notification = notification
+        buildGate.commit(refreshKey)
+        lastBuildIncludedAuto = includeAuto
     }
 }

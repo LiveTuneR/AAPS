@@ -22,23 +22,37 @@ import javax.inject.Inject
  * stateless — they resolve their dependencies via Hilt EntryPoint inside
  * `provideGlance`, so this class doesn't need to hold any state-loader refs.
  */
+@javax.inject.Singleton
 class WidgetUpdaterImpl @Inject constructor(
     private val context: Context,
     private val aapsLogger: AAPSLogger,
     @ApplicationScope private val scope: CoroutineScope
 ) : WidgetUpdater {
+    @Inject lateinit var presentationKey: app.aaps.core.objects.PresentationRefreshKey
+    private val buildGate = app.aaps.core.data.diagnostics.PresentationBuildGate()
+    private val updateMutex = kotlinx.coroutines.sync.Mutex()
 
     override fun update(from: String) {
         scope.launch {
+            updateMutex.lock()
+            try {
+            val key = if (::presentationKey.isInitialized) presentationKey.current(System.currentTimeMillis()) else null
+            if (from == "ScheduleEveryMin" && !buildGate.needsBuild(key)) {
+                app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("widget.skippedUnchanged"); return@launch
+            }
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("widget.builds")
+            var successful = true
             aapsLogger.debug(LTag.WIDGET, "updateWidget $from")
             runCatching { AapsGlanceWidget().updateAll(context) }
-                .onFailure { aapsLogger.error(LTag.WIDGET, "updateWidget failed: ${it.message}", it) }
+                .onFailure { successful = false; aapsLogger.error(LTag.WIDGET, "updateWidget failed: ${it.message}", it) }
             runCatching { BgGraphGlanceWidget().updateAll(context) }
-                .onFailure { aapsLogger.error(LTag.WIDGET, "updateBgGraphWidget failed: ${it.message}", it) }
+                .onFailure { successful = false; aapsLogger.error(LTag.WIDGET, "updateBgGraphWidget failed: ${it.message}", it) }
             runCatching { CompactBgGlanceWidget().updateAll(context) }
-                .onFailure { aapsLogger.error(LTag.WIDGET, "updateCompactBgWidget failed: ${it.message}", it) }
+                .onFailure { successful = false; aapsLogger.error(LTag.WIDGET, "updateCompactBgWidget failed: ${it.message}", it) }
             runCatching { triggerSmallWidgetUpdate() }
-                .onFailure { aapsLogger.error(LTag.WIDGET, "updateSmallWidget failed: ${it.message}", it) }
+                .onFailure { successful = false; aapsLogger.error(LTag.WIDGET, "updateSmallWidget failed: ${it.message}", it) }
+            if (successful) buildGate.commit(key) else buildGate.reset()
+            } finally { updateMutex.unlock() }
         }
     }
 

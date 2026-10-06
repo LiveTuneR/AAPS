@@ -37,6 +37,7 @@ class TherapyTelemetryImpl @Inject constructor(
     private val _health = MutableStateFlow(TherapyTelemetryHealth())
     override val health = _health.asStateFlow()
     private val started = AtomicBoolean()
+    private val stopped = AtomicBoolean()
     private val drops = AtomicLong()
     private val admissionFailures = AtomicLong()
     private val queueHighWater = AtomicLong()
@@ -88,6 +89,7 @@ class TherapyTelemetryImpl @Inject constructor(
     }
 
     override fun record(type: TherapyEventType, data: JSONObject, generation: Long?, correlationId: String?) {
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.records.${type.name}")
         try {
             val copied = TelemetrySanitizer.clean(data)
             val observedUtc = System.currentTimeMillis()
@@ -131,6 +133,16 @@ class TherapyTelemetryImpl @Inject constructor(
         catch (e: RejectedExecutionException) { failed(e) }
     }
 
+    override fun stop() {
+        if (!stopped.compareAndSet(false, true)) return
+        started.set(false)
+        diagnosticDeadline.close()
+        diagnosticClock.shutdown()
+        try { writer.execute { try { flushDiagnostics(); flushDrops(); store.close() } catch (error: Exception) { failed(error) } } }
+        catch (error: RejectedExecutionException) { failed(error) }
+        finally { writer.shutdown() }
+    }
+
     override suspend fun export(startUtc: Long, endUtc: Long, expectedCgmIntervalMs: Long?): File = suspendCancellableCoroutine { continuation ->
         try { writer.execute {
             var output: File? = null
@@ -154,12 +166,13 @@ class TherapyTelemetryImpl @Inject constructor(
                         .put("status", "EXPERIMENTAL_DEVICE_VALIDATION_REQUIRED")
                         .put("diagnosticPolicy", JSONObject()
                             .put("batchedTypes", org.json.JSONArray(diagnosticTypes.map { it.name }.sorted()))
-                            .put("maxRecords",128).put("maxBytes",65536).put("flushIntervalMs",1000)
+                            .put("maxRecordsPerBuffer",128).put("maxBytesPerBuffer",65536).put("buffers",2).put("flushDeadlineMs",1000)
                             .put("aggregation", "consecutive identical PUMP_STATE; firstSeenUtc/lastSeenUtc/repeatCount")
                             .put("crashCoverage", "Unflushed RAM diagnostics may be lost; unclean session is marked uncertain. Accepted durable batches use counted admission WAL.")
                             .put("rawBleCoverage", "Current Apex/Medtrum RAM ring snapshots included with truncation and UTC span; pre-crash/full BLE history unavailable.")
                             .put("criticalEvents", "Serialized writer admission and per-record fsync; record API asynchronous; bolus-operation journal unchanged"))
-                        .put("telemetryPerformance", performanceJson()),
+                        .put("telemetryPerformance", performanceJson())
+                        .put("energyRuntime", JSONObject(app.aaps.core.data.diagnostics.EnergyRuntimeCounters.snapshot())),
                 )
                 refreshHealth()
                 if (continuation.isActive) continuation.resume(output) else output.delete()
@@ -194,6 +207,7 @@ class TherapyTelemetryImpl @Inject constructor(
             diagnostics.drain()
         }
         if (batch.isEmpty()) return
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.diagnosticFlushes")
         diagnosticBatches.incrementAndGet()
         // One admission per bounded batch; persisted counts also cover a partial append after a crash.
         val observations = batch.sumOf { it.data.optJSONObject("diagnosticAggregation")?.optLong("repeatCount", 1L) ?: 1L }

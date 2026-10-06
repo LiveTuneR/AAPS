@@ -393,6 +393,7 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
         //  schedule widget update
         refreshWidget = Runnable {
             handler.postDelayed(refreshWidget, 60000)
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("timer.widgetMinute")
             widgetUpdater.update("ScheduleEveryMin")
         }
         handler.postDelayed(refreshWidget, 5000)
@@ -1004,6 +1005,7 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
 
     override fun onTerminate() {
         aapsLogger.debug(LTag.CORE, "onTerminate")
+        therapyTelemetry.stop()
         handler.removeCallbacksAndMessages(null)
         handler.looper.quitSafely()
         unregisterReceivers()

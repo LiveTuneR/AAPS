@@ -7,6 +7,8 @@ import androidx.annotation.StringRes
  */
 
 interface SP {
+    /** Observation-only invalidation token; unknown implementations cannot prove cache equality. */
+    val presentationRevision: Long? get() = null
 
     // Using a helper Editor interface to distinguish its
     // methods from SP's. The latter always run apply().
