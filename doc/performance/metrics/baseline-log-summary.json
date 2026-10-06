@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "source": "USER_EXPORT_PRE_R1",
+  "sourceSha": "da3220a5982000b63940f03004fa3a51af531017",
+  "clock": "source elapsed timing, not CPU",
+  "configuration": {
+    "glucoseInputMinutes": 1,
+    "algorithm": "SMB",
+    "dynamicIsf": false,
+    "autosens": true,
+    "maxSmbFrequencyMinutes": 5
+  },
+  "workerMs": {
+    "n": 12691,
+    "p50": 8126,
+    "p95": 41378,
+    "p99": 90405,
+    "max": 511424,
+    "sum": 195904518
+  },
+  "componentsMs": {
+    "load": {
+      "n": 12689,
+      "p50": 24,
+      "p95": 137,
+      "p99": 271,
+      "max": 796,
+      "sum": 482431
+    },
+    "smoothing": {
+      "n": 12688,
+      "p50": 4.0,
+      "p95": 11,
+      "p99": 117,
+      "max": 325,
+      "sum": 88738
+    },
+    "bucketGraph": {
+      "n": 12688,
+      "p50": 0.0,
+      "p95": 0,
+      "p99": 0,
+      "max": 313,
+      "sum": 2449
+    },
+    "bgGraph": {
+      "n": 12688,
+      "p50": 5.0,
+      "p95": 36,
+      "p99": 164,
+      "max": 622,
+      "sum": 142346
+    },
+    "profile": {
+      "n": 12688,
+      "p50": 0.0,
+      "p95": 1,
+      "p99": 43,
+      "max": 3180,
+      "sum": 29506
+    },
+    "treatmentsIob": {
+      "n": 12688,
+      "p50": 55.0,
+      "p95": 432,
+      "p99": 1190,
+      "max": 35440,
+      "sum": 1830595
+    },
+    "carbs": {
+      "n": 12688,
+      "p50": 0.0,
+      "p95": 89,
+      "p99": 316,
+      "max": 4593,
+      "sum": 201051
+    },
+    "sensitivity": {
+      "n": 12688,
+      "p50": 15.0,
+      "p95": 150,
+      "p99": 337,
+      "max": 6072,
+      "sum": 483386
+    },
+    "autosensTotal": {
+      "n": 12688,
+      "p50": 108.0,
+      "p95": 859,
+      "p99": 2202,
+      "max": 45333,
+      "sum": 3380017
+    },
+    "iobGraph": {
+      "n": 12687,
+      "p50": 7966,
+      "p95": 40375,
+      "p99": 88771,
+      "max": 501962,
+      "sum": 191682883
+    }
+  },
+  "adsCache": {
+    "hits": 5053568,
+    "misses": 44703
+  },
+  "byPump": {
+    "APEX_TRUCARE_III": {
+      "n": 8295,
+      "p50Ms": 7957,
+      "p95Ms": 48517
+    },
+    "MEDTRUM_NANO": {
+      "n": 4396,
+      "p50Ms": 8349.0,
+      "p95Ms": 27627
+    }
+  },
+  "eventCounts": {
+    "CGM": 11235,
+    "SCHEDULER": 39002,
+    "PUMP_QUEUE": 22952,
+    "PUMP_STATE": 388756,
+    "PUMP_DISPATCH": 3565,
+    "PUMP_SENT": 26995,
+    "CALCULATION": 25289,
+    "PUMP_RESULT": 9136,
+    "APS_INPUT": 12489,
+    "APS_DECISION": 12489,
+    "CONSTRAINT": 12489,
+    "TBR_REQUEST": 5269,
+    "THERAPY_EVENT": 5675,
+    "HISTORY_RECONCILIATION": 43884,
+    "ACTIVITY": 5811,
+    "SMB_REQUEST": 298,
+    "ERROR": 11,
+    "PROCESS_START": 3,
+    "SETTINGS_SNAPSHOT": 3
+  },
+  "eventBytes": {
+    "CGM": 7083777,
+    "SCHEDULER": 24061428,
+    "PUMP_QUEUE": 14696036,
+    "PUMP_STATE": 245400618,
+    "PUMP_DISPATCH": 2227289,
+    "PUMP_SENT": 16451818,
+    "CALCULATION": 23672283,
+    "PUMP_RESULT": 5778802,
+    "APS_INPUT": 308166846,
+    "APS_DECISION": 28359879,
+    "CONSTRAINT": 8062715,
+    "TBR_REQUEST": 2714123,
+    "THERAPY_EVENT": 3113022,
+    "HISTORY_RECONCILIATION": 29707178,
+    "ACTIVITY": 3590239,
+    "SMB_REQUEST": 150051,
+    "ERROR": 6757,
+    "PROCESS_START": 1408,
+    "SETTINGS_SNAPSHOT": 12099
+  },
+  "archiveSha256Verified": true,
+  "batteryData": "screenshots only; no controlled R1 comparison"
+}

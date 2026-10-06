@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "previousApks": true,
+  "apks": [
+    {
+      "kind": "phone",
+      "file": "aaps-4.0-apex-da3220a.apk",
+      "bytes": 128324086,
+      "sha256": "73797ecefe4918f5699d4e11c27ec6ff20336a9e5b24bcfa88db050297869d96",
+      "package": "info.nightscout.androidaps",
+      "versionCode": 2006,
+      "versionName": "4.0.0-beta-apex7",
+      "minSdk": 31,
+      "targetSdk": 35,
+      "abis": [
+        "arm64-v8a",
+        "armeabi-v7a",
+        "x86",
+        "x86_64"
+      ],
+      "certificateSha256": "1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084",
+      "signatureVerified": true,
+      "embeddedSourceSha": null
+    },
+    {
+      "kind": "wear",
+      "file": "aaps-4.0-apex-wear-da3220a.apk",
+      "bytes": 54804861,
+      "sha256": "9adaebe4e38874305ff894cf274d30929d194256daf0afe366ac502b1748e22d",
+      "package": "info.nightscout.androidaps",
+      "versionCode": 2006,
+      "versionName": "4.0.0-beta-apex7",
+      "minSdk": 30,
+      "targetSdk": 30,
+      "abis": [
+        "arm64-v8a",
+        "armeabi-v7a",
+        "x86",
+        "x86_64"
+      ],
+      "certificateSha256": "1b20d5c3807e9e6d895728d68099e21801ec05f860d4cc457eee25e530a8a084",
+      "signatureVerified": true,
+      "embeddedSourceSha": null
+    }
+  ],
+  "deviceUpgradeTested": false,
+  "deviceEnergyMeasured": false
+}

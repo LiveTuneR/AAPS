@@ -1,0 +1,136 @@
+{
+  "sha": "da3220a5982000b63940f03004fa3a51af531017",
+  "buildVariant": "fullDebugUnitTest",
+  "java": 21,
+  "modules": [
+    {
+      "module": "workflow",
+      "suites": 6,
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/main",
+      "suites": 11,
+      "tests": 43,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/sensitivity",
+      "suites": 6,
+      "tests": 58,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/interfaces",
+      "suites": 9,
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/sync",
+      "suites": 103,
+      "tests": 843,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "pump/apex",
+      "suites": 8,
+      "tests": 60,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "core/data",
+      "suites": 7,
+      "tests": 40,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "pump/medtrum",
+      "suites": 34,
+      "tests": 145,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/aps",
+      "suites": 34,
+      "tests": 296,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "plugins/smoothing",
+      "suites": 1,
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "implementation",
+      "suites": 79,
+      "tests": 736,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "shared/impl",
+      "suites": 5,
+      "tests": 102,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "ui",
+      "suites": 112,
+      "tests": 415,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "wear",
+      "suites": 48,
+      "tests": 265,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "database/impl",
+      "suites": 79,
+      "tests": 393,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "module": "database/persistence",
+      "suites": 16,
+      "tests": 56,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "status": "PASSED"
+}
