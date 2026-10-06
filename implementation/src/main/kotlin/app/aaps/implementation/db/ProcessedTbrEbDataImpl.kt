@@ -25,10 +25,13 @@ class ProcessedTbrEbDataImpl @Inject constructor(
         return null
     }
 
-    override suspend fun getTempBasalIncludingConvertedExtended(timestamp: Long): TB? =
-        persistenceLayer.getTemporaryBasalActiveAt(timestamp) ?: getConvertedExtended(timestamp)
+    override suspend fun getTempBasalIncludingConvertedExtended(timestamp: Long): TB? {
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("db.tbr.point")
+        return persistenceLayer.getTemporaryBasalActiveAt(timestamp) ?: getConvertedExtended(timestamp)
+    }
 
     override suspend fun getTempBasalsIncludingConvertedExtended(startTime: Long, endTime: Long): ProcessedTbrEbData.TempBasalsInRange {
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("db.tbr.range")
         val basals = persistenceLayer.getTemporaryBasalsActiveBetweenTimeAndTime(startTime, endTime).map { it.copy() }.sortedByDescending { it.timestamp }
         val extended = if (activePlugin.activePump.isFakingTempsByExtendedBoluses)
             persistenceLayer.getExtendedBolusesActiveBetweenTimeAndTime(startTime, endTime).map { it.copy() }.sortedByDescending { it.timestamp }

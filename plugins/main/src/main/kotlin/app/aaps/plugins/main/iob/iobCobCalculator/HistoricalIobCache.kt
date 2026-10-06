@@ -19,6 +19,7 @@ internal class HistoricalIobCache(private val maximumEntries: Int = 4096, privat
         prune(now)
         val value = if (time < now) values[time]?.detached() else null
         if (value == null) misses++ else hits++
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add(if (value == null) "historicalIob.cacheMisses" else "historicalIob.cacheHits")
         return Lookup(revision, value)
     }
 

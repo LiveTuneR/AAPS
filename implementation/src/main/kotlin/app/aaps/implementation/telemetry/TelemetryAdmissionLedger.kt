@@ -66,6 +66,7 @@ internal class TelemetryAdmissionLedger(private val file: File) {
             output.write((row.toString() + "\n").toByteArray())
             output.flush()
             output.fd.sync()
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.admissionFsync")
         }
     }
 
@@ -75,6 +76,7 @@ internal class TelemetryAdmissionLedger(private val file: File) {
         FileOutputStream(replacement).use { output ->
             output.write((JSONObject().put("kind", "checkpoint").put("nextSequence", nextSequence).put("timestampUtc", System.currentTimeMillis()).toString() + "\n").toByteArray())
             output.fd.sync()
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.admissionFsync")
         }
         if (!replacement.renameTo(file)) {
             file.delete()

@@ -49,4 +49,18 @@ class OptionalGraphGenerationTest : TestBase() {
         release.complete(Unit)
         graph.join()
     }
+
+    @Test fun `routine generation replacement retains active graph input but discards publication`() {
+        val chain = WorkflowChainData(aapsLogger)
+        val oldInput = data()
+        val old = chain.startMain(oldInput, mock())
+        chain.graphReady(old); chain.retainGraph(old, oldInput)
+        val nextInput = data()
+        val next = chain.startMain(nextInput, mock()); chain.graphReady(next)
+        assertSame(oldInput, chain.graphInputFor(old))
+        assertFalse(chain.publishGraphIfCurrent(old, { false }) { fail<Unit>("stale graph published") })
+        assertSame(nextInput, chain.graphFor(next))
+        chain.invalidate(MAIN_CALCULATION)
+        assertNull(chain.graphInputFor(old))
+    }
 }

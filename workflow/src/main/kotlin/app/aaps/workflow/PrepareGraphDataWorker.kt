@@ -156,6 +156,13 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             return result
         }
         finally {
+            val metricRole = if (inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false)) "optionalGraph"
+                else if (inputData.getString(WorkflowChainData.JOB_KEY) == CalculationWorkflow.MAIN_CALCULATION) "mandatoryPrepare" else "historyPrepare"
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.duration(metricRole, (System.nanoTime() - started) / 1_000_000)
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("calculation.$metricRole.$outcome")
+            if (metricRole == "optionalGraph" && !optionalGraphPublished) app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("calculation.optionalGraph.discarded")
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("ads.cacheHits", adsCacheHits.toLong())
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("ads.cacheMisses", adsCacheMisses.toLong())
             val sections = timings.entries.joinToString(" ") { "${it.key}Calls=${it.value.calls} ${it.key}Ms=${it.value.nanos / 1_000_000}" }
             aapsLogger.info(LTag.WORKER, "CalculationTiming job=${inputData.getString(WorkflowChainData.JOB_KEY)} generation=${inputData.getLong(WorkflowChainData.GEN_KEY, -1L)} startedAt=$startedAt finishedAt=${dateUtil.now()} stopped=$isStopped totalMs=${(System.nanoTime() - started) / 1_000_000} adsCacheHits=$adsCacheHits adsCacheMisses=$adsCacheMisses $sections")
             telemetry { (publishedEvidence ?: org.json.JSONObject()).put("stage","FINISHED").put("outcome",outcome)

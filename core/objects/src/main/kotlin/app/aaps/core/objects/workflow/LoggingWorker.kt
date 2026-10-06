@@ -25,6 +25,7 @@ abstract class LoggingWorker(
 
     override suspend fun doWork(): Result =
         withContext(dispatcher) {
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("workManager.${this@LoggingWorker::class.java.simpleName}")
             doWorkAndLog().also {
                 aapsLogger.debug(LTag.WORKER, "Worker result ${it::class.java.simpleName.uppercase()} for ${this@LoggingWorker::class.java} ${it.outputData}")
             }

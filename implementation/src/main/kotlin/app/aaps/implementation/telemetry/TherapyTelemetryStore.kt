@@ -49,7 +49,7 @@ internal class TherapyTelemetryStore(
         lastReconciliation = monotonic()
         return diskBytes
     }
-    private fun sync(fd: java.io.FileDescriptor) { fd.sync(); durableSyncs++ }
+    private fun sync(fd: java.io.FileDescriptor) { fd.sync(); durableSyncs++; app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.fsync") }
     fun flush() { if (active.isFile && active.length() > 0) FileOutputStream(active, true).use { sync(it.fd) } }
     private val control = File(directory,"control.json")
     private var state: JSONObject
@@ -146,7 +146,7 @@ internal class TherapyTelemetryStore(
             return false
         }
         val originalLength = active.length()
-        try { FileOutputStream(active,true).use { it.write(bytes); if (durable) sync(it.fd) }; account(active) }
+        try { FileOutputStream(active,true).use { it.write(bytes); app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("telemetry.bytes",bytes.size.toLong()); if (durable) sync(it.fd) }; account(active) }
         catch (error: Exception) {
             try { RandomAccessFile(active,"rw").use { it.setLength(originalLength); sync(it.fd) }; account(active) }
             catch (_: Exception) { state.put("uncertainHistory",true) }
