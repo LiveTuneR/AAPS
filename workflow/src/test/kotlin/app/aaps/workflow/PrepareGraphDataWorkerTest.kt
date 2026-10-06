@@ -103,6 +103,25 @@ class PrepareGraphDataWorkerTest : TestBaseWithProfile() {
     }
 
     @Test
+    fun `optional graph performs its work without rewinding mandatory calculation progress`() = runTest {
+        stubSuspendCalls()
+        workflowChainData = WorkflowChainData(aapsLogger)
+        val generation = workflowChainData.startMain(buildData(false, false), mock())
+        workflowChainData.graphReady(generation)
+        whenever(cache.hasIobGraphConsumers).thenReturn(true)
+        whenever(workerParameters.inputData).thenReturn(workDataOf(
+            WorkflowChainData.JOB_KEY to app.aaps.core.interfaces.workflow.CalculationWorkflow.MAIN_CALCULATION,
+            WorkflowChainData.GEN_KEY to generation,
+            WorkflowChainData.GRAPH_ONLY_KEY to true
+        ))
+
+        assertIs<ListenableWorker.Result.Success>(worker().doWorkAndLog())
+
+        verify(dataIobCob).calculateIobArrayForSMB(any(), any(), any(), any())
+        verify(signals, org.mockito.kotlin.never()).emitProgress(any(), any())
+    }
+
+    @Test
     fun `full run traverses all phases and emits progress`() = runTest {
         stubSuspendCalls()
         whenever(workflowChainData.prepareFor(anyOrNull(), any())).thenReturn(buildData(bgDataReload = false, emitFinalProgress = true))

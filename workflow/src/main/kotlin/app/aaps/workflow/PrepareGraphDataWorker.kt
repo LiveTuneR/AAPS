@@ -768,7 +768,9 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         val fromTime = cacheTimeRange?.fromTime ?: data.overviewData.fromTime
         val endTime = cacheTimeRange?.endTime ?: data.overviewData.endTime
 
-        data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 0)
+        // Optional rendering must not rewind the completed mandatory cycle's indicator.
+        val reportCalculationProgress = !inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false)
+        if (reportCalculationProgress) data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 0)
 
         val now = dateUtil.now().toDouble()
         var time = fromTime
@@ -793,7 +795,7 @@ class PrepareGraphDataWorker @AssistedInject constructor(
             if (isStopped || inputData.getBoolean(WorkflowChainData.GRAPH_ONLY_KEY, false) &&
                 workflowChainData.graphFor(inputData.getLong(WorkflowChainData.GEN_KEY, -1L)) == null) return
             val progress = (time - fromTime).toDouble() / (endTime - fromTime) * 100.0
-            data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, progress.toInt())
+            if (reportCalculationProgress) data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, progress.toInt())
             val profile = profileFunction.getProfile(time)
             if (profile == null) {
                 time += 5 * 60 * 1000L
@@ -887,6 +889,6 @@ class PrepareGraphDataWorker @AssistedInject constructor(
         else workflowChainData.publishIfCurrent(job, generation, { isStopped }, publishForRange)
         if (!published || !rangePublished) return
 
-        data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 100)
+        if (reportCalculationProgress) data.signals.emitProgress(CalculationWorkflow.ProgressData.PREPARE_IOB_AUTOSENS_DATA, 100)
     }
 }

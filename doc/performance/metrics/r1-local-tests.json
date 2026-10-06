@@ -12,7 +12,7 @@
     {
       "module": "workflow",
       "suites": 7,
-      "tests": 27,
+      "tests": 28,
       "failures": 0,
       "errors": 0,
       "skipped": 0
@@ -139,7 +139,7 @@
     }
   ],
   "totals": {
-    "tests": 3562,
+    "tests": 3563,
     "failures": 0,
     "errors": 0,
     "skipped": 0
@@ -153,5 +153,13 @@
     "finalFullSuitePassed": true,
     "excluded": false
   },
-  "deviceEnergyValidation": "PENDING"
+  "deviceEnergyValidation": "PENDING",
+  "finalWorkflowSupplement": {
+    "elapsed": "29s",
+    "tests": 28,
+    "result": "BUILD SUCCESSFUL",
+    "reason": "Optional graph no longer drives mandatory progress",
+    "logSha256": "53c47b2dfd106a25bb622b971dd78d052f33d5724452a6337848831f03c9c906"
+  },
+  "totalsScope": "Latest module XML: original full 16-module run (3562 tests) plus final workflow run (28 tests replacing its previous 27); no exclusions."
 }
