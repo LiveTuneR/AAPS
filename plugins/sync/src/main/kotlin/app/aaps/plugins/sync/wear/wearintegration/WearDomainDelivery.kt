@@ -9,13 +9,16 @@ internal class WearDomainDelivery {
     private var skipped = 0L
     private var resyncs = 0L
     data class Stats(val sends: Map<String, Long>, val skippedUnchanged: Long, val fullResyncs: Long)
-    @Synchronized fun reset() { keys.clear(); resyncs++ }
+    @Synchronized fun reset(fullResync: Boolean = false) {
+        keys.clear()
+        if (fullResync) { resyncs++; app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.fullResyncs") }
+    }
     @Synchronized fun stats() = Stats(sends.toMap(), skipped, resyncs)
 
     @Synchronized fun accept(event: EventData, force: Boolean = false): Boolean {
         val (domain, key) = when (event) {
             // SingleBg overrides equals using only timestamp/color: its data-class text covers all fields.
-            is EventData.FastStatus -> "FAST_STATUS" to listOf(event.bg?.toString(), event.status, event.predictions?.map { it.toString() })
+            is EventData.FastStatus -> (if (event.status == null && event.predictions == null) "FAST_BG" else "FAST_STATUS") to listOf(event.bg?.toString(), event.status, event.predictions?.map { it.toString() })
             is EventData.Preferences -> "PREFERENCES" to event.copy(timeStamp = 0)
             is EventData.GraphData -> "GRAPH_HISTORY" to event.entries.map { it.toString() }
             is EventData.TreatmentData -> "TREATMENT_HISTORY" to listOf(event.temps, event.basals, event.boluses, event.predictions.map { it.toString() })
@@ -26,7 +29,10 @@ internal class WearDomainDelivery {
             is EventData.RunningModeList -> "RUNNING_MODES" to event.states.toList()
             else -> return true
         }
-        if (!force && keys[domain] == key) { skipped++; return false }
+        if (event !is EventData.GraphData) app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.payloadBuilds.$domain")
+        if (!force && keys[domain] == key) {
+            skipped++; app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.skipped.$domain"); return false
+        }
         keys[domain] = key
         sends[domain] = (sends[domain] ?: 0) + 1
         return true

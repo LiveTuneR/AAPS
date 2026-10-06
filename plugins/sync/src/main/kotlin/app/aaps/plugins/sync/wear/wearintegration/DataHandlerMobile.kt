@@ -169,8 +169,9 @@ class DataHandlerMobile @Inject constructor(
     private val graphHistory = WearHistoryCache<GraphKey, EventData.GraphData>()
 
     private val domainDelivery = WearDomainDelivery()
-    private var lastFinalGeneration: Long? = null
-    fun resetHistoryDelivery() { graphHistory.reconnect(); domainDelivery.reset() }
+    private val finalCycle = WearCycleGate()
+    private val fastStatusMutex = kotlinx.coroutines.sync.Mutex()
+    fun resetHistoryDelivery(fullResync: Boolean = false) { graphHistory.reconnect(); domainDelivery.reset(fullResync) }
     internal fun deliveryMetrics() = domainDelivery.stats()
 
 
@@ -1088,7 +1089,7 @@ class DataHandlerMobile @Inject constructor(
     /** Full snapshot is reserved for restart, reconnect and an explicit watch request. */
     suspend fun resendData(from: String, forceHistory: Boolean = false) = snapshotMutex.withLock {
         if (!config.appInitialized) return@withLock
-        resetHistoryDelivery()
+        resetHistoryDelivery(fullResync = true)
         sendPreferences()
         sendQuickWizardListToWear()
         sendUserActions()
@@ -1122,29 +1123,27 @@ class DataHandlerMobile @Inject constructor(
     suspend fun sendRoutineModes() = handleAvailableRunningModes(routine = true)
 
     /** Early minute-CGM update is cheap. The terminal generation owns the final APS status. */
-    suspend fun sendFastStatus(from: String, bgOnly: Boolean = false, generation: Long? = null) {
-        if (!config.appInitialized) return
-        if (generation != null) synchronized(this) {
-            if (lastFinalGeneration == generation) return
-            lastFinalGeneration = generation
-        }
+    suspend fun sendFastStatus(from: String, bgOnly: Boolean = false, generation: Long? = null) = fastStatusMutex.withLock {
+        if (!config.appInitialized || !finalCycle.needsBuild(generation)) return@withLock
         val bg = iobCobCalculator.ads.lastBg()?.let(::getSingleBG)
         val status = if (bgOnly) null else buildStatus(from)
         val predictions = if (bgOnly) null else buildPredictions()
         sendToWear(EventData.FastStatus(bg, status, predictions))
+        finalCycle.committed(generation)
     }
 
     fun sendGraphHistory(forceHistory: Boolean = false) {
         iobCobCalculator.ads.getBucketedDataTableCopy()?.let { bucketedData ->
             // Hoist out of the per-bucket map: getGlucoseStatusData copies the bucketed table and runs a polynomial fit on every call.
-            val glucoseStatus = glucoseStatusProvider.getGlucoseStatusData(true)
             val units = profileFunction.getUnits()
             val lowLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewLowMark), units)
             val highLine = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.OverviewHighMark), units)
-            val slopeArrow = (trendCalculator.getTrendArrow(iobCobCalculator.ads) ?: TrendArrow.NONE).symbol
             val key = GraphKey(bucketedData.map { it.copy() }, units, preferences.get(StringKey.GeneralUnits),
                 lowLine, highLine)
             graphHistory.snapshot(key, System.nanoTime(), forceHistory) {
+                app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.payloadBuilds.GRAPH_HISTORY")
+                val glucoseStatus = glucoseStatusProvider.getGlucoseStatusData(true)
+                val slopeArrow = (trendCalculator.getTrendArrow(iobCobCalculator.ads) ?: TrendArrow.NONE).symbol
                 EventData.GraphData(ArrayList(bucketedData.map { buildSingleBg(it, glucoseStatus, units, lowLine, highLine, slopeArrow) }))
             }?.let(::sendToWear)
         }

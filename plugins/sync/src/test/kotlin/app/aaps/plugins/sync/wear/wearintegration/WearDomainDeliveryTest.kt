@@ -21,7 +21,7 @@ class WearDomainDeliveryTest {
         assertFalse(gate.accept(actions.copy(entries = arrayListOf(actions.entries.single().copy(timeStamp = 10_000)))))
         assertTrue(gate.accept(EventData.ActiveSceneState(true)))
         assertFalse(gate.accept(actions))
-        gate.reset(); assertTrue(gate.accept(actions)); assertEquals(1L, gate.stats().fullResyncs)
+        gate.reset(fullResync = true); assertTrue(gate.accept(actions)); assertEquals(1L, gate.stats().fullResyncs)
     }
     @Test fun `urgent progress and interactive mode replies bypass routine suppression`() {
         val gate = WearDomainDelivery()
@@ -34,7 +34,7 @@ class WearDomainDeliveryTest {
         val gate = WearDomainDelivery()
         repeat(60) { minute -> assertTrue(gate.accept(EventData.FastStatus(
             EventData.SingleBg(0, minute * 60_000L, sgv = 100.0, high = 180.0, low = 70.0), null))) }
-        assertEquals(mapOf("FAST_STATUS" to 60L), gate.stats().sends)
+        assertEquals(mapOf("FAST_BG" to 60L), gate.stats().sends)
         assertTrue(EventData.deserialize(EventData.FastStatus(null, null, arrayListOf()).serialize()) is EventData.FastStatus)
     }
 }

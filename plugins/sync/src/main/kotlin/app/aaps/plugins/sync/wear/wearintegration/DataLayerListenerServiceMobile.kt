@@ -69,6 +69,8 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
     private val traffic = WearTrafficCounters()
 
     private fun reportTraffic(size: Int, domain: String = "WATCHFACE") {
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.messages.$domain")
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.bytes.$domain", size.toLong())
         traffic.sent(size, domain)
         traffic.reportIfDue()?.let { stats ->
             therapyTelemetry.record(app.aaps.core.interfaces.telemetry.TherapyEventType.SCHEDULER,
@@ -159,6 +161,7 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
             if (changed) {
                 dataHandlerMobile.resetHistoryDelivery()
                 if (bestNode != null) {
+                    app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.reconnects")
                     rxBus.send(EventMobileToWear(EventData.ActionPing(System.currentTimeMillis())))
                     rxBus.send(EventData.ActionResendData("WatchUpdaterService"))
                 }
@@ -204,9 +207,11 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
             reportTraffic(bytes.size, domain)
             messageClient
                 .sendMessage(nodeId, path, bytes).apply {
-                    addOnSuccessListener { traffic.completed(true) }
+                    addOnSuccessListener { traffic.completed(true); app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.succeeded") }
                     addOnFailureListener {
                         traffic.completed(false)
+                        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.failed")
+                        dataHandlerMobile.resetHistoryDelivery()
                         aapsLogger.debug(LTag.WEAR, "sendMessage:  $path failure")
                     }
                 }
@@ -220,9 +225,11 @@ class DataLayerListenerServiceMobile : WearableListenerService() {
             reportTraffic(data.size)
             messageClient
                 .sendMessage(nodeId, path, data).apply {
-                    addOnSuccessListener { traffic.completed(true) }
+                    addOnSuccessListener { traffic.completed(true); app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.succeeded") }
                     addOnFailureListener {
                         traffic.completed(false)
+                        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wear.failed")
+                        dataHandlerMobile.resetHistoryDelivery()
                         aapsLogger.debug(LTag.WEAR, "sendMessage:  $path failure ${data.size}")
                     }
                 }
