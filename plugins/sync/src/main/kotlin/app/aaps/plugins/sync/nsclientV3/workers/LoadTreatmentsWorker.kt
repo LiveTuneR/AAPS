@@ -37,6 +37,7 @@ class LoadTreatmentsWorker @AssistedInject constructor(
     override suspend fun doWorkAndLog(): Result {
         val nsAndroidClient = nsClientV3Plugin.nsAndroidClient ?: return Result.failure(workDataOf("Error" to "AndroidClient is null"))
 
+        val firstLoadBefore = nsClientV3Plugin.firstLoadContinueTimestamp.collections.treatments
         var continueLoading = true
         try {
             while (continueLoading) {
@@ -53,11 +54,9 @@ class LoadTreatmentsWorker @AssistedInject constructor(
                     } else {
                         response = nsAndroidClient.getTreatmentsModifiedSince(lastLoaded, NSClientV3Plugin.RECORDS_TO_LOAD)
                         aapsLogger.debug(LTag.NSCLIENT, "lastLoadedSrvModified: ${response.lastServerModified}")
-                        response.lastServerModified?.let { nsClientV3Plugin.lastLoadedSrvModified.collections.treatments = it }
-                        nsClientV3Plugin.storeLastLoadedSrvModified()
                     }
                     treatments = response.values
-                    aapsLogger.debug(LTag.NSCLIENT, "TREATMENTS: $treatments")
+                    aapsLogger.debug(LTag.NSCLIENT) { "TREATMENTS count=${treatments.size}" }
                     if (treatments.isNotEmpty()) {
                         val action = if (isFirstLoad) "RCV-F" else "RCV"
                         nsClientRepository.addLog("◄ $action", "${treatments.size} TRs from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
@@ -65,16 +64,21 @@ class LoadTreatmentsWorker @AssistedInject constructor(
                         continueLoading =
                             response.code != 304 && nsIncomingDataProcessor.processTreatments(response.values, nsClientV3Plugin.doingFullSync)
                     } else {
-                        // End first load
-                        if (isFirstLoad) {
-                            nsClientV3Plugin.lastLoadedSrvModified.collections.treatments = lastLoaded
-                            nsClientV3Plugin.storeLastLoadedSrvModified()
-                        }
                         nsClientRepository.addLog("◄ RCV TR END", "No data from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
                         continueLoading = false
                     }
+                    storeDataForDb.storeTreatmentsToDb(fullSync = nsClientV3Plugin.doingFullSync)
+                    if (isFirstLoad && treatments.isEmpty()) {
+                        nsClientV3Plugin.lastLoadedSrvModified.collections.treatments = lastLoaded
+                        nsClientV3Plugin.storeLastLoadedSrvModified()
+                    }
+                    if (!isFirstLoad) {
+                        response.lastServerModified?.let { nsClientV3Plugin.lastLoadedSrvModified.collections.treatments = it }
+                        nsClientV3Plugin.storeLastLoadedSrvModified()
+                    }
                 } else {
                     // End first load
+                    storeDataForDb.storeTreatmentsToDb(fullSync = nsClientV3Plugin.doingFullSync)
                     if (isFirstLoad) {
                         nsClientV3Plugin.lastLoadedSrvModified.collections.treatments = lastLoaded
                         nsClientV3Plugin.storeLastLoadedSrvModified()
@@ -84,13 +88,14 @@ class LoadTreatmentsWorker @AssistedInject constructor(
                 }
             }
         } catch (error: Exception) {
+            if (nsClientV3Plugin.lastLoadedSrvModified.collections.treatments == 0L)
+                nsClientV3Plugin.firstLoadContinueTimestamp.collections.treatments = firstLoadBefore
             aapsLogger.error("Error: ", error)
             nsClientRepository.addLog("◄ ERROR", error.localizedMessage)
             nsClientV3Plugin.lastOperationError = error.localizedMessage
             return Result.failure(workDataOf("Error" to error.localizedMessage))
         }
 
-        storeDataForDb.storeTreatmentsToDb(fullSync = nsClientV3Plugin.doingFullSync)
         nsClientV3Plugin.lastOperationError = null
         return Result.success()
     }

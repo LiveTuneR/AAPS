@@ -339,4 +339,26 @@ internal class LoadBgWorkerTest : TestBaseWithProfile() {
         // Should only call once, not continue loading
         org.mockito.kotlin.verify(nsAndroidClient, org.mockito.kotlin.times(1)).getSgvsModifiedSince(anyLong(), anyInt())
     }
+
+    @Test fun `DB failure leaves cursor for reconnect replay and success commits afterwards`() = runTest(timeout = 30.seconds) {
+        nsClientV3Plugin.nsAndroidClient = nsAndroidClient
+        val before = now - 2000
+        nsClientV3Plugin.lastLoadedSrvModified.collections.entries = before
+        nsClientV3Plugin.newestDataOnServer?.collections?.entries = now
+        whenever(nsAndroidClient.getSgvsModifiedSince(anyLong(), anyInt()))
+            .thenReturn(NSAndroidClient.ReadResponse(200, now - 1000, emptyList()))
+        whenever(storeDataForDb.storeGlucoseValuesToDb()).thenAnswer {
+            assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.entries).isEqualTo(before)
+            throw IllegalStateException("injected DB failure")
+        }
+        sut = buildSut()
+        assertIs<ListenableWorker.Result.Failure>(sut.doWorkAndLog())
+        assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.entries).isEqualTo(before)
+        org.mockito.kotlin.doAnswer {
+            assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.entries).isEqualTo(before)
+            Unit
+        }.whenever(storeDataForDb).storeGlucoseValuesToDb()
+        assertIs<ListenableWorker.Result.Success>(buildSut().doWorkAndLog())
+        assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.entries).isEqualTo(now - 1000)
+    }
 }

@@ -333,4 +333,26 @@ internal class LoadTreatmentsWorkerTest : TestBaseWithProfile() {
         org.mockito.kotlin.verify(nsAndroidClient, org.mockito.kotlin.never()).getTreatmentsNewerThan(anyString(), anyInt())
         assertIs<ListenableWorker.Result.Success>(result)
     }
+
+    @Test fun `DB failure leaves cursor for reconnect replay and success commits afterwards`() = runTest(timeout = 30.seconds) {
+        nsClientV3Plugin.nsAndroidClient = nsAndroidClient
+        val before = now - 2000
+        nsClientV3Plugin.lastLoadedSrvModified.collections.treatments = before
+        nsClientV3Plugin.newestDataOnServer?.collections?.treatments = now
+        whenever(nsAndroidClient.getTreatmentsModifiedSince(anyLong(), anyInt()))
+            .thenReturn(NSAndroidClient.ReadResponse(200, now - 1000, emptyList()))
+        whenever(storeDataForDb.storeTreatmentsToDb(fullSync = nsClientV3Plugin.doingFullSync)).thenAnswer {
+            assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.treatments).isEqualTo(before)
+            throw IllegalStateException("injected DB failure")
+        }
+        sut = buildSut()
+        assertIs<ListenableWorker.Result.Failure>(sut.doWorkAndLog())
+        assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.treatments).isEqualTo(before)
+        org.mockito.kotlin.doAnswer {
+            assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.treatments).isEqualTo(before)
+            Unit
+        }.whenever(storeDataForDb).storeTreatmentsToDb(fullSync = nsClientV3Plugin.doingFullSync)
+        assertIs<ListenableWorker.Result.Success>(buildSut().doWorkAndLog())
+        assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.treatments).isEqualTo(now - 1000)
+    }
 }

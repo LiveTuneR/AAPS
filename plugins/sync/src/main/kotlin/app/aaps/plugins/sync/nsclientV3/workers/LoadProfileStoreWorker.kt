@@ -46,6 +46,7 @@ class LoadProfileStoreWorker @AssistedInject constructor(
                 val profiles = response.values
                 if (profiles.isNotEmpty()) {
                     val profile = profiles[profiles.size - 1]
+                    nsIncomingDataProcessor.processProfile(profile, nsClientV3Plugin.doingFullSync)
                     // if srvModified found in response
                     aapsLogger.debug(LTag.NSCLIENT, "lastLoadedSrvModified: ${response.lastServerModified}")
                     response.lastServerModified?.let { nsClientV3Plugin.lastLoadedSrvModified.collections.profile = it } ?:
@@ -56,9 +57,8 @@ class LoadProfileStoreWorker @AssistedInject constructor(
                     // if not found reset to now
                     { nsClientV3Plugin.lastLoadedSrvModified.collections.profile = dateUtil.now() }
                     nsClientV3Plugin.storeLastLoadedSrvModified()
-                    aapsLogger.debug(LTag.NSCLIENT, "PROFILE: $profile")
+                    aapsLogger.debug(LTag.NSCLIENT) { "PROFILE committed modified=${response.lastServerModified}" }
                     nsClientRepository.addLog("◄ RCV", "1 PROFILE from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
-                    nsIncomingDataProcessor.processProfile(profile, nsClientV3Plugin.doingFullSync)
                 } else {
                     nsClientRepository.addLog("◄ RCV PROFILE END", "No new data from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
                 }

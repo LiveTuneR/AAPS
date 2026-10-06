@@ -44,6 +44,7 @@ class LoadBgWorker @AssistedInject constructor(
             return Result.success(workDataOf("Result" to "Load not enabled"))
 
         val nsAndroidClient = nsClientV3Plugin.nsAndroidClient ?: return Result.failure(workDataOf("Error" to "AndroidClient is null"))
+        val firstLoadBefore = nsClientV3Plugin.firstLoadContinueTimestamp.collections.entries
         var continueLoading = true
         try {
             while (continueLoading) {
@@ -58,9 +59,6 @@ class LoadBgWorker @AssistedInject constructor(
                     else {
                         response = nsAndroidClient.getSgvsModifiedSince(lastLoaded, NSClientV3Plugin.RECORDS_TO_LOAD)
                         aapsLogger.debug(LTag.NSCLIENT, "lastLoadedSrvModified: ${response.lastServerModified}")
-                        response.lastServerModified?.let { nsClientV3Plugin.lastLoadedSrvModified.collections.entries = it }
-                        nsClientV3Plugin.storeLastLoadedSrvModified()
-                        nsClientV3Plugin.scheduleIrregularExecution() // Idea is to run after 5 min after last BG
                     }
                     sgvs = response.values
                     // Calibration mbg entries ride the same entries fetch + cursor; ingest them
@@ -69,23 +67,31 @@ class LoadBgWorker @AssistedInject constructor(
                         nsClientRepository.addLog("◄ RCV", "${response.calibrations.size} calibrations from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
                         nsIncomingDataProcessor.processCalibrations(response.calibrations, nsClientV3Plugin.doingFullSync)
                     }
-                    aapsLogger.debug(LTag.NSCLIENT, "SGVS: $sgvs")
+                    aapsLogger.debug(LTag.NSCLIENT) { "SGVS count=${sgvs.size}" }
                     if (sgvs.isNotEmpty()) {
                         val action = if (isFirstLoad) "RCV-F" else "RCV"
                         nsClientRepository.addLog("◄ $action", "${sgvs.size} SVGs from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
                         // Schedule processing of fetched data and continue of loading
                         continueLoading = response.code != 304 && nsIncomingDataProcessor.processSgvs(sgvs, nsClientV3Plugin.doingFullSync)
                     } else {
-                        // End first load
-                        if (isFirstLoad) {
-                            nsClientV3Plugin.lastLoadedSrvModified.collections.entries = lastLoaded
-                            nsClientV3Plugin.storeLastLoadedSrvModified()
-                        }
                         nsClientRepository.addLog("◄ RCV BG END", "No data from ${dateUtil.dateAndTimeAndSecondsString(lastLoaded)}")
                         continueLoading = false
                     }
+                    storeDataForDb.storeGlucoseValuesToDb()
+                    storeDataForDb.storeCalibrationEntriesToDb()
+                    if (isFirstLoad && sgvs.isEmpty()) {
+                        nsClientV3Plugin.lastLoadedSrvModified.collections.entries = lastLoaded
+                        nsClientV3Plugin.storeLastLoadedSrvModified()
+                    }
+                    if (!isFirstLoad) {
+                        response.lastServerModified?.let { nsClientV3Plugin.lastLoadedSrvModified.collections.entries = it }
+                        nsClientV3Plugin.storeLastLoadedSrvModified()
+                        nsClientV3Plugin.scheduleIrregularExecution()
+                    }
                 } else {
                     // End first load
+                    storeDataForDb.storeGlucoseValuesToDb()
+                    storeDataForDb.storeCalibrationEntriesToDb()
                     if (isFirstLoad) {
                         nsClientV3Plugin.lastLoadedSrvModified.collections.entries = lastLoaded
                         nsClientV3Plugin.storeLastLoadedSrvModified()
@@ -95,14 +101,14 @@ class LoadBgWorker @AssistedInject constructor(
                 }
             }
         } catch (error: Exception) {
+            if (nsClientV3Plugin.lastLoadedSrvModified.collections.entries == 0L)
+                nsClientV3Plugin.firstLoadContinueTimestamp.collections.entries = firstLoadBefore
             aapsLogger.error("Error: ", error)
             nsClientRepository.addLog("◄ ERROR", error.localizedMessage)
             nsClientV3Plugin.lastOperationError = error.localizedMessage
             return Result.failure(workDataOf("Error" to error.localizedMessage))
         }
 
-        storeDataForDb.storeGlucoseValuesToDb()
-        storeDataForDb.storeCalibrationEntriesToDb()
         nsClientV3Plugin.lastOperationError = null
         return Result.success()
     }

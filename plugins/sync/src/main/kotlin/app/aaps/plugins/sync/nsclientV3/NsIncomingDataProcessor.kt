@@ -101,7 +101,7 @@ class NsIncomingDataProcessor @Inject constructor(
         if (!nsClientSource.isEnabled() && !preferences.get(BooleanKey.NsClientAcceptCgmData) && !doFullSync) return false
 
         var latestDateInReceivedData: Long = 0
-        aapsLogger.debug(LTag.NSCLIENT, "Received NS Data: $sgvs")
+        aapsLogger.debug(LTag.NSCLIENT) { "Received NS SGV batch type=${sgvs.javaClass.simpleName}" }
         val glucoseValues = mutableListOf<GV>()
 
         if (sgvs is List<*>) { // V3 client
@@ -285,8 +285,9 @@ class NsIncomingDataProcessor @Inject constructor(
                     nsClient.dataSyncSelector.profileReceived(store.getStartDate())
                 } else {
                     aapsLogger.error(LTag.PROFILE, "loadFromNs failed; not acknowledging profile to NS", result.exceptionOrNull())
+                    result.getOrThrow() // Caller must not commit its download cursor for an unpersisted profile.
                 }
-                aapsLogger.debug(LTag.PROFILE, "Received profileStore: $profileJson")
+                aapsLogger.debug(LTag.PROFILE) { "Received profileStore createdAt=$createdAt" }
             }
         }
     }
