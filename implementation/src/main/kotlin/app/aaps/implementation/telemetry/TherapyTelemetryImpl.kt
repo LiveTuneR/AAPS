@@ -46,7 +46,7 @@ class TherapyTelemetryImpl @Inject constructor(
     private val admissionLedger by lazy { TelemetryAdmissionLedger(File(context.filesDir,"therapy-telemetry-admission-v1.jsonl")) }
     private val writer = ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,ArrayBlockingQueue(4096),
         { action -> Thread(action,"TherapyTelemetry").apply { isDaemon = true } }, ThreadPoolExecutor.AbortPolicy())
-    private val diagnostics = DiagnosticBatchBuffer()
+    private val diagnostics = DoubleDiagnosticBuffer()
     private val diagnosticLock = Any()
     private val diagnosticFlushQueued = AtomicBoolean()
     private var lastHealthRefresh = Long.MIN_VALUE
@@ -77,7 +77,7 @@ class TherapyTelemetryImpl @Inject constructor(
             }
             catch (error: Exception) { failed(error) }
         }
-        synchronized(diagnosticLock) { if (diagnostics.stats().records > 0) diagnosticDeadline.pendingRecord() }
+        synchronized(diagnosticLock) { if (diagnostics.hasRecords()) diagnosticDeadline.pendingRecord() }
         record(TherapyEventType.PROCESS_START,JSONObject().put("appVersion",config.VERSION_NAME).put("model",Build.MODEL)
             .put("androidApi",Build.VERSION.SDK_INT).put("buildSha",config.HEAD))
         val previous=Thread.getDefaultUncaughtExceptionHandler()
@@ -96,10 +96,9 @@ class TherapyTelemetryImpl @Inject constructor(
             if (type in diagnosticTypes) {
                 val accepted = synchronized(diagnosticLock) {
                     diagnostics.offer(DiagnosticRecord(type.name, copied, generation, correlationId,
-                        observedUtc, observedMonotonic, observedZone)).also { if (it) diagnosticDeadline.pendingRecord() }
+                        observedUtc, observedMonotonic, observedZone)).also { if (it.accepted) diagnosticDeadline.pendingRecord() }
                 }
-                if (!accepted) { drops.incrementAndGet(); requestDiagnosticFlush() }
-                else if (diagnostics.stats().records >= 128 || diagnostics.stats().bufferedBytes >= 60 * 1024) requestDiagnosticFlush()
+                if (accepted.pressure) requestDiagnosticFlush()
                 return
             }
             updateQueueHighWater(writer.queue.size + 1)
@@ -139,7 +138,9 @@ class TherapyTelemetryImpl @Inject constructor(
                 flushDiagnostics()
                 flushDrops()
                 output = File(context.cacheDir, "AAPS_APEX_DEVICE_TEST_${System.currentTimeMillis()}_${config.HEAD.take(7)}.zip")
+                val liveFiles = LiveDiagnosticExport.write(File(context.cacheDir, "therapy-live-rings"), app.aaps.core.data.diagnostics.DiagnosticTraceRegistry.snapshots())
                 val supportFiles = buildList {
+                    addAll(liveFiles)
                     File(loggerUtils.logDirectory).listFiles()?.filter { it.isFile && it.lastModified() >= startUtc && it.lastModified() <= endUtc + 86_400_000L }?.let(::addAll)
                     File(context.filesDir, "apex/bolus-operations.json").takeIf(File::isFile)?.let(::add)
                     File(context.filesDir, "apex-diagnostics").listFiles()?.filter { it.isFile && it.lastModified() >= startUtc }?.let(::addAll)
@@ -156,7 +157,7 @@ class TherapyTelemetryImpl @Inject constructor(
                             .put("maxRecords",128).put("maxBytes",65536).put("flushIntervalMs",1000)
                             .put("aggregation", "consecutive identical PUMP_STATE; firstSeenUtc/lastSeenUtc/repeatCount")
                             .put("crashCoverage", "Unflushed RAM diagnostics may be lost; unclean session is marked uncertain. Accepted durable batches use counted admission WAL.")
-                            .put("rawBleCoverage", "Bounded in-memory ring; explicit driver export reports truncation. Full BLE history is not promised.")
+                            .put("rawBleCoverage", "Current Apex/Medtrum RAM ring snapshots included with truncation and UTC span; pre-crash/full BLE history unavailable.")
                             .put("criticalEvents", "Serialized writer admission and per-record fsync; record API asynchronous; bolus-operation journal unchanged"))
                         .put("telemetryPerformance", performanceJson()),
                 )
@@ -175,7 +176,15 @@ class TherapyTelemetryImpl @Inject constructor(
         try { writer.execute {
             try { flushDiagnostics(); flushDrops(); refreshHealth() }
             catch (error: Exception) { failed(error) }
-            finally { diagnosticFlushQueued.set(false) }
+            finally {
+                diagnosticFlushQueued.set(false)
+                synchronized(diagnosticLock) {
+                    if (diagnostics.hasRecords()) {
+                        diagnosticDeadline.drained()
+                        diagnosticDeadline.pendingRecord()
+                    }
+                }
+            }
         } } catch (error: RejectedExecutionException) { diagnosticFlushQueued.set(false) }
     }
 
@@ -197,6 +206,11 @@ class TherapyTelemetryImpl @Inject constructor(
     }
 
     private fun flushDrops() {
+        diagnostics.takeLoss()?.let { loss ->
+            try { store.dropped(timestamp = loss.firstUtc, reason = "DIAGNOSTIC_BUFFER_FULL", count = loss.count,
+                endUtc = loss.lastUtc, types = loss.types) }
+            catch (error: Exception) { diagnostics.restoreLoss(loss); throw error }
+        }
         val count=drops.getAndSet(0)
         if (count > 0) try { store.dropped(count=count) } catch (error: Exception) { drops.addAndGet(count); throw error }
     }
@@ -237,6 +251,7 @@ class TherapyTelemetryImpl @Inject constructor(
             .put("diagnosticTimerCallbacks",diagnosticDeadline.callbacks).put("diagnosticBatches",diagnosticBatches.get())
             .put("diagnosticBuffer", JSONObject().apply { val stats=diagnostics.stats()
                 put("maxRecords",128).put("maxBytes",65536).put("flushIntervalMs",1000)
+                put("buffers",2).put("flushPolicy","demand deadline; immediate pressure/critical/export")
                 put("records",stats.records).put("bufferedBytes",stats.bufferedBytes)
                 put("offeredBytes",stats.offeredBytes).put("aggregatedRepeats",stats.repeats).put("rejected",stats.rejected)
             })

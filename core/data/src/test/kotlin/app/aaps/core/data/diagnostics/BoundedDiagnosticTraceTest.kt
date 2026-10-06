@@ -4,6 +4,18 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class BoundedDiagnosticTraceTest {
+    @Test fun `support snapshot is independent non destructive and reports times and truncation`() {
+        val ring = BoundedDiagnosticTrace(2, 100)
+        ring.offer("a", 10); ring.offer("b", 20); ring.offer("c", 30)
+        val first = ring.snapshot()
+        assertEquals(listOf("b", "c"), first.lines)
+        assertEquals(1L, first.dropped); assertEquals(20L, first.oldestUtc); assertEquals(30L, first.newestUtc)
+        ring.offer("d", 40)
+        assertEquals(listOf("b", "c"), first.lines)
+        assertEquals(listOf("c", "d"), ring.snapshot().lines)
+        DiagnosticTraceRegistry.register("medtrum", ring)
+        assertEquals(ring.snapshot(), DiagnosticTraceRegistry.snapshots()["medtrum"])
+    }
     @Test fun `saturation retains latest detail and reports overwritten records`() {
         val ring = BoundedDiagnosticTrace(3, 100)
         for (i in 0..999) ring.offer("event:$i")

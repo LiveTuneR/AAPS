@@ -36,6 +36,7 @@ class ApexTrace @Inject constructor(
     private val exportDirectory = File(context.cacheDir, "apex-diagnostics")
     private var activeFile: File? = null
     private val ring = app.aaps.core.data.diagnostics.BoundedDiagnosticTrace()
+    init { app.aaps.core.data.diagnostics.DiagnosticTraceRegistry.register("apex", ring) }
     private val commandOrigins = linkedMapOf<Long,app.aaps.core.interfaces.telemetry.PumpCommandRunContext>()
 
     fun nextOperationId(): Long = operationSequence.incrementAndGet()
@@ -106,7 +107,7 @@ class ApexTrace @Inject constructor(
     }
 
     suspend fun export(): File = withContext(dispatcher) {
-        val recent = ring.drain()
+        val recent = ring.snapshot()
         append(JSONObject().put("event", "diagnostic_ring_export").put("records", recent.lines.size)
             .put("dropped", recent.dropped).put("bufferedBytes", recent.bytes).put("wallMs", System.currentTimeMillis()).toString())
         recent.lines.forEach(::append)

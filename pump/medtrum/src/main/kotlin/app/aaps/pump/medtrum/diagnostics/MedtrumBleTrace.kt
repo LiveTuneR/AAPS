@@ -33,6 +33,7 @@ class MedtrumBleTrace @Inject constructor(
     private val exportDirectory = File(context.cacheDir, "medtrum-ble-diagnostics")
     private var activeFile: File? = null
     private val ring = app.aaps.core.data.diagnostics.BoundedDiagnosticTrace()
+    init { app.aaps.core.data.diagnostics.DiagnosticTraceRegistry.register("medtrum", ring) }
 
     fun record(event: String, fields: Map<String, Any?> = emptyMap()) {
         val error = event.contains("error", true) || event.contains("failed", true) ||
@@ -58,7 +59,7 @@ class MedtrumBleTrace @Inject constructor(
     }
 
     suspend fun export(additionalEntries: Map<String, String> = emptyMap()): File = withContext(dispatcher) {
-        val recent = ring.drain()
+        val recent = ring.snapshot()
         append(JSONObject().put("event", "diagnostic_ring_export").put("records", recent.lines.size)
             .put("dropped", recent.dropped).put("bufferedBytes", recent.bytes).put("wallMs", System.currentTimeMillis()).toString())
         recent.lines.forEach(::append)

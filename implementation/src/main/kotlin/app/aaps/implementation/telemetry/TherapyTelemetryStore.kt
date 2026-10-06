@@ -157,13 +157,15 @@ internal class TherapyTelemetryStore(
         return true
     }
 
-    fun dropped(timestamp: Long = wallClock(), reason: String = "WRITER_QUEUE_FULL", count: Long = 1) {
+    fun dropped(timestamp: Long = wallClock(), reason: String = "WRITER_QUEUE_FULL", count: Long = 1,
+                endUtc: Long = timestamp, types: Map<String, Long> = emptyMap()) {
         require(count > 0)
         state.put("writerDrops",writerDrops+count)
         state.put("firstDropUtc",minOf(state.optLong("firstDropUtc",timestamp),timestamp))
-        state.put("lastDropUtc",maxOf(state.optLong("lastDropUtc",timestamp),timestamp))
+        state.put("lastDropUtc",maxOf(state.optLong("lastDropUtc",endUtc),endUtc))
         state.put("lastDropReason",reason).put("storagePressure",reason == "STORAGE_PRESSURE")
-        integrity(if (reason == "STORAGE_PRESSURE") "STORAGE_PRESSURE" else "RECORD_LOSS", timestamp, timestamp, count, reason)
+        integrity(if (reason == "STORAGE_PRESSURE") "STORAGE_PRESSURE" else "RECORD_LOSS", timestamp, endUtc, count,
+            JSONObject().put("reason",reason).put("types",JSONObject(types)).toString())
         // Kept outside segment budget, a bounded control record cannot be displaced by graph logs.
         persistState()
     }
