@@ -44,6 +44,23 @@ import kotlin.test.assertIs
 import kotlin.time.Duration.Companion.seconds
 
 internal class LoadProfileStoreWorkerTest : TestBaseWithProfile() {
+    @Test fun `profile persistence failure leaves cursor available for reconnect replay`() = runTest(timeout = 30.seconds) {
+        nsClientV3Plugin.nsAndroidClient = nsAndroidClient
+        val before = now - 2000
+        nsClientV3Plugin.lastLoadedSrvModified.collections.profile = before
+        nsClientV3Plugin.newestDataOnServer?.collections?.profile = now
+        whenever(nsAndroidClient.getProfileModifiedSince(anyLong()))
+            .thenReturn(NSAndroidClient.ReadResponse(200, now - 1000, listOf(JSONObject().put("store", JSONObject()))))
+        org.mockito.kotlin.doAnswer {
+            assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.profile).isEqualTo(before)
+            throw IllegalStateException("injected profile write failure")
+        }.whenever(nsIncomingDataProcessor).processProfile(org.mockito.kotlin.any(), anyBoolean())
+        assertIs<ListenableWorker.Result.Failure>(buildSut().doWorkAndLog())
+        assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.profile).isEqualTo(before)
+        org.mockito.kotlin.doAnswer { Unit }.whenever(nsIncomingDataProcessor).processProfile(org.mockito.kotlin.any(), anyBoolean())
+        assertIs<ListenableWorker.Result.Success>(buildSut().doWorkAndLog())
+        assertThat(nsClientV3Plugin.lastLoadedSrvModified.collections.profile).isEqualTo(now - 1000)
+    }
 
     @Mock lateinit var nsAndroidClient: NSAndroidClient
     @Mock lateinit var dataSyncSelectorV3: DataSyncSelectorV3

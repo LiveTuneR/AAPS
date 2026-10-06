@@ -72,7 +72,11 @@ class NSClientV3Service : DaggerService() {
 
     private val disposable = CompositeDisposable()
     private val incomingMutex = Mutex()
-    private val durableOperations by lazy { DurableNetworkOperations(appScope, networkWakeScope) }
+    private val durableOperations by lazy { DurableNetworkOperations(appScope, networkWakeScope) { error ->
+        fabricPrivacy.logException(error)
+        nsClientV3Plugin.initialLoadFinished = false
+        nsClientV3Plugin.executeLoop("WS_DURABLE_FAILURE")
+    } }
 
     internal var networkWakeScope = NetworkWakeScope { timeout ->
         val lock = (getSystemService(POWER_SERVICE) as PowerManager)
@@ -276,7 +280,7 @@ class NSClientV3Service : DaggerService() {
         aapsLogger.debug(LTag.NSCLIENT) { "onDataCreateUpdate collection=${response.optString("colName")}" }
         val collection = response.getString("colName")
         val docJson = response.getJSONObject("doc")
-        val docString = response.getString("doc")
+          val docString = docJson.toString()
         nsClientRepository.addLog("◄ WS CREATE/UPDATE", collection, docJson)
         val srvModified = docJson.getLong("srvModified")
         // WebSocket delivery is incremental and may arrive out of order. Only the REST

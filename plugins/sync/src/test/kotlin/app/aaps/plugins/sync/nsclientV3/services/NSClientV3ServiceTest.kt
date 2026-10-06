@@ -13,6 +13,7 @@ import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.runCurrent
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
@@ -20,6 +21,57 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.whenever
 
 class NSClientV3ServiceTest : TestBaseWithProfile() {
+    private fun listener(name: String): io.socket.emitter.Emitter.Listener =
+        NSClientV3Service::class.java.getDeclaredField(name).also { it.isAccessible = true }.get(sut) as io.socket.emitter.Emitter.Listener
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun `actual SGV callback holds a lease until insertion and never advances REST cursor`() = kotlinx.coroutines.test.runTest {
+        sut.appScope = backgroundScope
+        val committed = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        org.mockito.kotlin.doSuspendableAnswer { entered.complete(Unit); committed.await() }
+            .whenever(storeDataForDb).storeGlucoseValuesToDb()
+        listener("onDataCreateUpdate").call(org.json.JSONObject().put("colName", "entries").put("doc",
+            org.json.JSONObject().put("type", "sgv").put("sgv", 123).put("date", now).put("identifier", "sgv-test").put("srvModified", now)))
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(1)
+        runCurrent(); assertThat(entered.isCompleted).isTrue()
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(1)
+        org.mockito.kotlin.verify(nsClientV3Plugin, org.mockito.kotlin.never()).storeLastLoadedSrvModified()
+        committed.complete(Unit); runCurrent()
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(0)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun `actual treatment deletion and profile coroutines retain lease through persistence`() = kotlinx.coroutines.test.runTest {
+        sut.appScope = backgroundScope
+        val gates = List(3) { kotlinx.coroutines.CompletableDeferred<Unit>() }
+        org.mockito.kotlin.doSuspendableAnswer { gates[0].await() }.whenever(storeDataForDb).storeTreatmentsToDb(fullSync = false)
+        org.mockito.kotlin.doSuspendableAnswer { gates[1].await() }.whenever(storeDataForDb).updateDeletedTreatmentsInDb()
+        org.mockito.kotlin.doSuspendableAnswer { gates[2].await() }.whenever(nsIncomingDataProcessor).processProfile(any(), org.mockito.kotlin.eq(false))
+        listener("onDataCreateUpdate").call(org.json.JSONObject().put("colName", "treatments").put("doc",
+            org.json.JSONObject().put("insulin", 1.0).put("date", now).put("eventType", "Correction Bolus").put("identifier", "t-test").put("srvModified", now)))
+        listener("onDataDelete").call(org.json.JSONObject().put("colName", "treatments").put("identifier", "t-test"))
+        listener("onDataCreateUpdate").call(org.json.JSONObject().put("colName", "profile").put("doc",
+            org.json.JSONObject().put("store", org.json.JSONObject()).put("srvModified", now)))
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(3)
+        for (gate in gates) { gate.complete(Unit); runCurrent() }
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(0)
+        org.mockito.kotlin.verify(nsClientV3Plugin, org.mockito.kotlin.never()).storeLastLoadedSrvModified()
+    }
+
+    @Test fun `subscribe ACK owns a separate lease and schedules durable reconnect replay`() {
+        val body: (Array<Any>) -> Unit = {
+            assertThat(sut.networkWakeScope.stats().active).isEqualTo(1)
+            nsClientV3Plugin.initialLoadFinished = false
+            nsClientV3Plugin.executeLoop("WS_CONNECT")
+        }
+        val method = NSClientV3Service::class.java.declaredMethods.single { it.name == "awakeAck" }.also { it.isAccessible = true }
+        val ack = method.invoke(sut, body) as io.socket.client.Ack
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(0)
+        ack.call(org.json.JSONObject().put("success", true))
+        assertThat(sut.networkWakeScope.stats().active).isEqualTo(0)
+        org.mockito.kotlin.verify(nsClientV3Plugin).executeLoop("WS_CONNECT")
+    }
 
     @Mock lateinit var nsIncomingDataProcessor: NsIncomingDataProcessor
     @Mock lateinit var storeDataForDb: StoreDataForDb

@@ -9,6 +9,15 @@ import org.junit.jupiter.api.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DurableNetworkOperationsTest {
+    @Test fun `DB exception releases ownership and requests replay without crashing the consumer scope`() = runTest {
+        var held = 0; var failures = 0
+        val wake = NetworkWakeScope { held++; AutoCloseable { held-- } }
+        val operations = DurableNetworkOperations(backgroundScope, wake) { failures++ }
+        operations.launch { throw IllegalStateException("DB commit failed") }
+        runCurrent()
+        assertEquals(0, held); assertEquals(1, failures)
+        operations.close()
+    }
     @Test fun `SGV treatment deletion and profile retain ownership through asynchronous commit`() = runTest {
         var held = 0
         val wake = NetworkWakeScope { held++; AutoCloseable { held-- } }

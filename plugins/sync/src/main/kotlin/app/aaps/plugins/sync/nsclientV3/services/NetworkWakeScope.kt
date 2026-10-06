@@ -15,11 +15,14 @@ internal class NetworkWakeScope(private val now: () -> Long = { System.nanoTime(
         val underlying = acquire(30_000L)
         val started = now()
         count++
+        app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wake.ns3.leases")
         lateinit var lease: AutoCloseable
         lease = AutoCloseable { synchronized(this) { if (active.remove(lease)) {
             val duration = (now() - started).coerceAtLeast(0)
             totalMs += duration; maxMs = maxOf(maxMs, duration)
             if (duration >= 30_000L) timedOut++
+            app.aaps.core.data.diagnostics.EnergyRuntimeCounters.duration("wake.ns3", duration.coerceAtMost(30_000))
+            if (duration >= 30_000L) app.aaps.core.data.diagnostics.EnergyRuntimeCounters.add("wake.ns3.timeouts")
             underlying.close()
         } } }
         active.add(lease)
