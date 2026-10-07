@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Keep notification actions short enough to distinguish all three snooze durations. -->
+    <string name="ignore5m">Пауза 5 мин</string>
+    <string name="ignore15m">Пауза 15 мин</string>
+    <string name="ignore30m">Пауза 30 мин</string>
+</resources>
