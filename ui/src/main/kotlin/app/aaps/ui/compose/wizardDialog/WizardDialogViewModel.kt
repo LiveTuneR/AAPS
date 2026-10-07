@@ -4,6 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.aaps.core.data.diagnostics.EnergyRuntimeCounters
 import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ui.ConfirmationLine
@@ -34,7 +35,6 @@ import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
-import app.aaps.core.objects.extensions.round
 import app.aaps.core.objects.extensions.valueToUnits
 import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.objects.runningMode.PumpCommandGate
@@ -43,6 +43,10 @@ import app.aaps.core.objects.wizard.BolusWizard
 import app.aaps.core.ui.compose.icons.IcCalculator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +56,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Provider
 import kotlin.math.abs
@@ -82,7 +87,7 @@ class WizardDialogViewModel @Inject constructor(
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(WizardDialogUiState())
+    private val _uiState = MutableStateFlow(WizardDialogUiState(isCalculating = true))
     val uiState: StateFlow<WizardDialogUiState> = _uiState.asStateFlow()
 
     sealed class SideEffect {
@@ -101,9 +106,24 @@ class WizardDialogViewModel @Inject constructor(
     val sideEffect: SharedFlow<SideEffect> = _sideEffect.asSharedFlow()
 
     private var wizard: BolusWizard? = null
+    private var calculationJob: Job? = null
+    private var calculationGeneration = 0L
+    // Use the existing application Default dispatcher, but retain viewModelScope's Job:
+    // dismissing this screen must cancel preview work rather than leave an app-lifetime job.
+    private val previewContext = appScope.coroutineContext.minusKey(Job)
 
     init {
-        viewModelScope.launch { initialize() }
+        viewModelScope.launch {
+            try {
+                withContext(previewContext) { initialize() }
+                recalculate()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                aapsLogger.error("Wizard initialization failed", error)
+                _uiState.update { it.copy(isCalculating = false, calculationFailed = true, okVisible = false) }
+            }
+        }
     }
 
     private suspend fun initialize() {
@@ -145,11 +165,6 @@ class WizardDialogViewModel @Inject constructor(
         val currentBg = actualBg?.valueToUnits(units) ?: 0.0
         val bgAgeMinutes = if (actualBg != null) ((dateUtil.now() - actualBg.timestamp) / 60000).toInt() else 0
 
-        // IOB for display
-        val bolusIob = iobCobCalculator.calculateIobFromBolus().round()
-        val basalIob = iobCobCalculator.calculateIobFromTempBasalsIncludingConvertedExtended().round()
-        val totalIOB = bolusIob.iob + basalIob.basaliob
-
         val cantDeliverBolus = runningModeGuard.rejectionMessage(PumpCommandGate.CommandKind.BOLUS) != null
         // An AAPSCLIENT always delivers via the master (deliverManualWizard), so it is NEVER forced record-only;
         // only a master's own can't-deliver conditions force the local record-only log (matches Insulin/Treatment dialog).
@@ -190,13 +205,12 @@ class WizardDialogViewModel @Inject constructor(
                 // BG card
                 hasBgData = hasBgData,
                 bgAgeMinutes = bgAgeMinutes,
-                // Initial IOB display
-                totalIOB = -totalIOB,
+                // The first preview supplies IOB; do not query and integrate it twice on opening.
+                isCalculating = true,
                 forcedRecordOnly = forcedRecordOnly
             )
         }
 
-        recalculate()
     }
 
     // --- Input update methods ---
@@ -332,12 +346,53 @@ class WizardDialogViewModel @Inject constructor(
     // --- Calculation ---
 
     private fun recalculate() {
-        viewModelScope.launch { recalculateSuspend() }
+        val generation = ++calculationGeneration
+        val state = uiState.value
+        calculationJob?.cancel()
+        wizard = null
+        _uiState.update { it.copy(isCalculating = true, calculationFailed = false, okVisible = false) }
+        calculationJob = viewModelScope.launch {
+            val started = System.nanoTime()
+            EnergyRuntimeCounters.add("wizard.preview.started")
+            try {
+                val preview = withContext(previewContext) { calculatePreview(state) }
+                currentCoroutineContext().ensureActive()
+                if (generation != calculationGeneration) return@launch
+                if (preview == null) {
+                    _uiState.update { it.copy(hasResult = false, calculationFailed = true) }
+                } else {
+                    publishPreview(state, preview)
+                    EnergyRuntimeCounters.add("wizard.preview.published")
+                }
+            } catch (cancelled: CancellationException) {
+                EnergyRuntimeCounters.add("wizard.preview.cancelled")
+                throw cancelled
+            } catch (error: Exception) {
+                EnergyRuntimeCounters.add("wizard.preview.failed")
+                aapsLogger.error("Wizard preview failed", error)
+                if (generation == calculationGeneration) {
+                    _uiState.update { it.copy(hasResult = false, calculationFailed = true, okVisible = false) }
+                }
+            } finally {
+                EnergyRuntimeCounters.duration("wizard.preview.wall", (System.nanoTime() - started) / 1_000_000)
+                if (generation == calculationGeneration) _uiState.update { it.copy(isCalculating = false) }
+            }
+        }
     }
 
-    private suspend fun recalculateSuspend() {
-        val state = uiState.value
-        val profileStore = profileRepository.profile.value ?: return
+    private data class Preview(
+        val wizard: BolusWizard,
+        val cob: Double,
+        val hasTT: Boolean,
+        val trendDetail: String,
+        val carbsAfterConstraint: Int,
+        val effectiveCarbs: Int,
+        val eCarbs: Int
+    )
+
+    private suspend fun calculatePreview(state: WizardDialogUiState): Preview? {
+        currentCoroutineContext().ensureActive()
+        val profileStore = profileRepository.profile.value ?: return null
 
         // Resolve profile
         val profileName: String
@@ -346,12 +401,12 @@ class WizardDialogViewModel @Inject constructor(
             specificProfile = profileFunction.getProfile()
             profileName = profileFunction.getProfileName()
         } else {
-            val name = state.profileNames.getOrNull(state.selectedProfileIndex) ?: return
+            val name = state.profileNames.getOrNull(state.selectedProfileIndex) ?: return null
             profileName = name
             specificProfile = profileStore.getSpecificProfile(name)?.let { ProfileSealed.Pure(it, activePlugin) }
         }
 
-        if (specificProfile == null) return
+        if (specificProfile == null) return null
 
         val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
 
@@ -400,8 +455,6 @@ class WizardDialogViewModel @Inject constructor(
             state.carbTime
         )
 
-        wizard = w
-
         // Update temp target availability
         val hasTT = tempTarget != null
 
@@ -412,6 +465,12 @@ class WizardDialogViewModel @Inject constructor(
             rh.gs(app.aaps.core.ui.R.string.wizard_trend_detail, signedTrendValue, profileUtil.unitLabel)
         } else ""
 
+        return Preview(w, cob, hasTT, trendDetail, carbsAfterConstraint, effectiveCarbs, eCarbs)
+    }
+
+    private fun publishPreview(state: WizardDialogUiState, preview: Preview) {
+        val w = preview.wizard
+        wizard = w
         _uiState.update {
             it.copy(
                 // Calculation results
@@ -422,7 +481,7 @@ class WizardDialogViewModel @Inject constructor(
                 insulinFromBolusIOB = w.data.insulinFromBolusIOB,
                 insulinFromBasalIOB = w.data.insulinFromBasalIOB,
                 insulinFromCorrection = w.data.insulinFromCorrection,
-                trendDetail = trendDetail,
+                trendDetail = preview.trendDetail,
                 totalInsulin = w.data.calculatedTotalInsulin,
                 totalBeforePercentage = w.data.totalBeforePercentageAdjustment,
                 insulinAfterConstraints = w.data.insulinAfterConstraints,
@@ -432,18 +491,18 @@ class WizardDialogViewModel @Inject constructor(
                     ch.bolusStep(w.data.insulinAfterConstraints),
                 isf = w.data.sens,
                 ic = w.data.ic,
-                currentCOB = cob,
+                currentCOB = preview.cob,
                 totalIOB = -(w.data.insulinFromBolusIOB + w.data.insulinFromBasalIOB),
                 trend = w.data.trend,
                 targetBGLow = 0.0, // not exposed directly
                 targetBGHigh = 0.0,
                 hasResult = true,
-                okVisible = w.data.calculatedTotalInsulin > 0.0 || carbsAfterConstraint > 0,
-                hasTempTarget = hasTT,
-                effectiveCarbs = effectiveCarbs,
-                eCarbs = eCarbs,
-                eCarbsDelayMinutes = carbsType.eCarbsDelayMinutes,
-                eCarbsDurationHours = carbsType.eCarbsDurationHours
+                okVisible = w.data.calculatedTotalInsulin > 0.0 || preview.carbsAfterConstraint > 0,
+                hasTempTarget = preview.hasTT,
+                effectiveCarbs = preview.effectiveCarbs,
+                eCarbs = preview.eCarbs,
+                eCarbsDelayMinutes = state.carbsType.eCarbsDelayMinutes,
+                eCarbsDurationHours = state.carbsType.eCarbsDurationHours
             )
         }
     }
@@ -451,7 +510,8 @@ class WizardDialogViewModel @Inject constructor(
     // --- Action methods ---
 
     fun hasAction(): Boolean =
-        wizard?.let { it.insulinAfterConstraints > 0 || it.carbs > 0 || uiState.value.eCarbs > 0 } ?: false
+        !uiState.value.isCalculating && uiState.value.hasResult &&
+            (wizard?.let { it.insulinAfterConstraints > 0 || it.carbs > 0 || uiState.value.eCarbs > 0 } ?: false)
 
     fun getConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
@@ -471,9 +531,11 @@ class WizardDialogViewModel @Inject constructor(
      * appScope: the screen pops on confirm, which would cancel viewModelScope before the write runs.
      */
     fun recordOnly() {
+        if (!hasAction()) return
         val state = uiState.value
+        val confirmedWizard = wizard ?: return
         appScope.launch {
-            wizard?.executeNormal(
+            confirmedWizard.executeNormal(
                 onError = { comment -> _sideEffect.tryEmit(SideEffect.ShowDeliveryError(comment)) },
                 eCarbsGrams = state.eCarbs,
                 eCarbsDelayMinutes = state.eCarbsDelayMinutes + state.carbTime,
@@ -498,6 +560,7 @@ class WizardDialogViewModel @Inject constructor(
      * appScope, not viewModelScope: the screen pops right after this call.
      */
     fun deliverManualWizard() {
+        if (!hasAction()) return
         val state = uiState.value
         val effectiveCarbs = state.carbs * state.carbsType.carbsPercent / 100
         // null → recompute on the master's active profile (index 0 = "Active"); else the selected stored profile by name.

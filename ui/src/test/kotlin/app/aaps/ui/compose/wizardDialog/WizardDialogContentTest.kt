@@ -3,9 +3,12 @@ package app.aaps.ui.compose.wizardDialog
 import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import com.google.common.truth.Truth.assertThat
 import org.junit.Before
@@ -41,10 +44,29 @@ class WizardDialogContentTest {
     @Test
     fun rendersAndFiresNavigateBack() {
         var back = false
+        render(WizardDialogUiState()) { back = true }
+        compose.onNodeWithContentDescription(closeLabel).assertIsDisplayed()
+        compose.onNodeWithContentDescription(closeLabel).performClick()
+        assertThat(back).isTrue()
+    }
+
+    @Test fun staleActionIsDisabledWhilePreviewIsLoading() {
+        render(WizardDialogUiState(okVisible = true, hasResult = true, isCalculating = true))
+        val loading = RuntimeEnvironment.getApplication().getString(CoreUiR.string.loading)
+        compose.onNodeWithText(loading).assertIsDisplayed().assertIsNotEnabled()
+    }
+
+    @Test fun failedPreviewShowsAnExplanation() {
+        render(WizardDialogUiState(calculationFailed = true))
+        val message = RuntimeEnvironment.getApplication().getString(app.aaps.ui.R.string.wizard_preview_failed)
+        compose.onNodeWithText(message).performScrollTo().assertIsDisplayed()
+    }
+
+    private fun render(state: WizardDialogUiState, onBack: () -> Unit = {}) {
         compose.setContent {
             MaterialTheme {
                 WizardDialogContent(
-                    uiState = WizardDialogUiState(),
+                    uiState = state,
                     decimalFormatter = decimalFormatter,
                     unitsLabel = "mg/dl",
                     onBgChange = {},
@@ -63,14 +85,11 @@ class WizardDialogContentTest {
                     onCOBToggle = {},
                     onAlarmToggle = {},
                     onCalculationExpandToggle = {},
-                    onNavigateBack = { back = true },
+                    onNavigateBack = onBack,
                     onConfirmClick = {},
                     onSettingsClick = {}
                 )
             }
         }
-        compose.onNodeWithContentDescription(closeLabel).assertIsDisplayed()
-        compose.onNodeWithContentDescription(closeLabel).performClick()
-        assertThat(back).isTrue()
     }
 }

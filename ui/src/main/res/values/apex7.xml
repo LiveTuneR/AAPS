@@ -244,4 +244,5 @@
     <string name="apex7_bolus_state_partial">Partial delivery confirmed</string>
     <string name="apex7_bolus_state_uncertain">Delivery not confirmed</string>
     <string name="apex7_bolus_state_reconciliation">Reconciliation required</string>
+    <string name="wizard_preview_failed">Could not calculate the bolus preview. Check the profile and glucose data, then change an input to retry.</string>
 </resources>

@@ -249,4 +249,5 @@
     <string name="apex7_bolus_state_partial">Частичная подача подтверждена</string>
     <string name="apex7_bolus_state_uncertain">Подача не подтверждена</string>
     <string name="apex7_bolus_state_reconciliation">Требуется сверка</string>
+    <string name="wizard_preview_failed">Не удалось рассчитать болюс. Проверьте профиль и данные СК, затем измените поле для повторного расчёта.</string>
 </resources>

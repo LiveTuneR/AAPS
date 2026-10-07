@@ -1005,7 +1005,7 @@ class MainApp : Application(), HasAndroidInjector, Configuration.Provider {
 
     override fun onTerminate() {
         aapsLogger.debug(LTag.CORE, "onTerminate")
-        therapyTelemetry.stop()
+        if (::therapyTelemetry.isInitialized) therapyTelemetry.get().stop()
         handler.removeCallbacksAndMessages(null)
         handler.looper.quitSafely()
         unregisterReceivers()

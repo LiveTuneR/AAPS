@@ -76,6 +76,8 @@ data class WizardDialogUiState(
     val targetBGHigh: Double = 0.0,
     val hasResult: Boolean = false,
     val okVisible: Boolean = false,
+    val isCalculating: Boolean = false,
+    val calculationFailed: Boolean = false,
 
     // Carbs type split (computed from carbs + carbsType)
     val effectiveCarbs: Int = 0,

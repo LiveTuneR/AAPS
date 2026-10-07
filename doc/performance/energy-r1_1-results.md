@@ -32,6 +32,18 @@ The existing actual-schema SQL fixture compares 2,881 point queries/table with o
 
 No R1.1 hardware A/B interval has been measured. No CPU, wakelock, energy percentage or phone/watch latency improvement is claimed. Supplied Android battery screenshots identify high app attribution; they cannot assign causality to an individual hot path.
 
+## 2026-10-07 build repair and wizard preview
+
+GitHub run 37473394219 passed the 16-module unit suite, SQL fixture and protected-source check, then failed at `:app:compileFullReleaseKotlin`: `MainApp.onTerminate` called `stop()` on a `Provider<TherapyTelemetry>`. The teardown now resolves the provider with `get()` and guards an uninitialized injection. The workflow compiles both release application entry points before the unit suite, so library-only validation no longer defers this class of failure until APK assembly.
+
+The user reported a delayed preview when opening or editing the bolus wizard. The previous view model integrated IOB once during initialization and again in its first `BolusWizard.doCalc`, ran the CPU portions on Main, and launched an independent calculation for every input edit. An older suspended read could finish after a newer one and overwrite its displayed result. The repair removes only the redundant initialization IOB calculation, executes preview work on the existing application Default dispatcher with a view-model-owned Job, cancels obsolete preview work immediately, and publishes only the current generation on Main. There is no timed debounce, stale IOB reuse, dose-formula edit, or change to mandatory APS scheduling. The authoritative prepare/confirmation/delivery executor remains unchanged.
+
+While a preview is pending, its action is disabled and shows Loading. Failure leaves an explanation and no actionable result; another edit retries. Confirmed record-only work captures its wizard object before dispatch. Bounded `wizard.preview.*` counters and a wall-duration window are included in the existing process-local energy observations; these add no timer or disk I/O.
+
+Regression cases exercise the actual view model with delayed/non-cooperative old reads, rapid edits, preview dispatcher ownership, close/cancellation, failure/recovery, and the absence of delivery preparation during a pending preview. Compose tests cover the disabled Loading button and the error explanation. The unchanged calculation/executor regression suites remain required; final test totals and release status belong to the evidence for the repaired commit.
+
+The user also reported much lower phone energy consumption after about 24 hours on the previous R1 phone release and lower watch consumption without updating Wear. This is a field observation, not an instrumented A/B result. R1 already reduced phone-side traffic while preserving its prior wire format, which can also reduce wakeups on an older watch. It does not establish an exact reduction or attribute it to one change. R1.1 FastStatus still requires the matching new Phone/Wear pair. No new phone log or device trace covering the reported wizard delay was supplied for this repair.
+
 ## Runtime measurement
 
 Ordinary support export `build-provenance.json` contains `energyRuntime`: cumulative process-local counters, elapsed time, and bounded latency windows (latest 2,048 samples, at most 32 duration keys/256 counters). No counter timer/thread exists. `telemetryPerformance` retains WAL/store latency, directory scans, batches, deadline callbacks and buffer state. Empty diagnostic checks do not perform disk flush/fsync.

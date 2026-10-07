@@ -38,6 +38,12 @@ jobs:
           cache-read-only: false
       - name: Prepare Gradle
         run: chmod +x gradlew
+      - name: Compile Phone and Wear release entry points
+        run: |
+          ./gradlew :app:compileFullReleaseKotlin :wear:compileFullReleaseKotlin \
+            --no-daemon --max-workers=2 --console=plain \
+            -Pkotlin.compiler.execution.strategy=in-process \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -Xss1m"
       - name: Test reliability and energy modules
         env:
           APEX7_CAPTURE_SCREENSHOTS: 'true'

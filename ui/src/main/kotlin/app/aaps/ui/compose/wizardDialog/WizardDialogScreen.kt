@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -81,6 +82,7 @@ import app.aaps.core.ui.compose.CarbTimeRow
 import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.QuickAddButtons
 import app.aaps.core.ui.compose.banner.WarningBanner
+import app.aaps.core.ui.compose.banner.ErrorBanner
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.consumeOverscroll
@@ -266,32 +268,38 @@ internal fun WizardDialogContent(
                     focusManager.clearFocus()
                     onConfirmClick()
                 },
-                enabled = uiState.okVisible,
+                enabled = uiState.okVisible && uiState.hasResult && !uiState.isCalculating,
                 modifier = Modifier
                     .fillMaxWidth()
                     .bottomBarSafeArea()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Check,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                if (uiState.totalInsulin > 0.0) {
-                    Text(stringResource(CoreUiR.string.format_insulin_units, uiState.totalInsulin))
-                }
-                if (uiState.totalInsulin > 0.0 && (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0)) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                if (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0) {
-                    Text(
-                        if (uiState.eCarbs > 0) stringResource(CoreUiR.string.format_carbs_split, uiState.effectiveCarbs, uiState.eCarbs)
-                        else stringResource(CoreUiR.string.format_carbs, uiState.effectiveCarbs)
+                if (uiState.isCalculating) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(CoreUiR.string.loading))
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
                     )
-                }
-                if (!uiState.okVisible) {
-                    Text(stringResource(CoreUiR.string.ok))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    if (uiState.totalInsulin > 0.0) {
+                        Text(stringResource(CoreUiR.string.format_insulin_units, uiState.totalInsulin))
+                    }
+                    if (uiState.totalInsulin > 0.0 && (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0)) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    if (uiState.effectiveCarbs > 0 || uiState.eCarbs > 0) {
+                        Text(
+                            if (uiState.eCarbs > 0) stringResource(CoreUiR.string.format_carbs_split, uiState.effectiveCarbs, uiState.eCarbs)
+                            else stringResource(CoreUiR.string.format_carbs, uiState.effectiveCarbs)
+                        )
+                    }
+                    if (!uiState.okVisible) {
+                        Text(stringResource(CoreUiR.string.ok))
+                    }
                 }
             }
         }
@@ -306,6 +314,9 @@ internal fun WizardDialogContent(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (uiState.calculationFailed) {
+                ErrorBanner(message = stringResource(R.string.wizard_preview_failed))
+            }
             // --- Forced-record-only warning ---
             if (uiState.forcedRecordOnly) {
                 WarningBanner(message = stringResource(CoreUiR.string.bolus_recorded_only))
