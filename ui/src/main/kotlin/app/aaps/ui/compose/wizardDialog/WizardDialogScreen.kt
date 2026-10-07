@@ -150,6 +150,8 @@ fun WizardDialogScreen(
     if (showConfirmation) {
         showConfirmation = false
         when {
+            // Clearing keyboard focus can commit a changed/clamped input. Wait for its new preview.
+            uiState.isCalculating  -> Unit
             !viewModel.hasAction()   -> showNoAction = true
             // Master can't deliver → log the wizard calc locally (record-only). Master-only; a client always delivers.
             uiState.forcedRecordOnly -> showRecordOnly = true

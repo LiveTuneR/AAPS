@@ -233,6 +233,29 @@ internal class WizardDialogViewModelTest {
         verify(wizardExecutor, never()).prepare(any(), any())
     }
 
+    @Test fun `focus loss recommitting the same field does not invalidate an actionable preview`() = runTest(mainDispatcher) {
+        var calculations = 0
+        setupPreview { calculations++; result(it) }
+        advanceUntilIdle()
+        sut.updateCarbs(30)
+        advanceUntilIdle()
+        val before = calculations
+        // NumberInputRow commits its text again when Confirm clears keyboard focus.
+        sut.updateCarbs(30)
+        sut.updateBg(sut.uiState.value.bg)
+        sut.updatePercentage(sut.uiState.value.percentage)
+        sut.updateDirectCorrection(sut.uiState.value.directCorrection)
+        sut.updateCarbTime(sut.uiState.value.carbTime)
+        sut.updateCarbsType(sut.uiState.value.carbsType)
+        sut.selectProfile(sut.uiState.value.selectedProfileIndex)
+        sut.addCarbs(0)
+        assertThat(sut.hasAction()).isTrue()
+        assertThat(sut.uiState.value.okVisible).isTrue()
+        assertThat(sut.uiState.value.isCalculating).isFalse()
+        advanceUntilIdle()
+        assertThat(calculations).isEqualTo(before)
+    }
+
     @Test fun `preview failure clears actionable result and a new input can recover`() = runTest(mainDispatcher) {
         setupPreview { if (it == 20) error("DB read failed") else result(it) }
         advanceUntilIdle()

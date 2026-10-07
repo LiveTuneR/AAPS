@@ -219,6 +219,7 @@ class WizardDialogViewModel @Inject constructor(
         val state = uiState.value
         val range = if (state.isMgdl) 0.0..500.0 else 0.0..30.0
         val clamped = value.coerceIn(range)
+        if (clamped == state.bg && !state.calculationFailed) return
         _uiState.update { it.copy(bg = clamped) }
         recalculate()
     }
@@ -226,6 +227,7 @@ class WizardDialogViewModel @Inject constructor(
     fun updateCarbs(value: Int) {
         val state = uiState.value
         val clamped = value.coerceIn(0, state.maxCarbs)
+        if (clamped == state.carbs && !state.calculationFailed) return
         _uiState.update { it.copy(carbs = clamped) }
         recalculate()
     }
@@ -233,11 +235,13 @@ class WizardDialogViewModel @Inject constructor(
     fun addCarbs(increment: Int) {
         val state = uiState.value
         val newValue = (state.carbs + increment).coerceIn(0, state.maxCarbs)
+        if (newValue == state.carbs && !state.calculationFailed) return
         _uiState.update { it.copy(carbs = newValue) }
         recalculate()
     }
 
     fun updatePercentage(value: Int) {
+        if (value == uiState.value.percentage && !uiState.value.calculationFailed) return
         _uiState.update { it.copy(percentage = value) }
         recalculate()
     }
@@ -245,17 +249,20 @@ class WizardDialogViewModel @Inject constructor(
     fun updateDirectCorrection(value: Double) {
         val state = uiState.value
         val clamped = value.coerceIn(-state.maxBolus, state.maxBolus)
+        if (clamped == state.directCorrection && !state.calculationFailed) return
         _uiState.update { it.copy(directCorrection = clamped) }
         recalculate()
     }
 
     fun updateCarbTime(value: Int) {
         val clamped = value.coerceIn(-60, 60)
+        if (clamped == uiState.value.carbTime && !uiState.value.calculationFailed) return
         _uiState.update { it.copy(carbTime = clamped) }
         recalculate()
     }
 
     fun updateCarbsType(value: CarbsType) {
+        if (value == uiState.value.carbsType && !uiState.value.calculationFailed) return
         _uiState.update { it.copy(carbsType = value) }
         recalculate()
     }
@@ -265,6 +272,7 @@ class WizardDialogViewModel @Inject constructor(
     }
 
     fun selectProfile(index: Int) {
+        if (index == uiState.value.selectedProfileIndex && !uiState.value.calculationFailed) return
         _uiState.update { it.copy(selectedProfileIndex = index) }
         recalculate()
     }
